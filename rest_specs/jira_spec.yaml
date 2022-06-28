@@ -1,0 +1,204 @@
+enabled: true
+name: jira
+base_url: https://tatari.atlassian.net
+paging:
+  strategy: offsetAndCount
+  offset_param: startAt
+  count_param: maxResults
+  page_size: 100
+pageStartArg: startAt
+pageMaxArg: maxResults
+maxPerPage: 100
+dateParser: bson
+queryDateFormat: "%Y/%m/%d %H:%M"
+# JIRA data changes. Let's use 4 hours
+cacheTTLSecs: 144000
+auth:
+  type: BASIC
+  uservar: JIRAUSER
+  tokenvar: JIRATOKEN
+tables:
+  - name: help_
+    resource_path: <inline>
+    columns:
+      - name: msg
+        key: True
+    values:
+      - msg: |
+          The JIRA connector loads all JIRA issues and lets you query them easily.
+          Use `issues` table to query issues.
+          Use `resolutions` table to query the list of defined resolution states.
+          Use `projects` table to query the set of JIRA projects.
+  - name: issues
+    query_resource: GET /rest/api/3/search
+    supports_paging: True
+    params:
+      jql: order by created DESC
+    refresh_params:
+      jql: updated >= '{checkpoint}'
+    result_body_path: issues
+    columns:
+      - name: id
+        type: VARCHAR
+      - name: key
+        key: true
+      - name: link
+        source: self
+      - name: project_id
+        source: fields.project.id
+      - name: summary
+        source: fields.summary
+      - name: reporter_name
+        source: fields.reporter.displayName
+      - name: reporter_email
+        source: fields.reporter.emailAddress
+      - name: assignee_name
+        source: fields.assignee.displayName
+      - name: assignee_email
+        source: fields.assignee.emailAddress
+      - name: project_key
+        source: fields.project.key
+      - name: status
+        source: fields.status.name  
+      - name: created
+        type: TIMESTAMP
+        source: fields.created
+      - name: updated
+        type: TIMESTAMP
+        timestamp: true
+        source: fields.updated
+      - name: issuetype
+        source: fields.issuetype.name
+      - name: priority
+        source: fields.priority.name
+      - name: labels
+        source: fields.labels
+        type: JSON
+      - name: resolution
+        source: fields.resolution.name
+      - name: description
+        source: fields.description.content[*].content[0].text
+        hidden: True
+  - name: myself
+    resource_path: /rest/api/3/myself
+    result_type: object
+    columns:
+      - name: account_id
+        source: accountId
+      - name: display_name
+        source: displayName
+      - name: name
+      - name: time_zone
+        source: timeZone
+      - name: avatar_urls_48
+        source: avatarUrls.48x48
+      - name: active
+        type: BOOLEAN  
+  - name: resolutions
+    resource_path: /rest/api/3/resolution
+    columns:
+      - name: id
+      - name: name
+      - name: description
+        hidden: True
+  - name: projects
+    resource_path: /rest/api/3/project/search
+    result_body_path: values
+    columns:
+      - name: id
+      - name: key
+      - name: name
+  - name: issue_keys
+    query_resource: GET /rest/api/3/search
+    supports_paging: True
+    params:
+      jql: order by created DESC
+      fields: key
+    refresh_params:
+      jql: updated >= '{checkpoint}'
+    result_body_path: issues
+    columns:
+      - name: id
+        type: VARCHAR
+      - name: key
+        key: true
+# 'transitions' table extracts the transition history of all issues
+  - name: test_transitions
+    query_resource: GET /rest/api/3/search
+    supports_paging: False
+    params:
+      jql: order by created DESC
+      expand: changelog
+    refresh_params:
+      jql: updated >= '{checkpoint}'
+    result_body_path: issues
+    columns:
+      - name: id
+        type: VARCHAR
+      - name: key
+        key: true
+      - name: created
+        source: changelog.histories.created
+        type: TIMESTAMP
+      - name: author_email
+        source: changelog.histories.author.emailAddress
+      - name: author_name
+        source: changelog.histories.author.displayName
+      - name: items
+        source: changelog.histories.items
+        type: JSON
+
+  - name: transitions
+    query_resource: GET /rest/api/3/search
+    supports_paging: True
+    params:
+      jql: order by created DESC
+      expand: changelog
+    refresh_params:
+      jql: updated >= '{checkpoint}'
+    json_response: |
+      {
+         "issues" : [
+           {
+             "*id" : "123",
+             "*key" : "abc123",
+             "changelog" : {
+                "histories" : [
+                   {
+                      "author" : {
+                         "accountId" : "606f3cb8126db9006f2e67b6",
+                         "accountType" : "atlassian",
+                         "active" : true,
+                         "*displayName|{display_name}" : "Bruce Rechichar",
+                         "*emailAddress|{email_address}" : "bruce@tatari.tv",
+                         "self" : "https://tatari.atlassian.net/rest/api/3/user?accountId=606f3cb8126db9006f2e67b6",
+                         "timeZone" : "America/Los_Angeles"
+                      },
+                      "*created" : "2021-08-13T09:34:24.545-0700|{DATE}",
+                      "*id|{history_id}" : "abc369295",
+                      "*items" : [
+                         {
+                            "field" : "resolution",
+                            "fieldId" : "resolution",
+                            "fieldtype" : "jira",
+                            "from" : null,
+                            "fromString" : null,
+                            "to" : "10000",
+                            "toString" : "Done"
+                         },
+                         {
+                            "field" : "status",
+                            "fieldId" : "status",
+                            "fieldtype" : "jira",
+                            "from" : "10190",
+                            "fromString" : "Resolved",
+                            "to" : "10189",
+                            "toString" : "Closed"
+                         }
+                      ]
+                   }
+                ]
+              }
+            }
+         ]
+      }

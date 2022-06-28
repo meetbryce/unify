@@ -1,0 +1,18 @@
+enabled: true
+name: datadog
+base_url: https://api.datadoghq.com/api/v1
+auth:
+  type: HEADERS
+  headers:
+    DD-API-KEY: DD_API_KEY
+    DD-APPLICATION-KEY: DD_APP_KEY
+tables:
+  - name: metrics
+    resource_path: /metrics
+    result_body_path: metrics
+    params:
+      from: 1624575829
+    columns:
+      - name: metric_name
+        type: VARCHAR
+        source: .

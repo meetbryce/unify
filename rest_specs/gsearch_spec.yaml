@@ -1,0 +1,26 @@
+enabled: true
+name: gsearch
+base_url: https://api.valueserp.com
+auth:
+  type: NONE
+tables:
+  - name: help_
+    resource_path: <inline>
+    columns:
+      - name: msg
+    values:
+      - msg: |
+          Google SERP search site
+  - name: serps
+    resource_path: /search?q={query}
+    params:
+      api_key: 797F58623C30445EA2C44CF539C3008A
+      num: 20
+    result_body_path: organic_results
+    columns:
+      - name: query
+        source: <args>
+      - name: position
+        type: INT
+      - name: title
+      - name: link

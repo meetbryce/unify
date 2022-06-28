@@ -1,0 +1,9 @@
+__pycache__
+*.sqlite
+.DS_Store
+*.shelve
+.cache
+venv
+keystore.pem
+node_modules
+data/

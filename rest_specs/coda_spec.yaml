@@ -1,0 +1,108 @@
+enabled: true
+name: coda
+base_url: https://coda.io/apis/v1
+dateParser: bson
+pageMaxArg: limit
+page_cursor_arg: pageToken
+next_page_token: nextPageToken
+auth:
+  type: BEARER
+  tokenvar: CODA_TOKEN
+tables:
+  - name: whoami
+    resource_path: /whoami
+    result_type: object
+    columns:
+      - name: name
+      - name: login_id
+        source: loginId
+      - name: picture_link
+        source: pictureLink
+      - name: workspace_id
+        source: workspace.id
+  - name: docs
+    resource_path: /docs
+    result_body_path: items
+    startArg: startAt
+    maxArg: maxResults
+    columns:
+      - name: id
+        type: VARCHAR
+      - name: browser_link
+        source: browserLink
+      - name: name
+      - name: owner_name
+        source: ownerName
+      - name: created_at
+        source: createdAt
+        type: TIMESTAMP
+      - name: table_view_count
+        source: docSize.tableAndViewCount
+        type: INT
+      - name: total_row_count
+        source: docSize.totalRowCount
+        type: INT
+  - name: pages
+    query_resource: GET /docs/{doc_id}/pages
+    result_body_path: items
+    maxArg: limit
+    columns:
+      - name: doc_id
+        source: <args>
+      - name: id
+        key: True
+      - name: name
+      - name: type
+      - name: subtitle
+  - name: tables
+    resource_path: /docs/{doc_id}/tables
+    result_body_path: items
+    columns:
+      - name: id
+        comment: Id for this table object
+      - name: doc_id
+        source: <args>
+        comment: Id of the container doc for this table
+      - name: name
+      - name: table_type
+        source: tableType
+  - name: tablerows
+    resource_path: /docs/{doc_id}/tables/{table_id}/rows
+    result_body_path: items
+    columns:
+      - name: doc_id
+        source: <args>
+      - name: table_id
+        source: <args>
+      - name: name
+      - name: values
+        type: JSON
+  - name: columns
+    query_resource: GET /docs/{*doc_id}/tables/{*table_id}/columns
+    json_response: |
+      {
+        "items": [
+          {
+            "*id": "c-tuVwxYz",
+            "*type": "column",
+            "href": "https://coda.io/apis/v1/docs/AbCDeFGH/tables/grid-pqRst-U/columns/c-tuVwxYz",
+            "*name": "Completed",
+            "*display": true,
+            "calculated": true,
+            "formula": "thisRow.Created()",
+            "defaultValue": "Test",
+            "format": {
+              "*type": "text",
+              "*isArray": true,
+              "label": "Click me",
+              "disableIf": "False()",
+              "action": "OpenUrl(\"www.google.com\")"
+            }
+          }
+        ],
+        "href": "https://coda.io/apis/v1/docs/AbCDeFGH/tables/grid-pqRst-U/columns?limit=20",
+        "nextPageToken": "eyJsaW1pd",
+        "nextPageLink": "https://coda.io/apis/v1/docs/AbCDeFGH/tables/grid-pqRst-U/columns?pageToken=eyJsaW1pd"
+      }
+
+

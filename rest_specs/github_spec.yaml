@@ -1,0 +1,188 @@
+enabled: true
+name: github
+base_url: https://api.github.com
+paging:
+  strategy: pageAndCount
+  page_param: page
+  count_param: per_page
+  page_size: 100
+pageIndexArg: page
+pageMaxArg: per_page
+dateParser: '%Y-%m-%dT%H:%M:%SZ'
+# Github data doesn't change that often
+cacheTTLSecs: 43200
+auth:
+  type: BASIC
+  uservar: GHUSER
+  tokenvar: GHTOKEN
+polling_interval_secs: 1800
+tables:
+  - name: help_
+    resource_path: <inline>
+    columns:
+      - name: msg
+    values:
+      - msg: |
+          The Github connector makes it easy to query data from Github
+          about your users, orgs, and repos.
+          Use: `myself` table to query current identity
+          Use: `users` table to query Github users
+          Use: `orgs` table to query Orgs accessible by the current identity
+          Use: `repos` table to query the repos in an org. You must supply the
+          Org slug in the where clause, like:
+            select * repos where org = 'github'
+          Use: 'pulls' table to query information about pull requests. You 
+          must supply an org and repo name in the query WHERE clause.
+  - name: orgs
+    resource_path: /user/orgs
+    columns:
+      - name: login
+      - name: description
+      - name: url
+  - name: org_members
+    resource_path: /orgs/{org}/members
+    supports_paging: True
+    args_query:
+      table: orgs
+      mapping:
+        org: login
+    columns:
+      - name: site_admin
+        type: BOOLEAN
+      - name: org
+        source: <args>
+      - name: user
+        source: login
+  - name: users
+    resource_path: /users/{login}
+    args_query:
+      table: org_members
+      mapping:
+        login: login
+    result_type: object
+    columns:
+      - name: login
+        type: VARCHAR
+      - name: id
+        type: INT
+        key: true
+      - name: node_id
+        type: VARCHAR
+      - name: avatar_url
+        type: VARCHAR
+      - name: url
+        type: VARCHAR
+      - name: type
+        type: VARCHAR
+      - name: name
+        type: VARCHAR
+      - name: location
+        type: VARCHAR
+      - name: email
+        type: VARCHAR
+      - name: followers
+        type: INT
+  - name: myself
+    resource_path: /user
+    result_type: object
+    columns:
+      - name: id
+        type: INT
+      - name: login
+      - name: avatar_url
+      - name: url
+      - name: name
+      - name: company
+      - name: email
+  - name: repos
+    resource_path: /orgs/{org}/repos
+    supports_paging: True
+    params:
+      type: all
+    args_query:
+      table: orgs
+      mapping:
+        org: login
+    columns:
+      - name: org
+        source: owner.login
+      - name: name
+        key: True
+      - name: owner
+        source: owner.login
+      - name: private
+        type: BOOLEAN
+      - name: description
+  - name: pulls
+    query_resource: GET /repos/{owner}/{repo}/pulls
+    supports_paging: True
+    params:
+      sort: created
+      direction: desc
+      state: all
+    args_query:
+      table: repos
+      mapping:
+        owner: owner_login
+        repo: name
+    select: id, url, node_id, number, state, locked, title, user, body, draft, created_at, updated_at, head_repo_name
+    columns:
+      - name: repo_owner
+        source: repo.owner.login
+      - name: repo
+        source: head.repo.name
+      - name: id
+        type: INT
+        key: True
+      - name: number
+        type: INT
+      - name: state
+      - name: title
+      - name: user 
+        source: user.login
+      - name: created_at
+        type: TIMESTAMP
+      - name: updated_at
+        type: TIMESTAMP
+  - name: pull_reviews
+    query_resource: GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+    supports_paging: True
+    args_query:
+      table: pulls
+      mapping:
+        owner: repo_owner
+        repo: repo
+        pull_number: number
+    columns:
+      - name: body
+      - name: state
+      - name: submitted_at
+        type: TIMESTAMP
+      - name: user
+        source: user.login
+      - name: id
+        type: INT
+        key: True
+  - name: repo_events
+    resource_path: /repos/{owner}/{repo}/events
+    args_query:
+      table: repos
+      mapping:
+        owner: owner
+        repo: name
+    columns:
+      - name: owner
+        source: <args>
+      - name: repo
+        source: <args>
+      - name: id
+      - name: type
+      - name: actor
+        source: actor.login
+      - name: repo_path
+        source: repo.name
+      - name: created_at
+        type: TIMESTAMP
+# 
+########################################
+# 

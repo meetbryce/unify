@@ -1,0 +1,81 @@
+enabled: true
+name: hubspot
+base_url: https://api.hubapi.com
+dateParser: '%Y-%m-%dT%H:%M:%S.%fZ'
+pageMaxArg: limit
+page_cursor_arg: after
+maxPerPage: 100
+next_page_token: paging.next.after
+auth:
+  type: PARAMS
+  params:
+    hapikey: HUBSPOT_API_KEY
+tables:
+  - name: contacts
+    query_resource: GET /crm/v3/objects/contacts
+    create_resource: POST /crm/v3/objects/contacts
+    update_resource: PATCH /crm/v3/objects/contacts/{id}
+    delete_resource: DELETE /crm/v3/objects/contacts/{id}
+    result_body_path: results
+    next_page_token: paging.next.after
+    body: '{}'
+    columns:
+      - name: id
+        key: true
+      - name: updated_at
+        source: updatedAt
+        type: TIMESTAMP
+      - name: email
+        source: properties.email
+      - name: firstname
+        source: properties.firstname
+      - name: lastname
+        source: properties.lastname
+      - name: createdate
+        source: properties.createdate
+        type: TIMESTAMP
+  - name: companies
+    query_resource: GET /crm/v3/objects/companies
+    create_resource: POST /crm/v3/objects/companies
+    update_resource: PATCH /crm/v3/objects/companies/{id}
+    delete_resource: DELETE /crm/v3/objects/companies/{id}
+    result_body_path: results
+    columns:
+      - name: id
+        key: true
+        type: BIGINT
+      - name: created_at
+        source: createdAt
+        type: TIMESTAMP
+      - name: updated_at
+        source: updatedAt
+        type: TIMESTAMP
+      - name: name
+        source: properties.name
+      - name: domain
+        source: properties.domain
+      - name: industry
+        source: properties.industry
+      - name: state
+        source: properties.state
+      - name: phone
+        source: properties.phone
+      - name: properties
+        type: JSON
+      - name: lastmodifieddate
+        source: hs_lastmodifieddate
+        type: TIMESTAMP
+  - name: company_properties
+    query_resource: GET /crm/v3/properties/company
+    result_body_path: results
+    columns:
+      - name: name
+        key: True
+      - name: type
+      - name: group_name
+        source: groupName
+      - name: hidden
+        type: BOOLEAN
+
+
+

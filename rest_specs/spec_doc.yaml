@@ -1,0 +1,89 @@
+enabled: true
+# Name of this connector, will be mapped to a Presto schema
+name: github
+# Base URL for the REST API
+base_url: https://api.github.com
+# For pagination by page number, the name of the page number (index) query arg
+pageIndexArg: page
+# The "row count" query arg
+pageMaxArg: per_page
+# If this API uses "page tokens", specify the dot-path into the result to extract the "next page" token
+next_page_token: <field path>
+# Maximum records queryable per page
+maxPerPage: 100
+# The strptime format for parsing timestamps
+dateParser: '%Y-%m-%dT%H:%M:%SZ'
+# The number of seconds to cache API responses
+cacheTTLSecs: 43200
+# The API authentication method
+auth:
+# type is BASIC, BEARER, HEADERS, PARAMS. If HEADERS then another "headers" key should be
+# included which contains a dictionary of header names, ENV VAR pairs.
+# If PARAMS then another "params" key should contains dictionary of parameter name, ENV VAR pairs.
+  type: BASIC
+# env var name holding the basic auth username
+  uservar: GHUSER
+# env var name holding the basic auth token
+  tokenvar: GHTOKEN
+# list of table definitions
+tables:
+# The name of table in presto  
+  - name: users
+# The API query resource method and path, or "<inline>" to provide static results from this file
+# Like: GET /v1/users
+    query_resource: <method> <path>
+# If the resource path includes arguments, you can specify a subquery to provide arg
+# values if they are omitted from the WHERE clause.
+    args_query:
+      table: <sub query table name>
+# The nested 'mapping' dict maps resource_path args to the sub-query result columns      
+      mapping:
+        org: login
+
+# If the connector supports mutations for this resource, you can indicate the REST
+# resources for each type of mutation, giving the http method and path together.
+    create_resource: <method> <path>
+    upsert_resource: <method> <path>
+    delete_resource: <method> <path>
+
+# another table
+  - name: users
+# the API resource path. Can include {vars} which must be supplied either
+# in the where clause or via query from another table.
+    resource_path: /users
+# The API call result at `resource_path` is expected to be an array. If it will only
+# contain a single value you can override the result type to `object`.    
+    result_type: object
+# optional additional query args to the REST API call for this path
+    params:
+      key: value
+# list of column definitions. Column definitions contain the follwing fields,
+# only "name" is required:
+# name: name of the column in the presto table
+# type: presto column type: VARCHAR (default), INT, BOOLEAN, TIMESTAMP, JSON
+# source: a dot separated path into the JSON blob to extract the source field, or "<args>" meaning the column is in the WHERE clause
+# comment: Column annotation
+# source_table: If the resource path var is omitted from the WHERE clause, this points
+# to a table from which a set of matching values can be queried
+# source_table_field: The field name from the source_table query
+    columns:
+      - name: login
+        type: VARCHAR
+      - name: id
+        type: INT
+      - name: node_id
+        type: VARCHAR
+      - name: avatar_url
+        type: VARCHAR
+      - name: url
+        type: VARCHAR
+      - name: type
+        type: VARCHAR
+      - name: name
+        type: VARCHAR
+      - name: location
+        type: VARCHAR
+      - name: email
+        type: VARCHAR
+      - name: followers
+        type: INT
