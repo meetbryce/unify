@@ -5,6 +5,7 @@ import cmd2
 import glob
 import pydoc
 import re
+import yaml
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -19,7 +20,7 @@ from timeit import default_timer as timer
 # DuckDB
 import duckdb
 
-from rest_schema import RESTCol, RESTTable, RESTAPISpec
+from rest_schema import RESTCol, RESTTable, RESTAPISpec, Connection
 
 # Pandas setup
 #pd.set_option('display.max_columns', None)
@@ -100,17 +101,16 @@ class TableScan(Thread):
                 self.duck.append(self.tableMgr.table_spec.name, df)
             page += 1
 
-            if df.size < count:
-                break
-
         print("Finished table scan for: ", self.tableMgr.name)
 
 
 class TableMgr:
-    def __init__(self, rest_spec, table_spec, auth = None, params={}):
-        self.name = rest_spec.name + "." + table_spec.name
+    def __init__(self, schema, rest_spec, table_spec, auth = None, params={}):
+        self.schema = schema
+        self.name = schema + "." + table_spec.name
         self.rest_spec = rest_spec
         self.table_spec = table_spec
+        self.synchronous_scanning = True
         self.setup()
 
     def setup(self):
@@ -134,11 +134,12 @@ class TableMgr:
         else:
             # Spawn a thread to query the table source
             self.scan = TableScan(self, tableLoader=tableLoader, duck=duck, select=self.table_spec.select_list)
-            self.scan.start()
-            #self.scan.run()
-            if waitForScan:
-                self.scan.join()
-                duck.execute(f"create view {self.name} as select * from read_parquet('{self.data_dir}/*')")
+            if self.synchronous_scanning:
+                self.scan.run()
+            else:
+                self.scan.start()
+                if waitForScan:
+                    self.scan.join()
 
 class TableLoader:
     """Master loader class. This class can load the data for any table, either by 
@@ -152,13 +153,18 @@ class TableLoader:
     """
     def __init__(self, duck):
         self.duck = duck
-        self.rest_specs = RESTAPISpec.load_configs("./rest_specs")
+        self.connections = Connection.load_config('./connections.yaml')
         self.tables = {}
-        for spec in self.rest_specs:
-            for t in spec.list_tables():
-                tmgr = TableMgr(spec, t)
-                self.duck.execute(f"create schema if not exists {spec.name}")
+
+        # Connections defines the set of schemas we will create in the database.
+        # For each connection/schema then we will define the tables as defined
+        # in the REST spec for the target system.
+        for conn in self.connections:
+            self.duck.execute(f"create schema if not exists {conn.schema_name}")
+            for t in conn.spec.list_tables():
+                tmgr = TableMgr(conn.schema_name, conn.spec, t)
                 self.tables[tmgr.name] = tmgr
+
 
     def materialize_table(self, table):
         tmgr = self.tables[table]
@@ -200,7 +206,6 @@ class ReplApp(cmd2.Cmd):
         self.setup()
 
     def setup(self):
-        self.basic = HTTPBasicAuth(os.environ['GHUSER'], os.environ['GHTOKEN'])
         self.loader = TableLoader(self.duck)
 
 
@@ -230,11 +235,25 @@ class ReplApp(cmd2.Cmd):
 
     def do_show(self, args):
         command = "show " + args
-        # FIXME: Show tables that aren't loaded yet
+        if args == 'schemas':
+            command = "select schema_name from information_schema.schemata"
+        # FIXME: "show tables" should show tables that aren't loaded yet
         self._execute_duck(command)
 
     def do_set(self, args):
         self._execute_duck("set " + args)
+        
+    def do_create(self, args):
+        self._execute_duck("create " + args)
+
+    def do_drop(self, args):
+        self._execute_duck("drop " + args)
+
+    def do_pragma(self, args):
+        self._execute_duck("PRAGMA " + args)
+
+    def do_delete(self, args):
+        self._execute_duck("delete " + args)
         
     def do_describe(self, args):
         return self.do_select(args, command='describe')

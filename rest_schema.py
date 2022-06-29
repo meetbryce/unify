@@ -32,6 +32,67 @@ class RESTCol:
         return f"RESTCol({self.name}<-{self.source},{self.type})"
 
 
+########## REST Paging helpers
+class PagingHelper:
+    def __init__(self, options):
+        page_size = (options or {}).get('page_size')
+        if page_size:
+            self.page_size = int(page_size)
+        else:
+            self.page_size = 1
+
+    @staticmethod
+    def get_pager(options):
+        if not options:
+            return NullPager(options)
+
+        if options['strategy'] == 'pageAndCount':
+            return PageAndCountPager(options)
+        elif options['strategy'] == 'indexAndCount':
+            return OffsetAndCountPager(options)
+        else:
+            raise RuntimeError("Unknown paging strategy: ", options)
+
+class NullPager(PagingHelper):
+    def __init__(self, options):
+        super().__init__(options)
+
+    def get_request_params(self):
+        return {}
+
+    def next_page(self, page_count):
+        return False
+
+
+class PageAndCountPager(PagingHelper):
+    def __init__(self, options):
+        super().__init__(options)
+        self.index_param = options['page_param']
+        self.count_param = options['count_param']
+        self.current_page = 1
+
+    def get_request_params(self):
+        return {self.index_param: self.current_page, self.count_param: self.page_size}
+
+    def next_page(self, page_count):
+        self.current_page += 1
+        return page_count >= self.page_size
+
+class OffsetAndCountPager(PagingHelper):
+    def __init__(self, options):
+        super().__init__(options)
+        self.offset_param = options['offset_param']
+        self.count_param = options['count_param']
+        self.current_offset = 0
+
+    def get_request_params(self):
+        return {self.offset_param: self.current_offset, self.count_param: self.page_size}
+
+    def next_page(self, page_count):
+        self.current_offset += page_count
+        return page_count >= self.page_size
+
+
 class RESTTable:
     def __init__(self, spec, dictvals):
         fmt = string.Formatter()
@@ -96,6 +157,7 @@ class RESTTable:
         if dictvals.get('args_query'):
             self.args_query_table = dictvals['args_query']['table']
             self.args_query_mappings = dictvals['args_query']['mapping']
+            self.args_query_exclusions = (dictvals['args_query'].get('exclude') or "").split(",")
         else:
             self.args_query_table = None
         self.keyColumnName = self.keyColumnType = None
@@ -120,70 +182,6 @@ class RESTTable:
     def supports_paging(self):
         return self._supports_paging
 
-    def parse_json_for_columns(self, root, path=[], column_map=None):
-        # Iterate through an annotated json response document. When we 
-        # find a key beginning with '*' then we record a column definition, infer the
-        # column type from the value, and record the current path to extract the field.
-        # FIXME: Handle lists inside another list
-        column_map = column_map or {}
-        cols = []
-        if isinstance(root, dict):
-            for key, value in root.items():
-                if key.startswith('*'):
-                    name = key[1:]
-                    m = re.match(r'(\w+)\|\{(\w+)\}', name)
-                    if m:
-                        name = m[2]
-                        key = "*" + m[1]
-                    col = RESTCol({
-                        "name": name,
-                        "type": pythonToPrestoType(value),
-                        "source": ".".join(path + [key[1:]])
-                    })
-                    if col.name in column_map:
-                        # Can't use the same column name
-                        if len(path) > 0:
-                            col.name = path[-1] + '_' + col.name
-
-                    if col.name not in column_map:
-                        column_map[col.name] = col
-                        cols.append(col)
-                    else:
-                        print(f"[ERROR] Skipping duplicate column '{col.name}'")
-                elif isinstance(value, dict):
-                    cols.extend(self.parse_json_for_columns(value, path + [key], column_map))
-                elif isinstance(value, list) and len(value) > 0:
-                    if getattr(self, 'result_body_path', None) is None:
-                        self.result_body_path = ".".join(path + [key])
-                        cols.extend(self.parse_json_for_columns(value[0], [], column_map))
-                    else:
-                        cols.extend(self.parse_json_for_columns(value[0], path + [key], column_map))
-        return cols
-
-    def get_latest_timestamp(self, json_rowset, time_format):
-        # Finds the latest time value from the configured timestamp column in
-        # the json_rowset
-        try:
-            selector = next(c.source for c in self.columns if c.is_timestamp)
-        except StopIteration:
-            return None
-
-        ts = None
-        for row in json_rowset:
-            val = deepGet(selector, row)
-            if val is not None:
-                if isinstance(val, str):
-                    if time_format == 'bson':
-                        val = json_util.loads('{"$date": "' + val + '"}')
-                    elif time_format:
-                        val = datetime.strptime(val, time_format)
-                    else:
-                        val = datetime.fromisoformat(val[0:-5])
-                if ts is None or val > ts:
-                    ts = val
-
-        return ts
-
     def supports_updates(self):
         return self.update_path is not None
 
@@ -200,29 +198,6 @@ class RESTTable:
         else:
             raise Exception(f"Invalid resource '{resource_spec}', must be '<http method> <path>'")
 
-    def lookupColumn(self, colname):
-        return self.colmap[colname]
-
-    def toPresto(self):
-        keys = None
-        if self.name == 'repos':
-            s = set()
-            s.add('login')
-            keys = [s]
-        elif self.name == 'companies':
-            s = set()
-            s.add('id')
-            keys = [s]
-
-        print("Table ", self.name, " keys: ", keys)
-        return PrestoThriftNullableTableMetadata(
-                 PrestoThriftTableMetadata(
-                    PrestoThriftSchemaTableName(self.spec.name, self.name),
-                    columns=[col.toPresto() for col in self.columns],
-                    indexableKeys=keys
-                 )
-               )
-
     def __repr__(self):
         cols = sorted({c.name for c in self.columns})
         cols = ", ".join(cols)
@@ -237,15 +212,20 @@ class RESTTable:
             print(">>Running parent query: ", self.parent_table())
             for df in tableLoader.read_table_rows(self.parent_table().qualified_name()):
                 for record in df.to_dict('records'):
+                    do_row = True
                     for key in self.args_query_mappings:
                         parent_col = self.args_query_mappings[key]
                         if parent_col in record:
                             record[key] = record[parent_col]
+                            if record[key] in self.args_query_exclusions:
+                                print("Excluding parent row with key: ", record[key])
+                                do_row = False
                         else:
                             print(f"Error: parent record missing col {parent_col}: ", record)
                             breakpoint()
-                    for page, count in self._query_resource(record):
-                        yield (page, count)
+                    if do_row:
+                        for page, count in self._query_resource(record):
+                            yield (page, count)
         else:
             # Simple query
             for page, count in self._query_resource():
@@ -285,67 +265,6 @@ class RESTTable:
                 break
 
 
-########## REST Paging helps
-class PagingHelper:
-    def __init__(self, options):
-        page_size = (options or {}).get('page_size')
-        if page_size:
-            self.page_size = int(page_size)
-        else:
-            self.page_size = 1
-
-    @staticmethod
-    def get_pager(options):
-        if not options:
-            return NullPager(options)
-
-        if options['strategy'] == 'pageAndCount':
-            return PageAndCountPager(options)
-        elif options['strategy'] == 'indexAndCount':
-            return OffsetAndCountPager(options)
-        else:
-            raise RuntimeError("Unknown paging strategy: ", options)
-
-
-class NullPager(PagingHelper):
-    def __init__(self, options):
-        super().__init__(options)
-
-    def get_request_params(self):
-        return {}
-
-    def next_page(self, page_count):
-        return False
-
-
-class PageAndCountPager(PagingHelper):
-    def __init__(self, options):
-        super().__init__(options)
-        self.index_param = options['page_param']
-        self.count_param = options['count_param']
-        self.current_page = 1
-
-    def get_request_params(self):
-        return {self.index_param: self.current_page, self.count_param: self.page_size}
-
-    def next_page(self, page_count):
-        self.current_page += 1
-        return page_count >= self.page_size
-
-class OffsetAndCountPager(PagingHelper):
-    def __init__(self, options):
-        super().__init__(options)
-        self.offset_param = options['offset_param']
-        self.count_param = options['count_param']
-        self.current_offset = 0
-
-    def get_request_params(self):
-        return {self.offset_param: self.current_offset, self.count_param: self.page_size}
-
-    def next_page(self, page_count):
-        self.current_offset += page_count
-        return page_count >= self.page_size
-##########
 
 
 
@@ -413,6 +332,18 @@ class RESTAPISpec:
     def load_configs(cls, path):
         return [RESTAPISpec(f) for f in glob.glob(f"{path}/*spec.yaml")]
 
+    def resolve_auth(self, opts):
+        # opts will be a dictionary of either env var references starting with '$'
+        # or else actual values
+        for key, var_name in self.auth.items():
+            if key == 'type':
+                continue
+            if var_name in opts:
+                value = opts[var_name]
+                if value.startswith("$"):
+                   value = os.environ.get(value[1:])
+                self.auth[key] = value 
+
     def _setup_request_auth(self, session):
         user = ''
         token = ''
@@ -424,8 +355,8 @@ class RESTAPISpec:
             dynValues = {k: os.environ.get(v, v) for k, v in entries.items()}
 
         if authType == 'BASIC':
-            user = os.environ.get(self.auth['uservar'])
-            token = os.environ.get(self.auth.get('tokenvar'))
+            user = self.auth['uservar']
+            token = self.auth['tokenvar']
             session.auth = (user, token)
         elif authType == 'BEARER':
             token = os.environ.get(self.auth['tokenvar'], self.auth['tokenvar'])
@@ -439,4 +370,18 @@ class RESTAPISpec:
             pass
         else:
             raise Exception("Error unknown auth type")
+
+class Connection:
+    def __init__(self, rest_specs, opts):
+        self.schema_name = next(iter(opts))
+        opts = opts[self.schema_name]
+        spec_name = opts['spec']
+        self.spec = next(sp for sp in rest_specs if sp.name == spec_name) 
+        self.spec.resolve_auth(opts['options'])
+
+    @classmethod
+    def load_config(cls, path):
+        rest_specs = RESTAPISpec.load_configs("./rest_specs")
+        connections = yaml.load(open('./connections.yaml'), Loader=yaml.FullLoader)
+        return [Connection(rest_specs, opts) for opts in connections]
 

@@ -1,0 +1,14 @@
+# Defines the set of Connections to cloud systems to expose as database
+# schemas in Unify.
+---
+- github:
+    spec: github
+    options:
+      GHUSER: $GHUSER
+      GHTOKEN: $GHTOKEN
+- jira:
+    spec: jira
+    options:
+      JIRAUSER: $JIRAUSER
+      JIRATOKEN: $JIRATOKEN
+

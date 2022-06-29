@@ -7,3 +7,4 @@ venv
 keystore.pem
 node_modules
 data/
+.env
