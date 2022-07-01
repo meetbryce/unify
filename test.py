@@ -12,9 +12,20 @@ print(duck.execute("select * from github.orgs").fetchall())
 
 
 df = pd.read_parquet(glob.glob('./data/github.orgs/*'))
+print(df)
 duck.execute("set search_path='github'")
 #table = duck.table("github.orgs")
 duck.append('orgs', df)
+duck.append('orgs', df)
+
+cols = df.columns.tolist()
+#cols = cols[-1:] + cols[:-1]
+
+if cols == df.columns.tolist():
+	print("same")
+else:
+	print("different!")
+df = df[cols]
 duck.append('orgs', df)
 
 print(duck.execute("select * from github.orgs").fetchall())

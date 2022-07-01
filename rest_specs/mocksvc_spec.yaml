@@ -1,0 +1,19 @@
+# Describes a simple API that we mock into requests for testing. See `mocksvc` folder.
+name: mocksvc
+base_url: https://mocksvc.com
+paging:
+  strategy: pageAndCount
+  page_param: page
+  count_param: count
+  page_size: 100
+auth:
+  type: BASIC
+  uservar: MOCKSVC_USER
+  tokenvar: MOCKSVC_PASS
+tables:
+  - name: repos100
+    resource_path: /api/repos_100
+    supports_paging: False
+  - name: repos1100
+    resource_path: /api/repos_1100
+    supports_paging: True

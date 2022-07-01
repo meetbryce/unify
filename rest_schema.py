@@ -3,11 +3,39 @@ import json
 import os
 import re
 import string
+import sys
 import yaml
 
 import requests
 
 Columns = list[str]
+
+class Connector:
+    def __init__(self, spec_table, opts):
+        self.schema_name = next(iter(opts))
+        opts = opts[self.schema_name]
+        spec_name = opts['spec']
+        self.spec = spec_table[spec_name] 
+        self.spec.resolve_auth(self.schema_name, opts['options'])
+
+    @classmethod
+    def setup_connections(cls, path=None, conn_list=None):
+        spec_table = {}
+        for f in glob.glob(f"./rest_specs/*spec.yaml"):
+            spec = yaml.load(open(f), Loader=yaml.FullLoader)
+            klass = RESTAPISpec
+            if 'class' in spec and spec['class'].lower() == 'gsheetsconnector':
+                from gsheets.gsheets_connector import GSheetsConnector
+                klass = GSheetsConnector
+            spec_inst = klass(spec)
+            spec_table[spec_inst.name] = spec_inst
+        
+        if conn_list:
+            connections = conn_list
+        else:
+            connections = yaml.load(open(path), Loader=yaml.FullLoader)
+        return [Connector(spec_table, opts) for opts in connections]
+
 
 class RESTCol:
     def __init__(self, dictvals):
@@ -24,9 +52,6 @@ class RESTCol:
     @staticmethod
     def build(name=None, type='VARCHAR', source=None):
         return RESTCol({"name": name, "type": type, "source": source})
-
-    def toPresto(self):
-        return PrestoThriftColumnMetadata(self.name, self.type, comment=self.comment, hidden=self.hidden)
 
     def __repr__(self):
         return f"RESTCol({self.name}<-{self.source},{self.type})"
@@ -48,7 +73,7 @@ class PagingHelper:
 
         if options['strategy'] == 'pageAndCount':
             return PageAndCountPager(options)
-        elif options['strategy'] == 'indexAndCount':
+        elif options['strategy'] == 'offsetAndCount':
             return OffsetAndCountPager(options)
         else:
             raise RuntimeError("Unknown paging strategy: ", options)
@@ -67,6 +92,10 @@ class NullPager(PagingHelper):
 class PageAndCountPager(PagingHelper):
     def __init__(self, options):
         super().__init__(options)
+        if 'page_param' not in options:
+            raise RuntimeError("page_param not specified in options")
+        if 'count_param' not in options:
+            raise RuntimeError("count_param not specified in options")
         self.index_param = options['page_param']
         self.count_param = options['count_param']
         self.current_page = 1
@@ -81,6 +110,10 @@ class PageAndCountPager(PagingHelper):
 class OffsetAndCountPager(PagingHelper):
     def __init__(self, options):
         super().__init__(options)
+        if 'offset_param' not in options:
+            raise RuntimeError("offset_param not specified in options")
+        if 'count_param' not in options:
+            raise RuntimeError("count_param not specified in options")
         self.offset_param = options['offset_param']
         self.count_param = options['count_param']
         self.current_offset = 0
@@ -224,12 +257,12 @@ class RESTTable:
                             print(f"Error: parent record missing col {parent_col}: ", record)
                             breakpoint()
                     if do_row:
-                        for page, count in self._query_resource(record):
-                            yield (page, count)
+                        for page, count, size_return in self._query_resource(record):
+                            yield (page, count, size_return)
         else:
             # Simple query
-            for page, count in self._query_resource():
-                yield (page, count)
+            for page, count, size_return in self._query_resource():
+                yield (page, count, size_return)
 
     def _query_resource(self, query_params={}):
         session = requests.Session()
@@ -250,13 +283,18 @@ class RESTTable:
             if r.status_code == 404:
                 raise Exception("Query returned no results")
             if r.status_code == 401:
+                print("Auth failed. Spec auth is: ", self.spec.auth)
                 raise Exception("API call unauthorized: " + r.text)
             if r.status_code >= 400:
                 raise Exception("API call failed: " + r.text)
 
-            yield (r.json(), pager.page_size)
+            size_return = []
+            with open(f"page-{page}.json", "w") as f:
+                f.write(r.text)
 
-            if not pager.next_page(len(r.json())):
+            yield (r.json(), pager.page_size, size_return)
+
+            if not pager.next_page(size_return[0]):
                 break
 
             page += 1
@@ -264,14 +302,8 @@ class RESTTable:
                 print("Aborting table scan after {} pages", page-1)
                 break
 
-
-
-
-
-class RESTAPISpec:
-    def __init__(self, spec_file):
-        spec = yaml.load(open(spec_file), Loader=yaml.FullLoader)
-        self.path = spec_file
+class RESTAPISpec(Connector):
+    def __init__(self, spec):
         self.name = spec['name']
         self.base_url = spec['base_url']
         self.paging_options = spec.get('paging')
@@ -291,7 +323,10 @@ class RESTAPISpec:
         self.polling_interval_secs = spec.get('polling_interval_secs', 60*60*4)
         self.next_page_token = spec.get('next_page_token')
 
-        self.tables = [RESTTable(self, d) for d in spec['tables']]
+        if "tables" in spec:
+            self.tables = [RESTTable(self, d) for d in spec['tables']]
+        else:
+            print("Warning: spec '{}' has no tables defined".format(self.name))
 
 
     def list_tables(self):
@@ -304,35 +339,11 @@ class RESTAPISpec:
     def supports_paging(self):
         return (self.pageIndexArg or self.pageStartArg or self.page_cursor_arg)
 
-    def get_next_page_params(self, last_page):
-        print("GET PAGE PARAMS, last_page: ",last_page)
-        if self.page_cursor_arg:
-            last_page.update({self.pageMaxArg: self.maxPerPage})
-            return last_page
-
-        range_start = 0
-        page_index = 0
-        page_size = self.maxPerPage
-        if last_page is not None:
-            range_start = last_page.get(self.pageStartArg, 0) + last_page.get(self.pageMaxArg, 0)
-            page_index = last_page.get(self.pageIndexArg, 0) + 1
-
-        if self.pageStartArg:
-            return {self.pageStartArg: range_start, self.pageMaxArg: page_size}
-        elif self.pageIndexArg:
-            return {self.pageIndexArg: page_index, self.pageMaxArg: page_size}
-        elif self.pageMaxArg:
-            return {self.pageMaxArg: page_size}
-
     def __repr__(self):
         return f"RESTAPISpect({self.name}) ->\n" + \
             ", ".join(map(lambda t: str(t), self.tables)) + "\n"
 
-    @classmethod
-    def load_configs(cls, path):
-        return [RESTAPISpec(f) for f in glob.glob(f"{path}/*spec.yaml")]
-
-    def resolve_auth(self, opts):
+    def resolve_auth(self, connection_name, opts):
         # opts will be a dictionary of either env var references starting with '$'
         # or else actual values
         for key, var_name in self.auth.items():
@@ -341,7 +352,11 @@ class RESTAPISpec:
             if var_name in opts:
                 value = opts[var_name]
                 if value.startswith("$"):
-                   value = os.environ.get(value[1:])
+                    try:
+                        value = os.environ[value[1:]]
+                    except KeyError:
+                        print(f"Authentication for {connection_name} failed, missing env var '{value[1:]}'")
+                        sys.exit(1)
                 self.auth[key] = value 
 
     def _setup_request_auth(self, session):
@@ -370,18 +385,4 @@ class RESTAPISpec:
             pass
         else:
             raise Exception("Error unknown auth type")
-
-class Connection:
-    def __init__(self, rest_specs, opts):
-        self.schema_name = next(iter(opts))
-        opts = opts[self.schema_name]
-        spec_name = opts['spec']
-        self.spec = next(sp for sp in rest_specs if sp.name == spec_name) 
-        self.spec.resolve_auth(opts['options'])
-
-    @classmethod
-    def load_config(cls, path):
-        rest_specs = RESTAPISpec.load_configs("./rest_specs")
-        connections = yaml.load(open('./connections.yaml'), Loader=yaml.FullLoader)
-        return [Connection(rest_specs, opts) for opts in connections]
 

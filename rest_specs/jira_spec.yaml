@@ -31,12 +31,16 @@ tables:
           Use `projects` table to query the set of JIRA projects.
   - name: issues
     query_resource: GET /rest/api/3/search
+# This API: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-get    
     supports_paging: True
     params:
-      jql: order by created DESC
+      jql: created > 2021-06-30 order by created DESC
     refresh_params:
       jql: updated >= '{checkpoint}'
     result_body_path: issues
+    select: "id, key, fields_project_id, fields_project_id, fields_summary, fields_reporter_.+, fields_assignee_.+, \n
+    fields_status_.+, fields.created, fields.updated, fields_issuetype_name, fields_priority_name, \n
+    fields_resolution_name"
     columns:
       - name: id
         type: VARCHAR

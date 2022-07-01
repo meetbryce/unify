@@ -20,7 +20,7 @@ from timeit import default_timer as timer
 # DuckDB
 import duckdb
 
-from rest_schema import RESTCol, RESTTable, RESTAPISpec, Connection
+from rest_schema import RESTCol, RESTTable, RESTAPISpec, Connector
 
 # Pandas setup
 #pd.set_option('display.max_columns', None)
@@ -47,7 +47,7 @@ class TableScan(Thread):
         self.duck = duck
         self.select = select
 
-    def cleanup_df_page(self, df):
+    def cleanup_df_page(self, df, cols_to_drop=[]):
         # Pandas json_normalize does not have a clever way to normalize embedded lists
         # of records, so it just returns a list of dicts. These will cause deserialization
         # issues if different REST response pages have different results for these
@@ -66,11 +66,15 @@ class TableScan(Thread):
                 df.drop(columns=f.name, inplace=True)
                 continue
 
-            # Caller can optionally specific a set of columns to keep. We keep any column with
+            if f.name in cols_to_drop:
+                df.drop(columns=f.name, inplace=True)
+
+            # Caller can optionally specify a set of columns to keep. We keep any column with
             # either an exact match, or a parent property match ("name_??").
             if self.select:
                 if not (f.name in self.select or \
-                    any(sname for sname in self.select if re.match(sname + r"_.*", f.name))):
+                    any(sname for sname in self.select if \
+                        (re.match(sname + r"_.*", f.name) or re.match(sname, f.name)))):
                     #print("Dropping column missing from 'select' clause: ", f.name)
                     df.drop(columns=f.name, inplace=True)
 
@@ -78,29 +82,54 @@ class TableScan(Thread):
     def run(self):
         print("Running table scan for: ", self.tableMgr.name)
 
-        page = 1
-        for json_page, count in self.tableMgr.table_spec.query_resource(self.tableLoader):
-            df = pd.json_normalize(json_page, sep='_')
+        def flush_rows(tableMgr, df, page, flush_count):
+            if page <= page_flush_count:
+                # First set of pages, so create the table
+                self.duck.register('df1', row_buffer_df)
+                self.duck.execute(f"create table {tableMgr.name} as select * from df1")
+                # FIXME: The following shouldn't be neccessary, but it seems like `Duck.append`
+                # does not work properly with qualified table names, so we hack around it
+                # by setting the search path
+                self.duck.execute(f"set search_path='{tableMgr.rest_spec.name}'")
+            else:
+                self.duck.append(tableMgr.table_spec.name, row_buffer_df)
 
-            if df.size == 0:
+        page = 1
+        page_flush_count = 5 # flush 5 REST calls worth of data to the db
+        row_buffer_df = None
+        table_cols = set()
+
+        for json_page, count, size_return in self.tableMgr.table_spec.query_resource(self.tableLoader):
+            record_path = self.tableMgr.table_spec.result_body_path
+            df = pd.json_normalize(json_page, record_path=record_path, sep='_')
+            size_return.append(df.shape[0])
+
+            if df.shape[0] == 0:
                 continue
 
             self.cleanup_df_page(df)
 
-            fname = self.tableMgr.name + "_" + str(time.time()) + "_" + str(page)
-            df.to_parquet(os.path.join(self.tableMgr.data_dir, fname))
-
             if page == 1:
-                self.duck.register('df1', df)
-                self.duck.execute(f"create table {self.tableMgr.name} as select * from df")
-                # FIXME: The following shouldn't be neccessary, but it seems like `Duck.append`
-                # does not work properly with qualified table names, so we hack around it
-                # by setting the search path
-                self.duck.execute(f"set search_path='{self.tableMgr.rest_spec.name}'")
+                row_buffer_df = df
             else:
-                self.duck.append(self.tableMgr.table_spec.name, df)
+                if table_cols:
+                    # Once we set the table columns from the first flush, then we enforce that list
+                    usable = list(table_cols.intersection(df.columns.tolist()))
+                    df = df[usable]
+                row_buffer_df = pd.concat([row_buffer_df, df], axis='index', ignore_index=True)
+
+            # Flush rows
+            if (page % page_flush_count) == 0:
+                flush_rows(self.tableMgr, row_buffer_df, page, page_flush_count)
+                if page == page_flush_count:
+                    table_cols = set(row_buffer_df.columns.tolist())
+                row_buffer_df = row_buffer_df[0:0] # clear flushed rows, but keep columns
+
             page += 1
 
+        if row_buffer_df.shape[0] > 0:
+            flush_rows(self.tableMgr, row_buffer_df, page, page_flush_count)
+            
         print("Finished table scan for: ", self.tableMgr.name)
 
 
@@ -127,19 +156,14 @@ class TableMgr:
         duck.execute(f"drop table {self.name}")
 
     def load_table(self, duck, waitForScan=False, tableLoader=None):
-        if self.has_data():
-            # Loads the table data as a view into Duck from the parquet files
-            #duck.execute(f"create view {self.name} as select * from read_parquet('{self.data_dir}/*')")
-            return True
+        # Spawn a thread to query the table source
+        self.scan = TableScan(self, tableLoader=tableLoader, duck=duck, select=self.table_spec.select_list)
+        if self.synchronous_scanning:
+            self.scan.run()
         else:
-            # Spawn a thread to query the table source
-            self.scan = TableScan(self, tableLoader=tableLoader, duck=duck, select=self.table_spec.select_list)
-            if self.synchronous_scanning:
-                self.scan.run()
-            else:
-                self.scan.start()
-                if waitForScan:
-                    self.scan.join()
+            self.scan.start()
+            if waitForScan:
+                self.scan.join()
 
 class TableLoader:
     """Master loader class. This class can load the data for any table, either by 
@@ -153,7 +177,7 @@ class TableLoader:
     """
     def __init__(self, duck):
         self.duck = duck
-        self.connections = Connection.load_config('./connections.yaml')
+        self.connections = Connector.setup_connections('./connections.yaml')
         self.tables = {}
 
         # Connections defines the set of schemas we will create in the database.
@@ -202,7 +226,12 @@ class ReplApp(cmd2.Cmd):
     def __init__(self):
         super().__init__(multiline_commands=['select'], persistent_history_file='/tmp/hist')
         self.debug = True
-        self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata")) # memory store by default for now
+        try:
+            self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"))
+        except RuntimeError:
+            self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=True)
+            print("Database locked. Opening for read-only.")
+
         self.setup()
 
     def setup(self):
@@ -237,7 +266,12 @@ class ReplApp(cmd2.Cmd):
         command = "show " + args
         if args == 'schemas':
             command = "select schema_name from information_schema.schemata"
-        # FIXME: "show tables" should show tables that aren't loaded yet
+        elif args == 'tables':
+            # FIXME: merge tables known to Duck but not us
+            print("tables\n----------")
+            for table in sorted(self.loader.tables.keys()):
+                print(table)
+            return
         self._execute_duck(command)
 
     def do_set(self, args):
@@ -266,7 +300,7 @@ class ReplApp(cmd2.Cmd):
         except RuntimeError as e:
             if fail_if_missing:
                 print(e)
-                return
+                returns
             m = re.search("Table with name (\S+) does not exist", str(e))
             if m:
                 table = m.group(1)

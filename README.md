@@ -51,3 +51,94 @@ for those variables in the `options` section of the connection.
 You can store sensitive values directly into `connections.yml`, or you can use
 `$<name>` syntax to reference an environment variable and store secrets in the
 environment instead.
+
+## Updates to the source system
+
+Each API spec can define a "refresh strategy" which indicates how changes to the
+system should be queried and merged into the local copy.
+
+**Full Reload**
+
+The default and simplest model is simply to perform a full table load again from
+the source system.
+
+**Incremental load**
+
+In this model the REST API must support a filter which returns "all changes since
+time t". The system will track the timestamp and provide it as a filter for the
+next query.
+
+**(future) Change data capture**
+
+If the system support webhooks for broadcasting change events, then Unify can subscribe
+to webhooks to be notified of changes to any records in the source system.
+
+## Variables
+
+Unify extends normal SQL syntax to support `$name` format variables:
+
+    set $last_record = (select * from items order by created desc limit 1)
+    ...
+    select * from items where created > $last_record.created
+
+By default variables will be evaluated into a result when the `set` operation occurs.
+However, you can request "lazy" evaluation in which case the variable acts like
+a VIEW which is evaluated when you reference it.
+
+    lazy set $scotts_items = (select * from items where owner = 'scott')
+    ...
+    select * from $scotts_items  // query will be evaluated when referenced
+
+Note that variables are automatically persisted across sessions. Use `unset` to
+delete a variable:
+
+    unset $scotts_items
+
+## Exporting data
+
+Unify supports the `>>` operator for exporting data out of the system:
+
+    > select * from orders >> file:./orders.csv     // exported as CSV
+    > select * from orders >> file:./orders.parquet // export as Parquet
+    > select * from orders >> file[parquet]:./orders_data // export as Parquet
+    > select * from orders >> s3:/bucket1/orders.parquet // export as Parquet
+
+### Integration with Google sheets
+
+Unify integrates to read and write data with Google Sheets.
+
+To export a query to a Gsheets file, use this syntax:
+
+    > select * from orders >> gsheets:<file name or sheetId>[/<tab name>]
+
+
+To import from Gsheets, configure a Gsheets connection and use the custom
+`gsheets` command to import data from your spreadsheets:
+
+    > gsheets list files
+    ...lists all Gsheet files
+    > gsheets search <query>
+    ...searches for Gsheet files whose title matches the query
+    > gsheets info <file name or gsheet Id>
+    ...lists the tabs of the idicated gsheet file
+    > gsheets import <file name or gsheet Id> 
+    ...imports the first sheet from the indicated Gsheet file. This will create
+    a new table in the gsheets connection schema with a name derived from the file name
+    > gsheets import <file name or gsheet Id> sheet <sheet name or number>
+    ...indicates the specific sheet to import (by sheet name or numeric index starting with 1)
+    > gsheets import <file> sheet <sheet> as table <name>
+    ...imports the indicated sheet into a table with the indicated table name. If the
+    table already exists then data from the sheet will be appended to the table
+
+## TODO
+
+1. Implement unit tests
+1. Implement table refresh, with support for strategies
+1. Implement GSheets adapter
+1. Implement Lark parser for more complex syntax support
+1. Implement full `show` commands
+1. Implement dollar variables
+1. Unobtrusive table loading status supporting interrupts
+
+
+
