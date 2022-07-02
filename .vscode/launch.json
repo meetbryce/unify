@@ -5,21 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Tests",
-            "type": "python",
-            "request": "launch",
-            "program": "pytest",
-            "console": "integratedTerminal",
-            "justMyCode": true,
-            "python.envFile": ".env"
-        },
-        {
             "name": "Unify main",
             "type": "python",
             "request": "launch",
             "program": "${fileDirname}/unify.py",
             "console": "integratedTerminal",
-            "justMyCode": true,
+            "justMyCode": false,
             "cwd": "${fileDirname}",
             "python.envFile": ".env"
         }

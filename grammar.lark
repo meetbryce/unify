@@ -1,0 +1,45 @@
+start: command+ ";"?
+
+command: show_tables
+         | show_schemas
+         | select_query
+         | describe
+         | clear
+
+show_tables: "show tables"
+
+show_schemas: "show schemas"
+
+select_query: "select" ANY
+
+describe: "describe" (table_ref | table_schema_ref)?
+
+clear: "clear" table_schema_ref
+
+col_list: col_ref WS? ("," WS? col_ref)*
+
+col_ref: WORD | "*"
+
+table_ref: WORD
+table_schema_ref: WORD "." WORD
+
+TABLE: WORD
+SCHEMA: WORD            
+
+parts: WORD ","? [ WS WORD+ ]
+
+ANY             : /.+/
+DIGIT           : "0".."9"
+LCASE_LETTER    : "a".."z"
+UCASE_LETTER    : "A".."Z"
+ALPHA           : UCASE_LETTER | LCASE_LETTER
+ALPHANUM        : ALPHA [ ALPHA | DIGIT ]*
+SPACE           : " "
+TAB             : SPACE+
+
+NAME            : ALPHANUM+
+WORD            : ALPHANUM+
+NUMBER          : DIGIT+
+WS              : SPACE | TAB
+
+%ignore WS

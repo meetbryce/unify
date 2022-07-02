@@ -1,10 +1,12 @@
+import pytest
 import requests
 import requests_mock
 
 from mocksvc.mocksvc import MockSvc
 from rest_schema import Connector, RESTAPISpec
 
-def test_mocksvc_config():
+@pytest.fixture
+def connection():
     config = [{"mocksvc": 
                 {"spec": "mocksvc",
                 "options": {"MOCKSVC_USER": "scott@example.com", "MOCKSVC_PASS": "abc123"}
@@ -12,14 +14,16 @@ def test_mocksvc_config():
             }]
     
     connections = Connector.setup_connections(conn_list=config)
-    assert len(connections) == 1
-    assert isinstance(connections[0].spec, RESTAPISpec)
-    assert connections[0].spec.name == "mocksvc"
-    assert connections[0].spec.base_url == "https://mocksvc.com"
+    return connections[0]
+
+def test_mocksvc_config(connection):
+    assert isinstance(connection.spec, RESTAPISpec)
+    assert connection.spec.name == "mocksvc"
+    assert connection.spec.base_url == "https://mocksvc.com"
 
     # Verify basic auth options set properly
-    assert connections[0].spec.auth['uservar'] == "scott@example.com"
-    assert connections[0].spec.auth['tokenvar'] == "abc123"
+    assert connection.spec.auth['uservar'] == "scott@example.com"
+    assert connection.spec.auth['tokenvar'] == "abc123"
 
 def test_mocksvc_requests_mock():
     with requests_mock.Mocker() as mock:
@@ -48,3 +52,28 @@ def test_mocksvc_requests_mock():
             resp = requests.get("https://mocksvc.com/api/repos_1100", auth=auth, params=params)
             assert resp.status_code == 200
             assert len(resp.json()) == 100
+
+def test_calling_rest_api(connection):
+    with requests_mock.Mocker() as mock:
+        MockSvc.setup_mocksvc_api(mock)
+
+        table_spec = connection.spec.lookupTable("repos100")
+        total_records = 0
+        for json, size_return in table_spec.query_resource(None):
+            total_records += len(json)
+            size_return.append(len(json))
+        assert total_records == 100
+
+        table_spec = connection.spec.lookupTable("repos27")
+        total_records = 0
+        for json, size_return in table_spec.query_resource(None):
+            total_records += len(json)
+            size_return.append(len(json))
+        assert total_records == 27
+
+        table_spec = connection.spec.lookupTable("repos1100")
+        total_records = 0
+        for json, size_return in table_spec.query_resource(None):
+            total_records += len(json)
+            size_return.append(len(json))
+        assert total_records == 1027

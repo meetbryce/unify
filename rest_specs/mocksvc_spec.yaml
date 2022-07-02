@@ -11,6 +11,9 @@ auth:
   uservar: MOCKSVC_USER
   tokenvar: MOCKSVC_PASS
 tables:
+  - name: repos27
+    resource_path: /api/repos_27
+    supports_paging: False
   - name: repos100
     resource_path: /api/repos_100
     supports_paging: False

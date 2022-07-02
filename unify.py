@@ -5,7 +5,14 @@ import cmd2
 import glob
 import pydoc
 import re
+import sys
+import traceback
 import yaml
+from lark import Lark, Visitor
+from lark.visitors import v_args
+from prompt_toolkit import prompt, PromptSession
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 
 import requests
 from requests.auth import HTTPBasicAuth
@@ -99,7 +106,7 @@ class TableScan(Thread):
         row_buffer_df = None
         table_cols = set()
 
-        for json_page, count, size_return in self.tableMgr.table_spec.query_resource(self.tableLoader):
+        for json_page, size_return in self.tableMgr.table_spec.query_resource(self.tableLoader):
             record_path = self.tableMgr.table_spec.result_body_path
             df = pd.json_normalize(json_page, record_path=record_path, sep='_')
             size_return.append(df.shape[0])
@@ -222,9 +229,9 @@ class TableLoader:
         except:
             return False
 
-class ReplApp(cmd2.Cmd):
+class RunCommand(Visitor):
     def __init__(self):
-        super().__init__(multiline_commands=['select'], persistent_history_file='/tmp/hist')
+        #super().__init__(multiline_commands=['select'], persistent_history_file='/tmp/hist')
         self.debug = True
         try:
             self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"))
@@ -232,14 +239,78 @@ class ReplApp(cmd2.Cmd):
             self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=True)
             print("Database locked. Opening for read-only.")
 
+        self.session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
+        self.parser = Lark(open("grammar.lark").read())
+
         self.setup()
 
     def setup(self):
         self.loader = TableLoader(self.duck)
 
+    def loop(self):
+        suggester = AutoSuggestFromHistory()
+        try:
+            while True:
+                self._cmd = self.session.prompt("> ", auto_suggest=suggester)
+                try:
+                    parse_tree = self.parser.parse(self._cmd)
+                    #print(parse_tree.pretty())
+                    self.visit(parse_tree)
+                except Exception as e:
+                    traceback.print_exc()
+        except EOFError:
+            sys.exit(0)
 
-    def do_clear(self, args):
-        table = args.args
+    def show_tables(self, tree):
+        # FIXME: merge tables known to Duck but not us
+        print("tables\n----------")
+        for table in sorted(self.loader.tables.keys()):
+            print(table)
+        return
+
+    def show_schemas(self, tree):
+        self._execute_duck("select schema_name from information_schema.schemata")
+        return tree
+
+    def describe(self, tree):
+        if len(tree.children) == 0:
+            self._execute_duck("describe")
+        elif tree.children[0].data.value == 'table_ref':
+            table = tree.children[0].children[0].value
+            self._execute_duck(f"describe {table}")
+        else:
+            schema = tree.children[0].children[0].value
+            table = tree.children[0].children[1].value
+            self._execute_duck(f"describe {schema}.{table}")
+        
+    def select_query(self, tree=None, fail_if_missing=False):
+        try:
+            self._execute_duck(self._cmd)
+
+        except RuntimeError as e:
+            if fail_if_missing:
+                print(e)
+                return
+            m = re.search("Table with name (\S+) does not exist", str(e))
+            if m:
+                table = m.group(1)
+                # Extract the schema from the original query
+                m = re.search(f"(\w+)\.{table}", self._cmd)
+                if m:
+                    table = m.group(1) + "." + table
+                    if self.loader.materialize_table(table):
+                        return self.select_query(self._cmd, fail_if_missing=True)
+                    else:
+                        print("Loading table...")
+                else:
+                    print(e)
+            else:
+                print(e)
+
+    def clear(self, tree):
+        schema = tree.children[0].children[0].value
+        _table = tree.children[0].children[1].value
+        table = schema + "." + _table
         self.loader.truncate_table(table)
         print("Table cleared: ", table)
 
@@ -261,19 +332,6 @@ class ReplApp(cmd2.Cmd):
             else:
                 print(df.to_string(**fmt_opts))
 
-
-    def do_show(self, args):
-        command = "show " + args
-        if args == 'schemas':
-            command = "select schema_name from information_schema.schemata"
-        elif args == 'tables':
-            # FIXME: merge tables known to Duck but not us
-            print("tables\n----------")
-            for table in sorted(self.loader.tables.keys()):
-                print(table)
-            return
-        self._execute_duck(command)
-
     def do_set(self, args):
         self._execute_duck("set " + args)
         
@@ -289,39 +347,6 @@ class ReplApp(cmd2.Cmd):
     def do_delete(self, args):
         self._execute_duck("delete " + args)
         
-    def do_describe(self, args):
-        return self.do_select(args, command='describe')
-
-    def do_select(self, query_remainder, fail_if_missing=False, command='select'):
-        query = command + " " + query_remainder
-        try:
-            self._execute_duck(query)
-
-        except RuntimeError as e:
-            if fail_if_missing:
-                print(e)
-                returns
-            m = re.search("Table with name (\S+) does not exist", str(e))
-            if m:
-                table = m.group(1)
-                # Extract the schema from the original query
-                m = re.search(f"(\w+)\.{table}", query)
-                if m:
-                    table = m.group(1) + "." + table
-                    if self.loader.materialize_table(table):
-                        return self.do_select(query_remainder, fail_if_missing=True)
-                    else:
-                        print("Loading table...")
-                else:
-                    print(e)
-            else:
-                print(e)
-
-def main():
-    import sys
-    c = ReplApp()
-    sys.exit(c.cmdloop())
-
 if __name__ == '__main__':
-    main()
+    RunCommand().loop()    
 

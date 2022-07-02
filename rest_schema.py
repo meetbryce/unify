@@ -257,12 +257,12 @@ class RESTTable:
                             print(f"Error: parent record missing col {parent_col}: ", record)
                             breakpoint()
                     if do_row:
-                        for page, count, size_return in self._query_resource(record):
-                            yield (page, count, size_return)
+                        for page, size_return in self._query_resource(record):
+                            yield (page, size_return)
         else:
             # Simple query
-            for page, count, size_return in self._query_resource():
-                yield (page, count, size_return)
+            for page, size_return in self._query_resource():
+                yield (page, size_return)
 
     def _query_resource(self, query_params={}):
         session = requests.Session()
@@ -289,10 +289,10 @@ class RESTTable:
                 raise Exception("API call failed: " + r.text)
 
             size_return = []
-            with open(f"page-{page}.json", "w") as f:
-                f.write(r.text)
+            #with open(f"page-{page}.json", "w") as f:
+            #    f.write(r.text)
 
-            yield (r.json(), pager.page_size, size_return)
+            yield (r.json(), size_return)
 
             if not pager.next_page(size_return[0]):
                 break

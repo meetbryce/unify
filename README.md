@@ -139,6 +139,8 @@ To import from Gsheets, configure a Gsheets connection and use the custom
 1. Implement full `show` commands
 1. Implement dollar variables
 1. Unobtrusive table loading status supporting interrupts
+1. Implement "script UI" like notebooks
+
 
 
 

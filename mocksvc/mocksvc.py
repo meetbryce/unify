@@ -18,18 +18,25 @@ class MockSvc:
 
         mock.get("https://mocksvc.com/api/repos_27", text=rows27, request_headers=auth_header)
         mock.get("https://mocksvc.com/api/repos_100", text=rows100, request_headers=auth_header)
+        mock.get("https://mocksvc.com/api/repos_100?page=2", text="[]", request_headers=auth_header)
 
         records = json.loads(rows100)
 
         mock.get(f"https://mocksvc.com/api/repos_1100", text=rows100, request_headers=auth_header)
 
         for page in range(1, 12):
+            body = rows100
+            if page == 11:
+                body = rows27
             mock.get(f"https://mocksvc.com/api/repos_1100?page={page}&count=100", 
-                text=rows100, request_headers=auth_header)
+                text=body, request_headers=auth_header)
                     
         for page in range(1, 4):
-            mock.get(f"https://mocksvc.com/api/repos_81?page={page}&count=27", 
-                text=rows27, request_headers=auth_header)
+            body = rows27
+            if page == 3:
+                body = "[]"
+        mock.get(f"https://mocksvc.com/api/repos_81?page={page}&count=27", 
+                text=body, request_headers=auth_header)
 
 
     
