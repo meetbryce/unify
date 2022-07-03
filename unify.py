@@ -230,7 +230,7 @@ class TableLoader:
             return False
 
 class RunCommand(Visitor):
-    def __init__(self):
+    def __init__(self, wide_display=False):
         #super().__init__(multiline_commands=['select'], persistent_history_file='/tmp/hist')
         self.debug = True
         try:
@@ -241,31 +241,48 @@ class RunCommand(Visitor):
 
         self.session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
         self.parser = Lark(open("grammar.lark").read())
+        self.__output = sys.stdout
+
+        if wide_display:
+            pd.set_option('display.max_rows', 500)
+            pd.set_option('display.max_columns', 500)
+            pd.set_option('display.width', 1000)
 
         self.setup()
 
     def setup(self):
         self.loader = TableLoader(self.duck)
 
+    def _run_command(self, cmd, output_buffer=None, use_pager=True):
+        save_output = self.__output
+        try:
+            self._allow_pager = use_pager
+            if output_buffer:
+                self.__output = output_buffer
+            self._cmd = cmd
+            try:
+                parse_tree = self.parser.parse(self._cmd)
+                #print(parse_tree.pretty())
+                self.visit(parse_tree)
+            except Exception as e:
+                traceback.print_exc(file=self.__output)
+        finally:
+            self.__output = save_output
+
     def loop(self):
         suggester = AutoSuggestFromHistory()
         try:
             while True:
-                self._cmd = self.session.prompt("> ", auto_suggest=suggester)
-                try:
-                    parse_tree = self.parser.parse(self._cmd)
-                    #print(parse_tree.pretty())
-                    self.visit(parse_tree)
-                except Exception as e:
-                    traceback.print_exc()
+                cmd = self.session.prompt("> ", auto_suggest=suggester)
+                self._run_command(cmd)
         except EOFError:
             sys.exit(0)
 
     def show_tables(self, tree):
         # FIXME: merge tables known to Duck but not us
-        print("tables\n----------")
+        print("tables\n----------", file=self.__output)
         for table in sorted(self.loader.tables.keys()):
-            print(table)
+            print(table, file=self.__output)
         return
 
     def show_schemas(self, tree):
@@ -289,7 +306,7 @@ class RunCommand(Visitor):
 
         except RuntimeError as e:
             if fail_if_missing:
-                print(e)
+                print(e, file=self.__output)
                 return
             m = re.search("Table with name (\S+) does not exist", str(e))
             if m:
@@ -301,18 +318,18 @@ class RunCommand(Visitor):
                     if self.loader.materialize_table(table):
                         return self.select_query(self._cmd, fail_if_missing=True)
                     else:
-                        print("Loading table...")
+                        print("Loading table...", file=self.__output)
                 else:
-                    print(e)
+                    print(e, file=self.__output)
             else:
-                print(e)
+                print(e, file=self.__output)
 
     def clear(self, tree):
         schema = tree.children[0].children[0].value
         _table = tree.children[0].children[1].value
         table = schema + "." + _table
         self.loader.truncate_table(table)
-        print("Table cleared: ", table)
+        print("Table cleared: ", table, file=self.__output)
 
     def _execute_duck(self, query):
         r = self.duck.execute(query)
@@ -322,15 +339,12 @@ class RunCommand(Visitor):
                 "index": False,
                 "max_rows" : None,
                 "min_rows" : 10,
-                "max_cols": 0,
-                "max_colwidth": 50,
-                "show_dimensions": 'truncate',
-                "line_width": 80                
+                "max_colwidth": 50
             }
-            if df.shape[0] > 40:
+            if df.shape[0] > 40 and self._allow_pager:
                 pydoc.pager(df.to_string(**fmt_opts))
             else:
-                print(df.to_string(**fmt_opts))
+                print(df.to_string(**fmt_opts), file=self.__output)
 
     def do_set(self, args):
         self._execute_duck("set " + args)

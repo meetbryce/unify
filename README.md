@@ -141,6 +141,13 @@ To import from Gsheets, configure a Gsheets connection and use the custom
 1. Unobtrusive table loading status supporting interrupts
 1. Implement "script UI" like notebooks
 
+### GUI
 
+Instead of creating a custom GUI, we can instead implement a custom Jupyter notebook kernel.
+This will allow a user to create a "Unify" notebook in the Jupyter web client and add code
+and comments to it.
+
+This article shows how to build a basic kernel: 
+https://ipython-books.github.io/16-creating-a-simple-kernel-for-jupyter/
 
 

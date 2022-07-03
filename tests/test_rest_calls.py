@@ -51,7 +51,7 @@ def test_mocksvc_requests_mock():
             params = {"page":page, "count":100}
             resp = requests.get("https://mocksvc.com/api/repos_1100", auth=auth, params=params)
             assert resp.status_code == 200
-            assert len(resp.json()) == 100
+            assert len(resp.json()) == (100 if page < 11 else 27)
 
 def test_calling_rest_api(connection):
     with requests_mock.Mocker() as mock:
