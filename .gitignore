@@ -8,3 +8,4 @@ keystore.pem
 node_modules
 data/
 .env
+.ipynb_checkpoints

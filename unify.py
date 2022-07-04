@@ -28,6 +28,7 @@ from timeit import default_timer as timer
 import duckdb
 
 from rest_schema import RESTCol, RESTTable, RESTAPISpec, Connector
+from schemata import Queries
 
 # Pandas setup
 #pd.set_option('display.max_columns', None)
@@ -239,7 +240,6 @@ class RunCommand(Visitor):
             self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=True)
             print("Database locked. Opening for read-only.")
 
-        self.session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
         self.parser = Lark(open("grammar.lark").read())
         self.__output = sys.stdout
 
@@ -253,6 +253,9 @@ class RunCommand(Visitor):
     def setup(self):
         self.loader = TableLoader(self.duck)
 
+    def _list_schemas(self):
+        return sorted(list(r[0] for r in self.duck.execute(Queries.list_schemas).fetchall()))
+
     def _run_command(self, cmd, output_buffer=None, use_pager=True):
         save_output = self.__output
         try:
@@ -260,33 +263,76 @@ class RunCommand(Visitor):
             if output_buffer:
                 self.__output = output_buffer
             self._cmd = cmd
-            try:
-                parse_tree = self.parser.parse(self._cmd)
-                #print(parse_tree.pretty())
-                self.visit(parse_tree)
-            except Exception as e:
-                traceback.print_exc(file=self.__output)
+            parse_tree = self.parser.parse(self._cmd)
+            #print(parse_tree.pretty())
+            self.visit(parse_tree)
         finally:
             self.__output = save_output
 
     def loop(self):
+        session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
         suggester = AutoSuggestFromHistory()
         try:
             while True:
-                cmd = self.session.prompt("> ", auto_suggest=suggester)
-                self._run_command(cmd)
+                try:
+                    cmd = session.prompt("> ", auto_suggest=suggester)
+                    self._run_command(cmd)
+                except Exception as e:
+                    if isinstance(e, EOFError):
+                        raise
+                    traceback.print_exc(file=self.__output)
         except EOFError:
             sys.exit(0)
 
     def show_tables(self, tree):
-        # FIXME: merge tables known to Duck but not us
+        # FIXME: merge tables known us but not yet to Duck
+        #    for table in sorted(self.loader.tables.keys()):
+        #        print(table, file=self.__output)
+        node = self.find_node("schema_ref", tree)
         print("tables\n----------", file=self.__output)
-        for table in sorted(self.loader.tables.keys()):
-            print(table, file=self.__output)
-        return
+        query = Queries.list_tables
+        if node:
+            schema = node.children[0].value
+            query += Queries.list_tables_filter.format(schema)
+
+        self._execute_duck(query)
+        return tree
 
     def show_schemas(self, tree):
-        self._execute_duck("select schema_name from information_schema.schemata")
+        self._execute_duck(Queries.list_schemas)
+        return tree
+
+    def find_node(self, rule, tree):
+        if getattr(getattr(tree, 'data', {}), 'value', None) == rule:
+            return tree
+        for node in getattr(tree, 'children', []):
+            if getattr(getattr(node, 'data', {}), 'value', None) == rule:
+                return node
+            else:
+                res = self.find_node(rule, node)
+                if res:
+                    return res
+        return None
+
+    def find_qualified_table_ref(self, tree):
+        table = None
+        sch_ref = self.find_node("table_schema_ref", tree)
+        if sch_ref:
+            schema = sch_ref.children[0].value
+            table = sch_ref.children[1].value
+            table = schema + "." + table
+        else:
+            table_ref = self.find_node("table_ref", tree)
+            if table_ref:
+                table = table_ref.children[0].value
+        return table
+
+    def show_columns(self, tree):
+        table = self.find_qualified_table_ref(tree)
+        if table:
+            self._execute_duck(f"describe {table}")
+        else:
+            self._execute_duck("describe")
         return tree
 
     def describe(self, tree):
