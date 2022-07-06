@@ -36,6 +36,8 @@ class Connector:
             connections = yaml.load(open(path), Loader=yaml.FullLoader)
         return [Connector(spec_table, opts) for opts in connections]
 
+    def list_tables(self):
+        return self.spec.list_tables()
 
 class RESTCol:
     def __init__(self, dictvals):
@@ -343,21 +345,33 @@ class RESTAPISpec(Connector):
         return f"RESTAPISpect({self.name}) ->\n" + \
             ", ".join(map(lambda t: str(t), self.tables)) + "\n"
 
-    def resolve_auth(self, connection_name, opts):
-        # opts will be a dictionary of either env var references starting with '$'
-        # or else actual values
-        for key, var_name in self.auth.items():
-            if key == 'type':
-                continue
-            if var_name in opts:
-                value = opts[var_name]
-                if value.startswith("$"):
-                    try:
-                        value = os.environ[value[1:]]
-                    except KeyError:
-                        print(f"Authentication for {connection_name} failed, missing env var '{value[1:]}'")
-                        sys.exit(1)
-                self.auth[key] = value 
+    def resolve_auth(self, connection_name, connection_opts):
+        # The REST spec has an auth clause (self.auth) that can refer to "Connection options". 
+        # The Connection options can refer to environment variables or hold direct values.
+        # We need to:
+        # 1. Resolve the env var references in the Connection options
+        # 2. Copy the connection options into the REST API spec's auth clause
+
+        for k, value in connection_opts.items():
+            if value.startswith("$"):
+                try:
+                    value = os.environ[value[1:]]
+                    connection_opts[k] = value
+                except KeyError:
+                    print(f"Authentication for {connection_name} failed, missing env var '{value[1:]}'")
+                    sys.exit(1)
+        def resolve_auth_values(auth_tree, conn_opts):
+            for key, value in auth_tree.items():
+                if key == 'type':
+                    continue
+                elif isinstance(value, dict):
+                    resolve_auth_values(value, conn_opts)
+                else:
+                    if value in conn_opts:
+                        auth_tree[key] = conn_opts[value]
+                    else:
+                        print(f"Error: auth key {key} missing value in connection options")
+        resolve_auth_values(self.auth, connection_opts)
 
     def _setup_request_auth(self, session):
         user = ''
@@ -366,8 +380,7 @@ class RESTAPISpec(Connector):
         authType = self.auth['type']
 
         if authType in ['HEADERS', 'PARAMS']:
-            entries = self.auth[authType.lower()]
-            dynValues = {k: os.environ.get(v, v) for k, v in entries.items()}
+            dynValues = self.auth[authType.lower()]
 
         if authType == 'BASIC':
             user = self.auth['uservar']

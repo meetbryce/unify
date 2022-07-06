@@ -23,14 +23,13 @@ The parser uses the `lark` package. Find the grammer in [grammark.lark](grammar.
 Unify integrates with Jupyter as a "kernel", as implemented
 in the [unify_kernel](./unify_kernel) directory.
 
-The [kernel](./unify_kernel/kernel.py) file implements a class which supports execution of SQL script against the Unify
-database.
+The [kernel](./unify_kernel/kernel.py) file implements a class which supports execution of SQL script against the Unify database.
 
 Install Jupyter, and run `jupyter-lab` to open the web interface.
 
 To test with the Jupyter console:
 
-    jupyter console --kernel unify_kerne
+    jupyter console --kernel unify_kernel
 
 ### Autocomplete
 

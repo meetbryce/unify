@@ -4,6 +4,9 @@ command: show_tables
          | show_schemas
          | show_columns
          | select_query
+         | create_statement
+         | insert_statement
+         | delete_statement
          | describe
          | clear
 
@@ -11,11 +14,17 @@ show_tables: "show tables" (WS FROM WS? schema_ref?)?
 
 show_schemas: "show schemas"
 
-show_columns: "show columns" (WS FROM WS (table_ref | table_schema_ref))?
+show_columns: "show columns" (WS FROM WS? (table_ref | table_schema_ref)?)?
 
 select_query: "select" ANY
 
 describe: "describe" (table_ref | table_schema_ref)?
+
+create_statement: "create" ANY
+
+insert_statement: "insert" ANY
+
+delete_statement: "delete" ANY
 
 clear: "clear" table_schema_ref
 
@@ -24,7 +33,7 @@ col_list: col_ref WS? ("," WS? col_ref)*
 col_ref: WORD | "*"
 
 table_ref: WORD
-table_schema_ref: WORD "." WORD
+table_schema_ref: WORD "." WORD?
 schema_ref: WORD
 
 TABLE: WORD

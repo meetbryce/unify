@@ -132,11 +132,12 @@ To import from Gsheets, configure a Gsheets connection and use the custom
 
 ## TODO
 
-1. Implement unit tests
+1. [done] Implement unit tests
 1. Implement table refresh, with support for strategies
 1. Implement GSheets adapter
-1. Implement Lark parser for more complex syntax support
-1. Implement full `show` commands
+1. Implement AWS Cost Reporting connection
+1. [done] Implement Lark parser for more complex syntax support
+1. [done] Implement full `show` commands
 1. Implement dollar variables
 1. Unobtrusive table loading status supporting interrupts
 1. Implement "script UI" like notebooks

@@ -1,0 +1,12 @@
+enabled: true
+name: papertrail
+base_url: https://papertrailapp.com/api/v1
+auth:
+  type: HEADERS
+  headers:
+    X-Papertrail-Token: PAPERTRAIL_TOKEN
+tables:
+  - name: systems
+    resource_path: /systems.json
+  - name: account_usage
+    resource_path: /accounts.json

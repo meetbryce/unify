@@ -1,6 +1,10 @@
 # Defines the set of Connections to cloud systems to expose as database
 # schemas in Unify.
 ---
+- papertrail:
+    spec: papertrail
+    options:
+      PAPERTRAIL_TOKEN: $PAPERTRAIL_TOKEN
 - github:
     spec: github
     options:

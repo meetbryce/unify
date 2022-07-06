@@ -22,6 +22,15 @@ class TestVisitor(Visitor):
     def select_query(self, tree):
         self.visited.append('select_query')
     
+    def create_statement(self, tree):
+        self.visited.append('create_statement')
+
+    def delete_statement(self, tree):
+        self.visited.append('delete_statement')
+
+    def insert_statement(self, tree):
+        self.visited.append('insert_statement')
+
 @pytest.fixture
 def visitor():
     return TestVisitor()
@@ -37,13 +46,14 @@ def test_parser(visitor, parser):
         visitor.visit(ast)
         assert visitor.visited == [rule]
 
+    verify_parse("show_columns", query="show columns from sch1.table1")
     verify_parse("show_tables", query="show tables")
     verify_parse("show_tables", query="show tables from github")
     verify_parse("show_tables", query="show tables  from github_data")
     verify_parse("show_schemas", query="show schemas")
     verify_parse("show_columns", query="show columns")
+    verify_parse("show_columns", query="show columns from")
     verify_parse("show_columns", query="show columns from table1")
-    verify_parse("show_columns", query="show columns from sch1.table1")
 
     verify_parse("select_query", query="select * from table")
     verify_parse("describe", query="describe github")
@@ -52,6 +62,10 @@ def test_parser(visitor, parser):
     # newlines in select are ok
     verify_parse("select_query", query="select * \nfrom table")
     verify_parse("select_query", query="select * \nfrom table\nlimit 10")
+
+    verify_parse("create_statement", query="create table foo1 (id INT)")
+    verify_parse("insert_statement", query="insert into foo1 (id) values (5)")
+    verify_parse("delete_statement", query="delete from foo1 where id = 5")
 
 def test_autocomplete_parser(visitor, parser):
     # Test parser snippets use for auto-completion

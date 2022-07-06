@@ -16,4 +16,13 @@ def test_autocomplete(kernel):
 
     check_query("show ", ["tables", "schemas", "columns from "])
     check_query("show tables from ", unify._list_schemas())
+    check_query("show tables from ", unify._list_schemas())
+    check_query("show tables from in", unify._list_schemas("in"))
+    check_query("show columns from ", unify._list_schemas())
+    sch1 = unify._list_schemas()[0]
+    check_query(f"show columns from {sch1}.", unify._list_tables_filtered(sch1, ""))
+    table1 = unify._list_tables_filtered(sch1, "")[0][0:3]
+    check_query(f"show columns from {sch1}.{table1}", unify._list_tables_filtered(sch1, table1))
+
+
 

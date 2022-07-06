@@ -29,6 +29,7 @@ import duckdb
 
 from rest_schema import RESTCol, RESTTable, RESTAPISpec, Connector
 from schemata import Queries
+from parsing_utils import find_node_return_children
 
 # Pandas setup
 #pd.set_option('display.max_columns', None)
@@ -197,7 +198,6 @@ class TableLoader:
                 tmgr = TableMgr(conn.schema_name, conn.spec, t)
                 self.tables[tmgr.name] = tmgr
 
-
     def materialize_table(self, table):
         tmgr = self.tables[table]
         tmgr.load_table(self.duck, tableLoader=self)
@@ -219,6 +219,8 @@ class TableLoader:
         else:
             raise RuntimeError(f"Could not get rows for table {table}")
 
+    def lookup_connection(self, name):
+        return next(c for c in self.connections if c.schema_name == name)
 
     def truncate_table(self, table):
         self.tables[table].truncate(self.duck)
@@ -253,8 +255,16 @@ class RunCommand(Visitor):
     def setup(self):
         self.loader = TableLoader(self.duck)
 
-    def _list_schemas(self):
-        return sorted(list(r[0] for r in self.duck.execute(Queries.list_schemas).fetchall()))
+    def _list_schemas(self, match_prefix=None):
+        all = sorted(list(r[0] for r in self.duck.execute(Queries.list_schemas).fetchall()))
+        if match_prefix:
+            all = [s[len(match_prefix):] for s in all if s.startswith(match_prefix)]
+        return all
+    
+    def _list_tables_filtered(self, schema, table=None):
+        conn = self.loader.lookup_connection(schema)
+        table = table or ''
+        return sorted(list(t.name[len(table):] for t in conn.list_tables() if t.name.startswith(table)))
 
     def _run_command(self, cmd, output_buffer=None, use_pager=True):
         save_output = self.__output
@@ -288,43 +298,31 @@ class RunCommand(Visitor):
         # FIXME: merge tables known us but not yet to Duck
         #    for table in sorted(self.loader.tables.keys()):
         #        print(table, file=self.__output)
-        node = self.find_node("schema_ref", tree)
+        schema_ref = find_node_return_children("schema_ref", tree)
         print("tables\n----------", file=self.__output)
-        query = Queries.list_tables
-        if node:
-            schema = node.children[0].value
-            query += Queries.list_tables_filter.format(schema)
+        if schema_ref:
+            query = Queries.list_tables_filtered.format(schema_ref[0])
+        else:
+            query = Queries.list_tables
 
-        self._execute_duck(query)
+        self._execute_duck(query, header=False)
         return tree
 
     def show_schemas(self, tree):
         self._execute_duck(Queries.list_schemas)
         return tree
 
-    def find_node(self, rule, tree):
-        if getattr(getattr(tree, 'data', {}), 'value', None) == rule:
-            return tree
-        for node in getattr(tree, 'children', []):
-            if getattr(getattr(node, 'data', {}), 'value', None) == rule:
-                return node
-            else:
-                res = self.find_node(rule, node)
-                if res:
-                    return res
-        return None
-
     def find_qualified_table_ref(self, tree):
         table = None
-        sch_ref = self.find_node("table_schema_ref", tree)
+        sch_ref = find_node_return_children("table_schema_ref", tree)
         if sch_ref:
-            schema = sch_ref.children[0].value
-            table = sch_ref.children[1].value
+            schema = sch_ref[0]
+            table = sch_ref[1]
             table = schema + "." + table
         else:
-            table_ref = self.find_node("table_ref", tree)
+            table_ref = find_node_return_children("table_ref", tree)
             if table_ref:
-                table = table_ref.children[0].value
+                table = table_ref[0]
         return table
 
     def show_columns(self, tree):
@@ -345,7 +343,19 @@ class RunCommand(Visitor):
             schema = tree.children[0].children[0].value
             table = tree.children[0].children[1].value
             self._execute_duck(f"describe {schema}.{table}")
-        
+
+    def create_statement(self, tree=None):
+        self._execute_duck(self._cmd)
+        return tree
+
+    def insert_statement(self, tree=None):
+        self._execute_duck(self._cmd)
+        return tree
+
+    def delete_statement(self, tree=None):
+        self._execute_duck(self._cmd)
+        return tree
+
     def select_query(self, tree=None, fail_if_missing=False):
         try:
             self._execute_duck(self._cmd)
@@ -377,7 +387,7 @@ class RunCommand(Visitor):
         self.loader.truncate_table(table)
         print("Table cleared: ", table, file=self.__output)
 
-    def _execute_duck(self, query):
+    def _execute_duck(self, query, header=True):
         r = self.duck.execute(query)
         with pd.option_context('display.max_rows', None):
             df = r.df()
@@ -385,7 +395,8 @@ class RunCommand(Visitor):
                 "index": False,
                 "max_rows" : None,
                 "min_rows" : 10,
-                "max_colwidth": 50
+                "max_colwidth": 50,
+                "header": header
             }
             if df.shape[0] > 40 and self._allow_pager:
                 pydoc.pager(df.to_string(**fmt_opts))
