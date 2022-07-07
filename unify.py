@@ -233,14 +233,16 @@ class TableLoader:
             return False
 
 class RunCommand(Visitor):
-    def __init__(self, wide_display=False):
+    _last_result: pd.DataFrame = None
+
+    def __init__(self, wide_display=False, read_only=False):
         #super().__init__(multiline_commands=['select'], persistent_history_file='/tmp/hist')
         self.debug = True
         try:
-            self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"))
+            self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=read_only)
         except RuntimeError:
-            self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=True)
-            print("Database locked. Opening for read-only.")
+            print("Database is locked. Is there a write process running?")
+            sys.exit(1)
 
         self.parser = Lark(open("grammar.lark").read())
         self.__output = sys.stdout
@@ -391,6 +393,7 @@ class RunCommand(Visitor):
         r = self.duck.execute(query)
         with pd.option_context('display.max_rows', None):
             df = r.df()
+            self._last_result = df
             fmt_opts = {
                 "index": False,
                 "max_rows" : None,
@@ -419,5 +422,5 @@ class RunCommand(Visitor):
         self._execute_duck("delete " + args)
         
 if __name__ == '__main__':
-    RunCommand().loop()    
+    RunCommand(read_only=True).loop()    
 

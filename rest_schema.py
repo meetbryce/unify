@@ -23,6 +23,8 @@ class Connector:
         spec_table = {}
         for f in glob.glob(f"./rest_specs/*spec.yaml"):
             spec = yaml.load(open(f), Loader=yaml.FullLoader)
+            if spec.get('enabled') == False:
+                continue
             klass = RESTAPISpec
             if 'class' in spec and spec['class'].lower() == 'gsheetsconnector':
                 from gsheets.gsheets_connector import GSheetsConnector

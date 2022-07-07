@@ -2,10 +2,12 @@ import os
 import lark
 from lark.visitors import Visitor
 import pytest
+from parsing_utils import find_node_return_children
 
 class TestVisitor(Visitor):
     def clear(self):
         self.visited = []
+        self.grammar_parts = {}
 
     def show_tables(self, tree):
         self.visited.append('show_tables')
@@ -30,6 +32,15 @@ class TestVisitor(Visitor):
 
     def insert_statement(self, tree):
         self.visited.append('insert_statement')
+
+    def create_chart(self, tree):
+        self.visited.append('create_chart')
+        print(tree)
+        self.grammar_parts['chart_name'] = find_node_return_children('chart_name', tree)
+        self.grammar_parts['chart_type'] = find_node_return_children('chart_type', tree)
+        self.grammar_parts['chart_source'] = find_node_return_children('chart_source', tree)
+        self.grammar_parts['chart_where'] = find_node_return_children('create_chart_where', tree)
+
 
 @pytest.fixture
 def visitor():
@@ -66,6 +77,13 @@ def test_parser(visitor, parser):
     verify_parse("create_statement", query="create table foo1 (id INT)")
     verify_parse("insert_statement", query="insert into foo1 (id) values (5)")
     verify_parse("delete_statement", query="delete from foo1 where id = 5")
+
+    # create chart
+    verify_parse("create_chart", query="create chart as bar_chart where x = col1 and y = col2")
+    verify_parse("create_chart", 
+        query="create chart chr1 from github.users as pie_chart where " +
+                "x = col1 and y = col2 and x_axis_label = green")
+    print(visitor.grammar_parts)
 
 def test_autocomplete_parser(visitor, parser):
     # Test parser snippets use for auto-completion
