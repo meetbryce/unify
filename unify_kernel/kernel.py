@@ -1,16 +1,10 @@
-import base64
 import io
-import sys
 import traceback
-import urllib
-import pandas as pd
 
 from ipykernel.kernelbase import Kernel
 from unify import RunCommand
 from lark.visitors import Visitor
 from parsing_utils import find_node_return_children
-
-import matplotlib.pyplot as plt
 
 
 class AutocompleteParser(Visitor):
@@ -50,19 +44,6 @@ class AutocompleteParser(Visitor):
     def select_query(self, tree):
         self.visited.append('select_query')
 
-def _to_png(df: pd.DataFrame, title):
-    """Return a base64-encoded PNG from a
-    matplotlib figure."""
-    plt.rcParams["figure.figsize"]=20,20
-    plt.rcParams['figure.dpi'] = 72 
-    plt.barh(df["user_login"], df["count"])
-    plt.title(title)
-    imgdata = io.BytesIO()
-    plt.savefig(imgdata, format='png')
-    imgdata.seek(0)
-    return urllib.parse.quote(
-        base64.b64encode(imgdata.getvalue()))
-
 class UnifyKernel(Kernel):
     implementation = 'Unify'
     implementation_version = '1.0'
@@ -91,30 +72,25 @@ class UnifyKernel(Kernel):
         try:
             if code == 'chart':
                 png = _to_png(self.unify_runner._last_result, self.unify_runner._cmd)
-                content = {
-                    'source': 'kernel',
-
-                    # This dictionary may contain
-                    # different MIME representations of
-                    # the output.
-                    'data': {
-                        'image/png': png
-                    },
-
-                    # We can specify the image size
-                    # in the metadata field.
-                    'metadata' : {}
-                }
-
-                # We send the display_data message with
-                # the contents.
-                self.send_response(self.iopub_socket, 'display_data', content)
+                data = self.unify_runner
             else:
-                self.unify_runner._run_command(code, output_buffer=buffer, use_pager=False)
+                response = self.unify_runner._run_command(code, output_buffer=buffer, use_pager=False)
                 if not silent:
-                    buffer.seek(0)
-                    stream_content = {'name': 'stdout', 'text': buffer.read()}
-                    self.send_response(self.iopub_socket, 'stream', stream_content)
+                    if response["response_type"] == "stream":
+                        buffer.seek(0)
+                        stream_content = {'name': 'stdout', 'text': buffer.read()}
+                        self.send_response(self.iopub_socket, 'stream', stream_content)
+                    elif response["response_type"] == "display_data":
+                        content = {
+                            'source': 'kernel',
+                            'data': { 'image/png': buffer.getvalue() },
+                            # We can specify the image size
+                            # in the metadata field.
+                            'metadata' : {}
+                        }
+                        # We send the display_data message with
+                        # the contents.
+                        self.send_response(self.iopub_socket, 'display_data', content)
 
             return {'status': 'ok',
                     # The base class increments the execution count

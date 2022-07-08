@@ -1,25 +1,23 @@
+import base64
+from email.parser import Parser
+from inspect import isfunction
+import io
 import os
-import time
 from threading import Thread
-import cmd2
-import glob
 import pydoc
 import re
 import sys
 import traceback
-import yaml
 from lark import Lark, Visitor
 from lark.visitors import v_args
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+import matplotlib.pyplot as plt
+import urllib
+from typing import Dict
 
-import requests
-from requests.auth import HTTPBasicAuth
 import pandas as pd
-# These imports are required to unified schemas across parquest files
-import pyarrow.dataset as ds
-import pyarrow.parquet as pq
 import pyarrow as pa
 
 from timeit import default_timer as timer
@@ -27,9 +25,9 @@ from timeit import default_timer as timer
 # DuckDB
 import duckdb
 
-from rest_schema import RESTCol, RESTTable, RESTAPISpec, Connector
+from rest_schema import Connector
 from schemata import Queries
-from parsing_utils import find_node_return_children
+from parsing_utils import find_subtree, find_node_return_child, find_node_return_children
 
 # Pandas setup
 #pd.set_option('display.max_columns', None)
@@ -232,7 +230,101 @@ class TableLoader:
         except:
             return False
 
-class RunCommand(Visitor):
+class ParserVisitor(Visitor):
+    """ Utility class for visiting our parse tree and assembling the relevant parts
+        for the parsed command. Also works on incomplete results so can be used
+        for autocompletion in the Jupyter kernel.
+    """
+    MATPLOT_CHART_MAP: Dict[str, str] = {
+        'bar_chart': 'bar',
+        'pie_chart': 'pie',
+        'line_chart': 'line',
+        'area_chart': 'area',
+        'hbar_chart': 'barh'
+    }
+
+    def perform_new_visit(self, parse_tree):
+        self._the_command = None
+        self._the_command_args = {}
+        self.visit(parse_tree)
+        return self._the_command
+
+    def show_tables(self, tree):
+        self._the_command = 'show_tables'
+        self._the_command_args['schema_ref'] = find_node_return_child("schema_ref", tree)
+        return tree
+
+    def show_schemas(self, tree):
+        self._the_command = 'show_schemas'
+        return tree
+
+    def show_columns(self, tree):
+        """" Always returns 'table_ref' either qualified or unqualified by the schema name."""
+        self._the_command = 'show_columns'
+        table = find_node_return_children("table_schema_ref", tree)
+        if table:
+            table = ".".join(table)
+        else:
+            table = find_node_return_child("table_ref", tree)
+        self._the_command_args['table_ref'] = table
+        return tree
+
+    def describe(self, tree):
+        self._the_command = 'describe'
+        if len(tree.children) == 0:
+            self._the_command_args['table_ref'] = None
+        elif tree.children[0].data.value == 'table_ref':
+            table = tree.children[0].children[0].value
+            self._the_command_args['table_ref'] = table
+        else:
+            schema = tree.children[0].children[0].value
+            table = tree.children[0].children[1].value
+            self._the_command_args['table_ref'] = f"{schema}.{table}"
+        return tree
+
+    def select_query(self, tree):
+        self._the_command = 'select_query'
+    
+    def create_statement(self, tree):
+        self._the_command = 'create_statement'
+
+    def delete_statement(self, tree):
+        self._the_command = 'delete_statement'
+
+    def insert_statement(self, tree):
+        self._the_command = 'insert_statement'
+
+    def clear_table(self, tree):
+        self._the_command = 'clear_table'
+        self._the_command_args['table_schema_ref'] = find_node_return_children("table_schema_ref", tree)
+        if self._the_command_args['table_schema_ref']:
+            self._the_command_args['table_schema_ref'] = ".".join(self._the_command_args['table_schema_ref'])
+        return tree
+
+    def create_chart(self, tree):
+        self._the_command = 'create_chart'
+        self._the_command_args['chart_name'] = find_node_return_child('chart_name', tree)
+        self._the_command_args['chart_type'] = find_node_return_child('chart_type', tree)
+        self._the_command_args['chart_source'] = \
+            find_node_return_children(['chart_source', 'table_schema_ref'], tree)
+        self._the_command_args['chart_where'] = find_subtree('create_chart_where', tree)
+        # collect chart params
+        key = value = None
+        params = {}
+        for child in self._the_command_args['chart_where'].children:
+            print(child)
+            key = key or find_node_return_child("chart_param", child)
+            value = value or find_node_return_child("param_value", child)
+            if value and value[0] == '"':
+                value = value[1:-1]
+            if value and value[-1] == '"':
+                value = value[:-1]
+            if key and value:
+                params[key] = value
+                key = value = None
+        self._the_command_args['chart_params'] = params
+
+class RunCommand:
     _last_result: pd.DataFrame = None
 
     def __init__(self, wide_display=False, read_only=False):
@@ -246,6 +338,7 @@ class RunCommand(Visitor):
 
         self.parser = Lark(open("grammar.lark").read())
         self.__output = sys.stdout
+        self.parser_visitor = ParserVisitor()
 
         if wide_display:
             pd.set_option('display.max_rows', 500)
@@ -276,8 +369,13 @@ class RunCommand(Visitor):
                 self.__output = output_buffer
             self._cmd = cmd
             parse_tree = self.parser.parse(self._cmd)
-            #print(parse_tree.pretty())
-            self.visit(parse_tree)
+            command = self.parser_visitor.perform_new_visit(parse_tree)
+            if command:
+                result = getattr(self, command)(**self.parser_visitor._the_command_args)
+                if result:
+                    return result
+                else:
+                    return {"response_type": "stream"}
         finally:
             self.__output = save_output
 
@@ -289,6 +387,8 @@ class RunCommand(Visitor):
                 try:
                     cmd = session.prompt("> ", auto_suggest=suggester)
                     self._run_command(cmd)
+                except RuntimeError as e:
+                    print(e)
                 except Exception as e:
                     if isinstance(e, EOFError):
                         raise
@@ -296,69 +396,63 @@ class RunCommand(Visitor):
         except EOFError:
             sys.exit(0)
 
-    def show_tables(self, tree):
+    def _execute_duck(self, query, header=True):
+        r = self.duck.execute(query)
+        with pd.option_context('display.max_rows', None):
+            df = r.df()
+            self._last_result = df
+            fmt_opts = {
+                "index": False,
+                "max_rows" : None,
+                "min_rows" : 10,
+                "max_colwidth": 50,
+                "header": header
+            }
+            if df.shape[0] > 40 and self._allow_pager:
+                pydoc.pager(df.to_string(**fmt_opts))
+            else:
+                print(df.to_string(**fmt_opts), file=self.__output)
+
+    ################
+    ## Commands 
+    ################
+    def show_schemas(self):
+        self._execute_duck(Queries.list_schemas)
+
+    def show_tables(self, schema_ref=None):
         # FIXME: merge tables known us but not yet to Duck
         #    for table in sorted(self.loader.tables.keys()):
         #        print(table, file=self.__output)
-        schema_ref = find_node_return_children("schema_ref", tree)
-        print("tables\n----------", file=self.__output)
+        print("tables\n--------------", file=self.__output)
         if schema_ref:
-            query = Queries.list_tables_filtered.format(schema_ref[0])
+            query = Queries.list_tables_filtered.format(schema_ref)
         else:
             query = Queries.list_tables
 
         self._execute_duck(query, header=False)
-        return tree
 
-    def show_schemas(self, tree):
-        self._execute_duck(Queries.list_schemas)
-        return tree
-
-    def find_qualified_table_ref(self, tree):
-        table = None
-        sch_ref = find_node_return_children("table_schema_ref", tree)
-        if sch_ref:
-            schema = sch_ref[0]
-            table = sch_ref[1]
-            table = schema + "." + table
-        else:
-            table_ref = find_node_return_children("table_ref", tree)
-            if table_ref:
-                table = table_ref[0]
-        return table
-
-    def show_columns(self, tree):
-        table = self.find_qualified_table_ref(tree)
-        if table:
-            self._execute_duck(f"describe {table}")
+    def show_columns(self, table_ref):
+        if table_ref:
+            self._execute_duck(f"describe {table_ref}")
         else:
             self._execute_duck("describe")
-        return tree
 
-    def describe(self, tree):
-        if len(tree.children) == 0:
+    def describe(self, table_ref):
+        if table_ref is None:
             self._execute_duck("describe")
-        elif tree.children[0].data.value == 'table_ref':
-            table = tree.children[0].children[0].value
-            self._execute_duck(f"describe {table}")
         else:
-            schema = tree.children[0].children[0].value
-            table = tree.children[0].children[1].value
-            self._execute_duck(f"describe {schema}.{table}")
+            self._execute_duck(f"describe {table_ref}")
 
-    def create_statement(self, tree=None):
+    def create_statement(self):
         self._execute_duck(self._cmd)
-        return tree
 
-    def insert_statement(self, tree=None):
+    def insert_statement(self):
         self._execute_duck(self._cmd)
-        return tree
 
-    def delete_statement(self, tree=None):
+    def delete_statement(self):
         self._execute_duck(self._cmd)
-        return tree
 
-    def select_query(self, tree=None, fail_if_missing=False):
+    def select_query(self, fail_if_missing=False):
         try:
             self._execute_duck(self._cmd)
 
@@ -382,45 +476,41 @@ class RunCommand(Visitor):
             else:
                 print(e, file=self.__output)
 
-    def clear(self, tree):
-        schema = tree.children[0].children[0].value
-        _table = tree.children[0].children[1].value
-        table = schema + "." + _table
-        self.loader.truncate_table(table)
-        print("Table cleared: ", table, file=self.__output)
+    def clear_table(self, table_schema_ref=None):
+        self.loader.truncate_table(table_schema_ref)
+        print("Table cleared: ", table_schema_ref, file=self.__output)
 
-    def _execute_duck(self, query, header=True):
-        r = self.duck.execute(query)
-        with pd.option_context('display.max_rows', None):
-            df = r.df()
-            self._last_result = df
-            fmt_opts = {
-                "index": False,
-                "max_rows" : None,
-                "min_rows" : 10,
-                "max_colwidth": 50,
-                "header": header
-            }
-            if df.shape[0] > 40 and self._allow_pager:
-                pydoc.pager(df.to_string(**fmt_opts))
-            else:
-                print(df.to_string(**fmt_opts), file=self.__output)
+    def create_chart(
+        self, 
+        chart_name=None, 
+        chart_type=None, 
+        chart_source=None, 
+        chart_where=None,
+        chart_params={}):
+        # FIXME: observe chart_source
+        if "x" not in chart_params:
+            raise RuntimeError("Missing 'x' column parameter for chart X axis")
+        if "y" not in chart_params:
+            raise RuntimeError("Missing 'y' column parameter for chart X axis")
+        df = self._last_result
+        if df is None:
+            raise RuntimeError("No query result available")
+        plt.rcParams["figure.figsize"]=10,10
+        plt.rcParams['figure.dpi'] = 100 
+        if chart_type == "pie_chart":
+            df = df.set_index(chart_params["x"])
+        kind = ParserVisitor.MATPLOT_CHART_MAP[chart_type]
+        title = chart_params.get("title", "")
+        df.plot(x = chart_params["x"], y = chart_params["y"], kind=kind,
+                title=title)
+        imgdata = io.BytesIO()
+        plt.savefig(imgdata, format='png')
+        imgdata.seek(0)
+        self.__output.write(urllib.parse.quote(
+            base64.b64encode(imgdata.getvalue())))
+        return {"response_type": "display_data"}
 
-    def do_set(self, args):
-        self._execute_duck("set " + args)
-        
-    def do_create(self, args):
-        self._execute_duck("create " + args)
 
-    def do_drop(self, args):
-        self._execute_duck("drop " + args)
-
-    def do_pragma(self, args):
-        self._execute_duck("PRAGMA " + args)
-
-    def do_delete(self, args):
-        self._execute_duck("delete " + args)
-        
 if __name__ == '__main__':
     RunCommand(read_only=True).loop()    
 
