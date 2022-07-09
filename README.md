@@ -185,5 +185,10 @@ So:
     create chart chart2 as ...
     create chart combo as chart1, chart2
         
+## Developing
 
+Make sure to setup the environment with:
+
+    export $(cat .env)
+    
 

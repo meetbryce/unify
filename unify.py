@@ -29,29 +29,32 @@ from rest_schema import Connector
 from schemata import Queries
 from parsing_utils import find_subtree, find_node_return_child, find_node_return_children
 
-# Pandas setup
-#pd.set_option('display.max_columns', None)
-
-def ptime(label, f):
-    start=timer(); 
-    f() 
-    end=timer(); 
-    print(label, ": ", end-start)
-
 DATA_HOME = "./data"
 os.makedirs(DATA_HOME, exist_ok=True)
 
+class DuckContext:
+    """ A cheap hack around DuckDB only usable in a single process. We just open/close
+        each time to manage. Context manager for accessing the DuckDB database """
+    def __init__(self):
+        pass
+
+    def __enter__(self):
+        self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=False)
+        return self.duck
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.duck.close()
+        
 
 class TableScan(Thread):
     """
         Thread class for querying a REST API, by pages, and storing the results as 
         parquet files in the table's data directory.
     """
-    def __init__(self, tableMgr=None, tableLoader=None, duck=None, select: list = None):
+    def __init__(self, tableMgr=None, tableLoader=None, select: list = None):
         Thread.__init__(self)
         self.tableMgr = tableMgr
         self.tableLoader = tableLoader
-        self.duck = duck
         self.select = select
 
     def cleanup_df_page(self, df, cols_to_drop=[]):
@@ -87,19 +90,23 @@ class TableScan(Thread):
 
 
     def run(self):
+        with DuckContext() as duck:
+            self.perform_scan(duck)
+
+    def perform_scan(self, duck):
         print("Running table scan for: ", self.tableMgr.name)
 
         def flush_rows(tableMgr, df, page, flush_count):
             if page <= page_flush_count:
                 # First set of pages, so create the table
-                self.duck.register('df1', row_buffer_df)
-                self.duck.execute(f"create table {tableMgr.name} as select * from df1")
+                duck.register('df1', row_buffer_df)
+                duck.execute(f"create table {tableMgr.name} as select * from df1")
                 # FIXME: The following shouldn't be neccessary, but it seems like `Duck.append`
                 # does not work properly with qualified table names, so we hack around it
                 # by setting the search path
-                self.duck.execute(f"set search_path='{tableMgr.rest_spec.name}'")
+                duck.execute(f"set search_path='{tableMgr.rest_spec.name}'")
             else:
-                self.duck.append(tableMgr.table_spec.name, row_buffer_df)
+                duck.append(tableMgr.table_spec.name, row_buffer_df)
 
         page = 1
         page_flush_count = 5 # flush 5 REST calls worth of data to the db
@@ -162,9 +169,9 @@ class TableMgr:
         # Remove table from duck db
         duck.execute(f"drop table {self.name}")
 
-    def load_table(self, duck, waitForScan=False, tableLoader=None):
+    def load_table(self, waitForScan=False, tableLoader=None):
         # Spawn a thread to query the table source
-        self.scan = TableScan(self, tableLoader=tableLoader, duck=duck, select=self.table_spec.select_list)
+        self.scan = TableScan(self, tableLoader=tableLoader, select=self.table_spec.select_list)
         if self.synchronous_scanning:
             self.scan.run()
         else:
@@ -182,50 +189,55 @@ class TableLoader:
        3. Not loaded. Data exists on disk, needs to be loaded as a view into Duck.
        4. Table view loaded in Duck.
     """
-    def __init__(self, duck):
-        self.duck = duck
+    def __init__(self):
         self.connections = Connector.setup_connections('./connections.yaml')
         self.tables = {}
 
         # Connections defines the set of schemas we will create in the database.
         # For each connection/schema then we will define the tables as defined
         # in the REST spec for the target system.
-        for conn in self.connections:
-            self.duck.execute(f"create schema if not exists {conn.schema_name}")
-            for t in conn.spec.list_tables():
-                tmgr = TableMgr(conn.schema_name, conn.spec, t)
-                self.tables[tmgr.name] = tmgr
+        with DuckContext() as duck:
+            for conn in self.connections:
+                duck.execute(f"create schema if not exists {conn.schema_name}")
+                for t in conn.spec.list_tables():
+                    tmgr = TableMgr(conn.schema_name, conn.spec, t)
+                    self.tables[tmgr.name] = tmgr
 
     def materialize_table(self, table):
-        tmgr = self.tables[table]
-        tmgr.load_table(self.duck, tableLoader=self)
-        return tmgr.has_data()
+        with DuckContext() as duck:
+            tmgr = self.tables[table]
+            tmgr.load_table(duck, tableLoader=self)
+            return tmgr.has_data()
 
     def read_table_rows(self, table):
-        if not self.table_exists_in_db(table):
-            tmgr = self.tables[table]
-            tmgr.load_table(self.duck, tableLoader=self, waitForScan=True)
+        with DuckContext() as duck:
+            if not self.table_exists_in_db(table):
+                tmgr = self.tables[table]
+                tmgr.load_table(duck, tableLoader=self, waitForScan=True)
 
-        if self.table_exists_in_db(table):
-            r = self.duck.execute(f"select * from {table}")
-            while True:
-                df = r.fetch_df_chunk()
-                if df.size == 0 or df.shape == (1,1):
-                    break
-                else:
-                    yield df
-        else:
-            raise RuntimeError(f"Could not get rows for table {table}")
+            if self.table_exists_in_db(table):
+                r = duck.execute(f"select * from {table}")
+                while True:
+                    df = r.fetch_df_chunk()
+                    if df.size == 0 or df.shape == (1,1):
+                        break
+                    else:
+                        yield df
+            else:
+                raise RuntimeError(f"Could not get rows for table {table}")
 
     def lookup_connection(self, name):
         return next(c for c in self.connections if c.schema_name == name)
 
     def truncate_table(self, table):
-        self.tables[table].truncate(self.duck)
+        with DuckContext() as duck:
+            self.tables[table].truncate(duck)
 
     def table_exists_in_db(self, table):
         try:
-            self.duck.execute(f"select 1 from {table}")
+            # FIXME: memoize the results here
+            with DuckContext() as duck:
+                duck.execute(f"select 1 from {table}")
             return True
         except:
             return False
@@ -288,6 +300,9 @@ class ParserVisitor(Visitor):
     def create_statement(self, tree):
         self._the_command = 'create_statement'
 
+    def create_view_statement(self, tree):
+        self._the_command = 'create_view_statement'
+
     def delete_statement(self, tree):
         self._the_command = 'delete_statement'
 
@@ -328,10 +343,10 @@ class RunCommand:
     _last_result: pd.DataFrame = None
 
     def __init__(self, wide_display=False, read_only=False):
-        #super().__init__(multiline_commands=['select'], persistent_history_file='/tmp/hist')
         self.debug = True
         try:
-            self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=read_only)
+            #self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=read_only)
+            pass
         except RuntimeError:
             print("Database is locked. Is there a write process running?")
             sys.exit(1)
@@ -339,23 +354,20 @@ class RunCommand:
         self.parser = Lark(open("grammar.lark").read())
         self.__output = sys.stdout
         self.parser_visitor = ParserVisitor()
+        self.loader = TableLoader()
 
         if wide_display:
             pd.set_option('display.max_rows', 500)
             pd.set_option('display.max_columns', 500)
             pd.set_option('display.width', 1000)
 
-        self.setup()
-
-    def setup(self):
-        self.loader = TableLoader(self.duck)
-
     def _list_schemas(self, match_prefix=None):
-        all = sorted(list(r[0] for r in self.duck.execute(Queries.list_schemas).fetchall()))
-        if match_prefix:
-            all = [s[len(match_prefix):] for s in all if s.startswith(match_prefix)]
-        return all
-    
+        with DuckContext() as duck:
+            all = sorted(list(r[0] for r in duck.execute(Queries.list_schemas).fetchall()))
+            if match_prefix:
+                all = [s[len(match_prefix):] for s in all if s.startswith(match_prefix)]
+            return all
+        
     def _list_tables_filtered(self, schema, table=None):
         conn = self.loader.lookup_connection(schema)
         table = table or ''
@@ -364,20 +376,23 @@ class RunCommand:
     def _run_command(self, cmd, output_buffer=None, use_pager=True):
         save_output = self.__output
         try:
-            self._allow_pager = use_pager
-            if output_buffer:
-                self.__output = output_buffer
-            self._cmd = cmd
-            parse_tree = self.parser.parse(self._cmd)
-            command = self.parser_visitor.perform_new_visit(parse_tree)
-            if command:
-                result = getattr(self, command)(**self.parser_visitor._the_command_args)
-                if result:
-                    return result
-                else:
-                    return {"response_type": "stream"}
+            with DuckContext() as duck:
+                self.duck = duck
+                self._allow_pager = use_pager
+                if output_buffer:
+                    self.__output = output_buffer
+                self._cmd = cmd
+                parse_tree = self.parser.parse(self._cmd)
+                command = self.parser_visitor.perform_new_visit(parse_tree)
+                if command:
+                    result = getattr(self, command)(**self.parser_visitor._the_command_args)
+                    if result:
+                        return result
+                    else:
+                        return {"response_type": "stream"}
         finally:
             self.__output = save_output
+            self.duck = None
 
     def loop(self):
         session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
@@ -446,6 +461,9 @@ class RunCommand:
     def create_statement(self):
         self._execute_duck(self._cmd)
 
+    def create_view_statement(self):
+        self._execute_duck(self._cmd)
+
     def insert_statement(self):
         self._execute_duck(self._cmd)
 
@@ -490,8 +508,6 @@ class RunCommand:
         # FIXME: observe chart_source
         if "x" not in chart_params:
             raise RuntimeError("Missing 'x' column parameter for chart X axis")
-        if "y" not in chart_params:
-            raise RuntimeError("Missing 'y' column parameter for chart X axis")
         df = self._last_result
         if df is None:
             raise RuntimeError("No query result available")
@@ -501,8 +517,13 @@ class RunCommand:
             df = df.set_index(chart_params["x"])
         kind = ParserVisitor.MATPLOT_CHART_MAP[chart_type]
         title = chart_params.get("title", "")
-        df.plot(x = chart_params["x"], y = chart_params["y"], kind=kind,
-                title=title)
+
+        fig, ax = plt.subplots()
+
+        df.plot(x = chart_params["x"], y = chart_params.get("y"), kind=kind,
+                title=title, stacked=chart_params.get("stacked", False))
+        fig.autofmt_xdate()
+        
         imgdata = io.BytesIO()
         plt.savefig(imgdata, format='png')
         imgdata.seek(0)

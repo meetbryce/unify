@@ -5,6 +5,7 @@ command: show_tables
          | show_columns
          | select_query
          | create_statement
+         | create_view_statement
          | insert_statement
          | delete_statement
          | describe
@@ -23,13 +24,15 @@ describe: "describe" (table_ref | table_schema_ref)?
 
 create_statement: "create table" ANY
 
+create_view_statement: "create view" ANY
+
 insert_statement: "insert" ANY
 
 delete_statement: "delete" ANY
 
 clear_table: "clear table" WS table_schema_ref
 
-create_chart_where: "where" (WS chart_param WS "=" WS param_value) (WS "and" WS chart_param WS "=" WS param_value)*
+create_chart_where: "where" (WS chart_param WS? "=" WS? param_value) (WS "and" WS chart_param WS? "=" WS? param_value)*
 create_chart: "create chart" WS chart_name? WS? ("from" chart_source)? "as" chart_type WS create_chart_where
 
 chart_name: WORD
@@ -37,10 +40,13 @@ chart_param: X_PARAM
              | Y_PARAM
              | TITLE_PARAM
              | X_AXIS_LABEL
+             | STACKED_PARAM
+             
 X_PARAM: "x"
 Y_PARAM: "y"
 TITLE_PARAM: "title"
 X_AXIS_LABEL: "x_axis_label"
+STACKED_PARAM: "stacked"
 
 param_value: WORD | /"[^"]*"/
 column_ref: WORD

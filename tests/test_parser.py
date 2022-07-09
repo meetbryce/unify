@@ -40,6 +40,7 @@ def test_parser(visitor, parser):
     verify_parse("select_query", query="select * \nfrom table\nlimit 10")
 
     verify_parse("create_statement", query="create table foo1 (id INT)")
+    verify_parse("create_view_statement", query="create view foo1 as select 5")
     verify_parse("insert_statement", query="insert into foo1 (id) values (5)")
     verify_parse("delete_statement", query="delete from foo1 where id = 5")
 
@@ -54,6 +55,9 @@ def test_parser(visitor, parser):
 
     verify_parse("create_chart", query="create chart as pie_chart where title = \"Awesome chart\"",
                 args={"chart_params": {"title": "Awesome chart"}})
+
+    verify_parse("create_chart", query="create chart as bar_chart where x = col1 and stacked = true",
+                args={"chart_params": {"stacked": "true", "x": "col1"}})
 
 def test_autocomplete_parser(visitor, parser):
     # Test parser snippets use for auto-completion

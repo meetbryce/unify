@@ -13,8 +13,7 @@ Simply run `pytest` to run the tests.
 
 ## Parser
 
-Unify builds its own command interpreter on top of DuckDB, so that it can offer extended operations and syntax without modifying
-DuckDB.
+Unify builds its own command interpreter on top of DuckDB, so that it can offer extended operations and syntax without modifying DuckDB.
 
 The parser uses the `lark` package. Find the grammer in [grammark.lark](grammar.lark). Tests for the gammar are in [tests/test_parser.py](tests/test_parser.py).
 
@@ -26,6 +25,10 @@ in the [unify_kernel](./unify_kernel) directory.
 The [kernel](./unify_kernel/kernel.py) file implements a class which supports execution of SQL script against the Unify database.
 
 Install Jupyter, and run `jupyter-lab` to open the web interface.
+
+Install the Unify kernel for development (sometimes have to do this when env restarts):
+
+    jupyter kernelspec install ./unify_kernel
 
 To test with the Jupyter console:
 
