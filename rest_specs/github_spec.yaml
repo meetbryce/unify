@@ -1,5 +1,13 @@
 enabled: true
 name: github
+help: |
+    The Github connector makes it easy to query data from Github
+    about your users, orgs, and repos.
+    Use: `myself` table to query current identity
+    Use: `users` table to query Github users
+    Use: `orgs` table to query Orgs accessible by the current identity
+    Use: `repos` table to query the repos in an org. 
+    Use: 'pulls' table to query information about pull requests.
 base_url: https://api.github.com
 paging:
   strategy: pageAndCount

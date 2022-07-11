@@ -1,14 +1,13 @@
 import glob
-import json
+import io
 import os
 import re
 import string
 import sys
 import yaml
+from typing import List, AnyStr, Dict
 
 import requests
-
-Columns = list[str]
 
 class Connector:
     def __init__(self, spec_table, opts):
@@ -293,8 +292,6 @@ class RESTTable:
                 raise Exception("API call failed: " + r.text)
 
             size_return = []
-            #with open(f"page-{page}.json", "w") as f:
-            #    f.write(r.text)
 
             yield (r.json(), size_return)
 
@@ -306,12 +303,40 @@ class RESTTable:
                 print("Aborting table scan after {} pages", page-1)
                 break
 
-class RESTAPISpec(Connector):
+class APIConnector:
+    name: str
+    help: str
+
+    def list_tables(self) -> List[RESTTable]:
+        pass
+
+    def resolve_auth(self, connection_name: AnyStr, connection_opts: Dict):
+        pass
+
+    def __repr__(self) -> AnyStr:
+        return f"{self.__class__.name}({self.name}) ->\n" + \
+            ", ".join(map(lambda t: str(t), self.tables)) + "\n"
+
+    def supports_commands(self) -> bool:
+        return self.help is not None
+
+    def run_command(self, code: str, output_buffer: io.TextIOBase) -> bool:
+        if code.strip() == 'help':
+            if self.help:
+                print(self.help, file=output_buffer)
+            else:
+                print(f"No help available for connector {self.name}")
+            return True
+        else:
+            return False
+
+class RESTAPISpec(APIConnector):
     def __init__(self, spec):
         self.name = spec['name']
         self.base_url = spec['base_url']
         self.paging_options = spec.get('paging')
         self.auth = spec.get('auth', {})
+        self.help = spec.get('help', None)
 
         # Pages are indicated by absolute row offset
         self.pageStartArg = spec.get('pageStartArg')
@@ -333,7 +358,7 @@ class RESTAPISpec(Connector):
             print("Warning: spec '{}' has no tables defined".format(self.name))
 
 
-    def list_tables(self):
+    def list_tables(self) -> List[RESTTable]:
         for t in self.tables:
             yield t
 
@@ -342,10 +367,6 @@ class RESTAPISpec(Connector):
 
     def supports_paging(self):
         return (self.pageIndexArg or self.pageStartArg or self.page_cursor_arg)
-
-    def __repr__(self):
-        return f"RESTAPISpect({self.name}) ->\n" + \
-            ", ".join(map(lambda t: str(t), self.tables)) + "\n"
 
     def resolve_auth(self, connection_name, connection_opts):
         # The REST spec has an auth clause (self.auth) that can refer to "Connection options". 

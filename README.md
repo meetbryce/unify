@@ -191,4 +191,15 @@ Make sure to setup the environment with:
 
     export $(cat .env)
     
+## Metrics use cases
 
+- Quality metrics
+  - Count of P1/P2 incidents by month
+  - Tickets opened vs. closed
+  - Revenue chart
+  - Count of DQ tickets (by tag)
+  - Costs
+    - 30 day lookback for
+      - AWS costs by service
+      - Datadog
+      - Papertrail

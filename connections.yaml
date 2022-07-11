@@ -15,7 +15,7 @@
     options:
       JIRAUSER: $JIRAUSER
       JIRATOKEN: $JIRATOKEN
-- spreadsheets:
+- gsheets:
     spec: gsheets
     options:
       client_json: ghseets/client_token.json

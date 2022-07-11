@@ -13,9 +13,11 @@ from lark.visitors import v_args
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-import matplotlib.pyplot as plt
 import urllib
 from typing import Dict
+# CHARTING
+from matplotlib import ticker
+import matplotlib.pyplot as plt
 
 import pandas as pd
 import pyarrow as pa
@@ -25,9 +27,14 @@ from timeit import default_timer as timer
 # DuckDB
 import duckdb
 
-from rest_schema import Connector
+from rest_schema import APIConnector, Connector
 from schemata import Queries
-from parsing_utils import find_subtree, find_node_return_child, find_node_return_children
+from parsing_utils import (
+    find_subtree, 
+    find_node_return_child, 
+    find_node_return_children,
+    collect_child_strings
+)
 
 DATA_HOME = "./data"
 os.makedirs(DATA_HOME, exist_ok=True)
@@ -193,6 +200,9 @@ class TableLoader:
         self.connections = Connector.setup_connections('./connections.yaml')
         self.tables = {}
 
+        self.command_handlers = dict(
+            [(conn.schema_name, conn.spec) for conn in self.connections if conn.spec.supports_commands()]
+        )
         # Connections defines the set of schemas we will create in the database.
         # For each connection/schema then we will define the tables as defined
         # in the REST spec for the target system.
@@ -279,6 +289,9 @@ class ParserVisitor(Visitor):
         else:
             table = find_node_return_child("table_ref", tree)
         self._the_command_args['table_ref'] = table
+        filter = collect_child_strings("column_filter", tree)
+        if filter:
+            self._the_command_args['column_filter'] = filter.strip()
         return tree
 
     def describe(self, tree):
@@ -355,6 +368,7 @@ class RunCommand:
         self.__output = sys.stdout
         self.parser_visitor = ParserVisitor()
         self.loader = TableLoader()
+        self.command_handlers: list[APIConnector] = self.loader.command_handlers
 
         if wide_display:
             pd.set_option('display.max_rows', 500)
@@ -373,9 +387,25 @@ class RunCommand:
         table = table or ''
         return sorted(list(t.name[len(table):] for t in conn.list_tables() if t.name.startswith(table)))
 
+    def pre_handle_command(self, code, output_buffer: io.TextIOBase):
+        m = re.match(r"\s*([\w_0-9]+)\s+(.*$)", code)
+        if m:
+            first_word = m.group(1)
+            rest_of_command = m.group(2)
+            if first_word in self.command_handlers:
+                handler: APIConnector = self.command_handlers[first_word]
+                handler.run_command(rest_of_command, output_buffer)
+                return True
+
+
     def _run_command(self, cmd, output_buffer=None, use_pager=True):
-        save_output = self.__output
+        save_output = self.__output    
         try:
+            # Allow Adapters to process their special commands
+            pre_result = self.pre_handle_command(cmd, output_buffer)
+            if pre_result:
+                return {"response_type": "stream"}
+
             with DuckContext() as duck:
                 self.duck = duck
                 self._allow_pager = use_pager
@@ -446,9 +476,14 @@ class RunCommand:
 
         self._execute_duck(query, header=False)
 
-    def show_columns(self, table_ref):
+    def show_columns(self, table_ref, column_filter=None):
         if table_ref:
-            self._execute_duck(f"describe {table_ref}")
+            if column_filter:
+                parts = table_ref.split(".")
+                column_filter = re.sub(r"\*", "%", column_filter)
+                self._execute_duck(Queries.list_columns.format(parts[0], parts[1], column_filter))
+            else:
+                self._execute_duck(f"describe {table_ref}")
         else:
             self._execute_duck("describe")
 
@@ -511,7 +546,7 @@ class RunCommand:
         df = self._last_result
         if df is None:
             raise RuntimeError("No query result available")
-        plt.rcParams["figure.figsize"]=10,10
+        plt.rcParams["figure.figsize"]=10,8
         plt.rcParams['figure.dpi'] = 100 
         if chart_type == "pie_chart":
             df = df.set_index(chart_params["x"])
@@ -522,7 +557,7 @@ class RunCommand:
 
         df.plot(x = chart_params["x"], y = chart_params.get("y"), kind=kind,
                 title=title, stacked=chart_params.get("stacked", False))
-        fig.autofmt_xdate()
+        plt.tight_layout()
         
         imgdata = io.BytesIO()
         plt.savefig(imgdata, format='png')

@@ -18,6 +18,8 @@ def test_parser(visitor, parser):
         for key in args.keys():
             assert key in visitor._the_command_args and visitor._the_command_args[key] == args[key]
 
+    verify_parse("show_columns", query="show columns from sch1.table1 like %user%",
+                args={'table_ref':"sch1.table1", "column_filter" : "%user%"})
     verify_parse("show_columns", query="show columns from sch1.table1", 
                 args={'table_ref':"sch1.table1"})
     verify_parse("show_tables", query="show tables")

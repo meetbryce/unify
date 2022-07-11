@@ -38,3 +38,10 @@ def find_node_return_child(rule, tree):
         return children[0]
     else:
         return None
+
+def collect_child_strings(rule, tree):
+    st = find_subtree(rule, tree)
+    if st:
+        return " ".join([c.value for c in st.children])
+    else:
+        return None
