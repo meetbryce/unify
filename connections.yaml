@@ -2,22 +2,22 @@
 # schemas in Unify.
 ---
 - papertrail:
-    spec: papertrail
+    adapter: papertrail
     options:
       PAPERTRAIL_TOKEN: $PAPERTRAIL_TOKEN
 - github:
-    spec: github
+    adapter: github
     options:
       GHUSER: $GHUSER
       GHTOKEN: $GHTOKEN
 - jira:
-    spec: jira
+    adapter: jira
     options:
       JIRAUSER: $JIRAUSER
       JIRATOKEN: $JIRATOKEN
 - gsheets:
-    spec: gsheets
+    adapter: gsheets
     options:
-      client_json: ghseets/client_token.json
+      client_json_path: ./ghseets/gauth_client_id.json
       
 

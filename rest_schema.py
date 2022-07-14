@@ -6,39 +6,50 @@ import string
 import sys
 import yaml
 from typing import List, AnyStr, Dict
+import typing
 
 import requests
 
-class Connector:
-    def __init__(self, spec_table, opts):
+Adapter = typing.NewType("Adapter", None)
+
+class Connection:
+    adapter: Adapter
+    schema_name: str
+
+    def __init__(self, adapter_table, opts):
         self.schema_name = next(iter(opts))
         opts = opts[self.schema_name]
-        spec_name = opts['spec']
-        self.spec = spec_table[spec_name] 
-        self.spec.resolve_auth(self.schema_name, opts['options'])
+        adapter_name = opts['adapter']
+        self.adapter = adapter_table[adapter_name] 
+        self.adapter.resolve_auth(self.schema_name, opts['options'])
 
     @classmethod
     def setup_connections(cls, path=None, conn_list=None):
-        spec_table = {}
+        adapter_table = {}
         for f in glob.glob(f"./rest_specs/*spec.yaml"):
             spec = yaml.load(open(f), Loader=yaml.FullLoader)
             if spec.get('enabled') == False:
                 continue
-            klass = RESTAPISpec
-            if 'class' in spec and spec['class'].lower() == 'gsheetsconnector':
-                from gsheets.gsheets_connector import GSheetsConnector
-                klass = GSheetsConnector
-            spec_inst = klass(spec)
-            spec_table[spec_inst.name] = spec_inst
+            klass = RESTAdapter
+            if 'class' in spec and spec['class'].lower() == 'gsheetsadapter':
+                from gsheets.gsheets_adapter import GSheetsAdapter
+                klass = GSheetsAdapter
+            adapter = klass(spec)
+            adapter_table[adapter.name] = adapter
         
         if conn_list:
             connections = conn_list
         else:
             connections = yaml.load(open(path), Loader=yaml.FullLoader)
-        return [Connector(spec_table, opts) for opts in connections]
+        result = []
+        for opts in connections:
+            c = Connection(adapter_table, opts)
+            c.adapter.validate()
+            result.append(c)
+        return result
 
     def list_tables(self):
-        return self.spec.list_tables()
+        return self.adapter.list_tables()
 
 class RESTCol:
     def __init__(self, dictvals):
@@ -303,9 +314,12 @@ class RESTTable:
                 print("Aborting table scan after {} pages", page-1)
                 break
 
-class APIConnector:
+class Adapter:
     name: str
     help: str
+
+    def validate(self) -> bool:
+        return True
 
     def list_tables(self) -> List[RESTTable]:
         pass
@@ -330,7 +344,7 @@ class APIConnector:
         else:
             return False
 
-class RESTAPISpec(APIConnector):
+class RESTAdapter(Adapter):
     def __init__(self, spec):
         self.name = spec['name']
         self.base_url = spec['base_url']

@@ -1,7 +1,7 @@
 enabled: true
 name: gsheets
-class: GSheetsConnector
+class: GSheetsAdapter
 auth:
   type: GOOGLE_AUTH
-  client_file_var: client_json
+  client_file_var: client_json_path
 

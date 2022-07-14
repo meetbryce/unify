@@ -27,7 +27,7 @@ from timeit import default_timer as timer
 # DuckDB
 import duckdb
 
-from rest_schema import APIConnector, Connector
+from rest_schema import Adapter, Connection
 from schemata import Queries
 from parsing_utils import (
     find_subtree, 
@@ -197,11 +197,11 @@ class TableLoader:
        4. Table view loaded in Duck.
     """
     def __init__(self):
-        self.connections = Connector.setup_connections('./connections.yaml')
+        self.connections = Connection.setup_connections('./connections.yaml')
         self.tables = {}
 
         self.command_handlers = dict(
-            [(conn.schema_name, conn.spec) for conn in self.connections if conn.spec.supports_commands()]
+            [(conn.schema_name, conn.adapter) for conn in self.connections if conn.adapter.supports_commands()]
         )
         # Connections defines the set of schemas we will create in the database.
         # For each connection/schema then we will define the tables as defined
@@ -209,8 +209,8 @@ class TableLoader:
         with DuckContext() as duck:
             for conn in self.connections:
                 duck.execute(f"create schema if not exists {conn.schema_name}")
-                for t in conn.spec.list_tables():
-                    tmgr = TableMgr(conn.schema_name, conn.spec, t)
+                for t in conn.adapter.list_tables():
+                    tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                     self.tables[tmgr.name] = tmgr
 
     def materialize_table(self, table):
@@ -368,7 +368,7 @@ class RunCommand:
         self.__output = sys.stdout
         self.parser_visitor = ParserVisitor()
         self.loader = TableLoader()
-        self.command_handlers: list[APIConnector] = self.loader.command_handlers
+        self.command_handlers: list[Adapter] = self.loader.command_handlers
 
         if wide_display:
             pd.set_option('display.max_rows', 500)
@@ -393,7 +393,7 @@ class RunCommand:
             first_word = m.group(1)
             rest_of_command = m.group(2)
             if first_word in self.command_handlers:
-                handler: APIConnector = self.command_handlers[first_word]
+                handler: Adapter = self.command_handlers[first_word]
                 handler.run_command(rest_of_command, output_buffer)
                 return True
 

@@ -1,6 +1,6 @@
 import sys
 import pytest
-from gsheets.gsheets_connector import GsheetCommandParser
+from gsheets.gsheets_adapter import GsheetCommandParser
 
 @pytest.fixture
 def parser():

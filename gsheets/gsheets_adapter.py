@@ -1,22 +1,26 @@
 # python
 import io
 import os
-import os
-import re
+import json
 import shelve
-import marshal
 import traceback
 
 # vendor
-from googleapiclient import discovery
-from httplib2 import Http
-from oauth2client import file, client, tools
 from lark import Lark
 from lark.visitors import Visitor
 from lark.tree import Tree
 
+from google.oauth2.credentials import Credentials
+from googleapiclient import discovery
+import google.auth.transport.requests
+from google_auth_oauthlib.flow import InstalledAppFlow
+
+#from httplib2 import Http
+#from oauth2client import file, client, tools
+
+
 # project
-from rest_schema import APIConnector
+from rest_schema import Adapter
 from parsing_utils import collect_child_strings
 
 class GSheetsClient:
@@ -24,24 +28,54 @@ class GSheetsClient:
     ALL_SPREADSHEETS_TABLE = "all_spreadsheets"
     MAPPED_SHEETS_TABLE = "mapped_sheets"
 
-    SCOPES = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets"
+    SCOPES = ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
 
-    def __init__(self):
-        store = file.Storage(os.path.expanduser('~/src/github/storage.json'))
-        creds = store.get()
-        if not creds or creds.invalid:
-            flow = client.flow_from_clientsecrets(
-                os.path.expanduser('~/src/github/client_id.json'), 
-                GSheetsClient.SCOPES)
-            # FIXME: Pass a flags=opt value where opt.auth_host_port=<port> to override 8080
-            # Otherwise the callback breaks cause Presto web is already listening on 8080
-            creds = tools.run_flow(flow, store)
-        self.DRIVE = discovery.build('drive', 'v3', http=creds.authorize(Http('.cache')))
-        self.SHEETS = discovery.build('sheets', 'v4', http=creds.authorize(Http('.cache')))
-        self.TABLE_STORE = shelve.open('mapped_sheets.shelve')
-        self.MAPPED = []
-        self.SCHEMA_CACHE = {}
-        self._loadMappedTables()
+# import os
+# import json
+# from google_auth_oauthlib.flow import InstalledAppFlow
+# flow = InstalledAppFlow.from_client_secrets_file(os.path.expanduser("~/src/github/client_id.json"), SCOPES)
+# flow.run_local_server()
+# session = flow.authorized_session()
+# session.credentials.token, session.refresh_token
+# Stored creds for later: session.credentials.to_json()
+
+# On startup, refresh:
+# creds = Credentials(**json.loads(session.credentials.to_json()))
+# import google.auth.transport.requests
+# req = google.auth.transport.requests.Request()
+# creds.refresh(req)
+
+    creds: Credentials
+
+    def __init__(self, spec):
+        #breakpoint()
+        self.auth = spec['auth']
+
+    def validate(self):
+        return True
+        # FIXME: Implement a metadata store for user creds rathen than the
+        # filesystem. Store creds per Connection so we can have multiple connections.
+        creds_path = os.path.join(os.path.dirname(__file__), 'user_creds.json')
+        if os.path.exists(creds_path):
+            cred_data = json.loads(open(creds_path).read())
+            self.creds = Credentials(**cred_data)
+            req = google.auth.transport.requests.Request()
+            self.creds.refresh(req)
+        else:
+            print("Press <enter> to re-authorize the GSheets connection")
+            input()
+            flow = InstalledAppFlow.from_client_secrets_file(self.auth['client_json_path'],
+                        self.SCOPES)
+            flow.run_local_server()
+            session = flow.authorized_session()
+            with(open(creds_path, "w")) as f:
+                f.write(session.credentials.to_json())
+            self.creds = session.credentials
+
+        self.DRIVE = discovery.build('drive', 'v3', credentials=self.creds)
+        self.SHEETS = discovery.build('sheets', 'v4', credentials=self.creds)
+        print(self.SHEETS.spreadsheets().values().get(spreadsheetId='16YgB5XykiMBMXQfHk8lI9hYilJ2ctn6madVAJoKt12Q').execute())
+        return True
 
     def _loadMappedTables(self):
         self.MAPPED.clear()
@@ -249,7 +283,7 @@ class GSheetsClient:
                         pass
                     return
 
-class GSheetsConnector(APIConnector):
+class GSheetsAdapter(Adapter):
     def __init__(self, spec):
         self.name = spec['name']
         self.parser: GsheetCommandParser = GsheetCommandParser()
@@ -260,7 +294,10 @@ Try these commands:
   gsheets search <file name>
   gsheets info <file name> - list sheet names from a sheet  
         """
-        self.client = GSheetsClient()
+        self.client = GSheetsClient(spec)
+
+    def validate(self):
+        return self.client.validate()
 
     def resolve_auth(self, connection_name, opts):
         pass

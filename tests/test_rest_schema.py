@@ -2,7 +2,7 @@ import io
 import os
 import yaml
 
-from rest_schema import APIConnector, RESTAPISpec, RESTTable, Connector
+from rest_schema import Adapter, RESTAdapter, RESTTable, Connection
 
 def test_apispec_class():
     config = {
@@ -11,7 +11,7 @@ def test_apispec_class():
         "description":"GitHub API",
         "help": "This is the GitHub API"
     }
-    spec = RESTAPISpec(config)
+    spec = RESTAdapter(config)
     assert spec.name == "github"
     assert spec.base_url == "https://api.github.com"
     assert spec.help == config["help"]
@@ -28,7 +28,7 @@ def test_apispec_class():
 
     config['tables'] = tables
 
-    spec = RESTAPISpec(config)
+    spec = RESTAdapter(config)
     assert len(spec.tables) == 2
     assert spec.tables[0].name == "repos"
     assert rest_tables[0].query_path == "/repos"
@@ -42,11 +42,11 @@ def test_apispec_class():
 
 def test_connector():
     fpath = os.path.join(os.path.dirname(__file__), "../connections.yaml")
-    connections = Connector.setup_connections(fpath)
+    connections = Connection.setup_connections(fpath)
     assert len(connections) > 0
 
-    assert connections[0].spec is not None
-    assert isinstance(connections[0].spec, APIConnector)
+    assert connections[0].adapter is not None
+    assert isinstance(connections[0].adapter, Adapter)
     # load yaml file from directory relative to current file
     config = yaml.load(open(fpath), Loader=yaml.FullLoader)
     conn_config = next(conn for conn in config if next(iter(conn.keys())) == "github")
