@@ -3,5 +3,5 @@ name: gsheets
 class: GSheetsAdapter
 auth:
   type: GOOGLE_AUTH
-  client_file_var: client_json_path
+  client_json_path: client_json_path
 

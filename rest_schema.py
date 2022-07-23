@@ -13,18 +13,14 @@ import requests
 Adapter = typing.NewType("Adapter", None)
 
 class Connection:
-    adapter: Adapter
-    schema_name: str
-
-    def __init__(self, adapter_table, opts):
-        self.schema_name = next(iter(opts))
-        opts = opts[self.schema_name]
-        adapter_name = opts['adapter']
-        self.adapter = adapter_table[adapter_name] 
+    def __init__(self, adapter, schema_name, opts):
+        self.schema_name: str = schema_name
+        self.adapter: Adapter = adapter
         self.adapter.resolve_auth(self.schema_name, opts['options'])
+        self.adapter.validate()
 
     @classmethod
-    def setup_connections(cls, path=None, conn_list=None):
+    def setup_connections(cls, path=None, conn_list=None, storage_manager=None):
         adapter_table = {}
         for f in glob.glob(f"./rest_specs/*spec.yaml"):
             spec = yaml.load(open(f), Loader=yaml.FullLoader)
@@ -34,17 +30,20 @@ class Connection:
             if 'class' in spec and spec['class'].lower() == 'gsheetsadapter':
                 from gsheets.gsheets_adapter import GSheetsAdapter
                 klass = GSheetsAdapter
-            adapter = klass(spec)
-            adapter_table[adapter.name] = adapter
+            adapter_table[spec['name']] = (klass, spec)
         
         if conn_list:
             connections = conn_list
         else:
             connections = yaml.load(open(path), Loader=yaml.FullLoader)
         result = []
+        # Instantiate each adapter, resolve auth vars, and validate the connection
         for opts in connections:
-            c = Connection(adapter_table, opts)
-            c.adapter.validate()
+            schema_name = next(iter(opts))
+            opts = opts[schema_name]
+            adapter_klass, spec = adapter_table[opts['adapter']]
+            adapter = adapter_klass(spec, storage_manager)
+            c = Connection(adapter, schema_name, opts)
             result.append(c)
         return result
 
@@ -139,8 +138,41 @@ class OffsetAndCountPager(PagingHelper):
         self.current_offset += page_count
         return page_count >= self.page_size
 
+class TableDef:
+    def __init__(self, name):
+        self._name = name
+        self._select_list = []
+        self._result_body_path = None
 
-class RESTTable:
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, val):
+        self._name = val
+
+    @property
+    def select_list(self) -> list:
+        return []
+
+    @select_list.setter
+    def select_list(self, selects: list):
+        self._select_list = selects
+
+    def query_resource(self, tableLoader):
+        pass
+
+    @property
+    def result_body_path(self):
+        return self._result_body_path
+
+    @result_body_path.setter
+    def result_body_path(self, val):
+        self._result_body_path = val
+
+
+class RESTTable(TableDef):
     def __init__(self, spec, dictvals):
         fmt = string.Formatter()
         self.max_pages = 50000
@@ -254,6 +286,14 @@ class RESTTable:
         return self.spec.name + "." + self.name
 
     def query_resource(self, tableLoader):
+        """ Generator which yields (page, size_return) tuples for all rows from
+            an API endpoint. Each page should be a list of dicts representing
+            each row of results.
+
+            Because a resource may reference a parent query to provide API query
+            args, the 'tableLoader' argument is provided for querying the rows
+            of a parent table.
+        """
         if self.parent_table():
             # Run our parent query and then our query with parameters from each parent record
             print(">>Running parent query: ", self.parent_table())
@@ -269,7 +309,6 @@ class RESTTable:
                                 do_row = False
                         else:
                             print(f"Error: parent record missing col {parent_col}: ", record)
-                            breakpoint()
                     if do_row:
                         for page, size_return in self._query_resource(record):
                             yield (page, size_return)
@@ -314,21 +353,73 @@ class RESTTable:
                 print("Aborting table scan after {} pages", page-1)
                 break
 
+class StorageManager:
+    """
+        Passed to adapters to allow them to store additional metadata for their operation.
+        Exposes a simple object storage interface:
+
+        mgr.put_object(collection: str, id: str, values: dict)
+        mgr.get_object(collection: str, id: str) -> values: dict
+        mgr.list_objects(collection: str) -> results: list<dict>
+    """
+    def put_object(self, collection: str, id: str, values: dict) -> None:
+        pass
+
+    def get_object(self, collection: str, id: str) -> dict:
+        return {}
+
+    def delete_object(self, collection: str, id: str) -> bool:
+        return False
+
+    def list_objects(self, collection: str) -> list[dict]:
+        return []
+
+
 class Adapter:
-    name: str
-    help: str
+    def __init__(self, name, storage: StorageManager):
+        self.name = name
+        self.help = ""
+        self.auth: dict = {}
+        self.storage: StorageManager = storage
 
     def validate(self) -> bool:
         return True
 
-    def list_tables(self) -> List[RESTTable]:
+    def list_tables(self) -> List[TableDef]:
         pass
+
+    def lookupTable(self, tableName: str):
+        return next(t for t in self.tables if t.name == tableName)
 
     def resolve_auth(self, connection_name: AnyStr, connection_opts: Dict):
-        pass
+        # The adapter spec has an auth clause (self.auth) that can refer to "Connection options". 
+        # The Connection options can refer to environment variables or hold direct values.
+        # We need to:
+        # 1. Resolve the env var references in the Connection options
+        # 2. Copy the connection options into the REST API spec's auth clause
+        for k, value in connection_opts.items():
+            if value.startswith("$"):
+                try:
+                    value = os.environ[value[1:]]
+                    connection_opts[k] = value
+                except KeyError:
+                    print(f"Authentication for {connection_name} failed, missing env var '{value[1:]}'")
+                    sys.exit(1)
+        def resolve_auth_values(auth_tree, conn_opts):
+            for key, value in auth_tree.items():
+                if key == 'type':
+                    continue
+                elif isinstance(value, dict):
+                    resolve_auth_values(value, conn_opts)
+                else:
+                    if value in conn_opts:
+                        auth_tree[key] = conn_opts[value]
+                    else:
+                        print(f"Error: auth key {key} missing value in connection options")
+        resolve_auth_values(self.auth, connection_opts)
 
     def __repr__(self) -> AnyStr:
-        return f"{self.__class__.name}({self.name}) ->\n" + \
+        return f"{self.__class__.__name__}({self.name}) ->\n" + \
             ", ".join(map(lambda t: str(t), self.tables)) + "\n"
 
     def supports_commands(self) -> bool:
@@ -345,11 +436,11 @@ class Adapter:
             return False
 
 class RESTAdapter(Adapter):
-    def __init__(self, spec):
-        self.name = spec['name']
+    def __init__(self, spec, storage: StorageManager=None):
+        super().__init__(spec['name'], storage)
         self.base_url = spec['base_url']
         self.paging_options = spec.get('paging')
-        self.auth = spec.get('auth', {})
+        self.auth = spec.get('auth', {}).copy()
         self.help = spec.get('help', None)
 
         # Pages are indicated by absolute row offset
@@ -372,43 +463,11 @@ class RESTAdapter(Adapter):
             print("Warning: spec '{}' has no tables defined".format(self.name))
 
 
-    def list_tables(self) -> List[RESTTable]:
-        for t in self.tables:
-            yield t
-
-    def lookupTable(self, tableName):
-        return next(t for t in self.tables if t.name == tableName)
+    def list_tables(self) -> List[TableDef]:
+        return self.tables
 
     def supports_paging(self):
         return (self.pageIndexArg or self.pageStartArg or self.page_cursor_arg)
-
-    def resolve_auth(self, connection_name, connection_opts):
-        # The REST spec has an auth clause (self.auth) that can refer to "Connection options". 
-        # The Connection options can refer to environment variables or hold direct values.
-        # We need to:
-        # 1. Resolve the env var references in the Connection options
-        # 2. Copy the connection options into the REST API spec's auth clause
-
-        for k, value in connection_opts.items():
-            if value.startswith("$"):
-                try:
-                    value = os.environ[value[1:]]
-                    connection_opts[k] = value
-                except KeyError:
-                    print(f"Authentication for {connection_name} failed, missing env var '{value[1:]}'")
-                    sys.exit(1)
-        def resolve_auth_values(auth_tree, conn_opts):
-            for key, value in auth_tree.items():
-                if key == 'type':
-                    continue
-                elif isinstance(value, dict):
-                    resolve_auth_values(value, conn_opts)
-                else:
-                    if value in conn_opts:
-                        auth_tree[key] = conn_opts[value]
-                    else:
-                        print(f"Error: auth key {key} missing value in connection options")
-        resolve_auth_values(self.auth, connection_opts)
 
     def _setup_request_auth(self, session):
         user = ''

@@ -8,6 +8,7 @@ command: show_tables
          | create_view_statement
          | insert_statement
          | delete_statement
+         | drop_schema
          | describe
          | clear_table
          | create_chart
@@ -31,6 +32,8 @@ create_view_statement: "create view" ANY
 insert_statement: "insert" ANY
 
 delete_statement: "delete" ANY
+
+drop_schema: "drop schema" WS schema_ref
 
 clear_table: "clear table" WS table_schema_ref
 

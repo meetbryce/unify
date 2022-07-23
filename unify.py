@@ -27,8 +27,8 @@ from timeit import default_timer as timer
 # DuckDB
 import duckdb
 
-from rest_schema import Adapter, Connection
-from schemata import Queries
+from rest_schema import Adapter, Connection, StorageManager
+from schemata import LoadTableRequest, Queries
 from parsing_utils import (
     find_subtree, 
     find_node_return_child, 
@@ -122,6 +122,7 @@ class TableScan(Thread):
 
         for json_page, size_return in self.tableMgr.table_spec.query_resource(self.tableLoader):
             record_path = self.tableMgr.table_spec.result_body_path
+            breakpoint()
             df = pd.json_normalize(json_page, record_path=record_path, sep='_')
             size_return.append(df.shape[0])
 
@@ -161,18 +162,11 @@ class TableMgr:
         self.rest_spec = rest_spec
         self.table_spec = table_spec
         self.synchronous_scanning = True
-        self.setup()
 
-    def setup(self):
-        self.data_dir = os.path.join(DATA_HOME, self.name)
-        os.makedirs(self.data_dir, exist_ok=True)
- 
     def has_data(self):
-        return len(os.listdir(self.data_dir)) > 0
+        return True
 
     def truncate(self, duck):
-        for f in os.listdir(self.data_dir):
-            os.remove(os.path.join(self.data_dir, f))
         # Remove table from duck db
         duck.execute(f"drop table {self.name}")
 
@@ -192,15 +186,18 @@ class TableLoader:
 
        Tables can be in 4 states:
        1. Unknown (schema and table name never registered)
-       2. Never queried. Call the REST API to query the data and store it to parquet.
-       3. Not loaded. Data exists on disk, needs to be loaded as a view into Duck.
-       4. Table view loaded in Duck.
+       2. Never queried. Call the Adapter to query the data and store it to local db.
+       3. Table exists in the local db.
     """
     def __init__(self):
-        self.connections = Connection.setup_connections('./connections.yaml')
+        self.storage_manager = BasicStorageManager()
+        self.connections = Connection.setup_connections(
+            './connections.yaml', 
+            storage_manager=self.storage_manager
+        )
         self.tables = {}
 
-        self.command_handlers = dict(
+        self.adapters: dict[str, Adapter] = dict(
             [(conn.schema_name, conn.adapter) for conn in self.connections if conn.adapter.supports_commands()]
         )
         # Connections defines the set of schemas we will create in the database.
@@ -213,9 +210,15 @@ class TableLoader:
                     tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                     self.tables[tmgr.name] = tmgr
 
-    def materialize_table(self, table):
+    def materialize_table(self, schema, table):
         with DuckContext() as duck:
-            tmgr = self.tables[table]
+            qual = schema + "." + table
+            if qual in self.tables:
+                tmgr = self.tables[table]
+            else:
+                table_spec = self.adapters[schema].lookupTable(table)
+                tmgr = TableMgr(schema, self.adapters[schema], table_spec)
+                self.tables[tmgr.name] = tmgr           
             tmgr.load_table(duck, tableLoader=self)
             return tmgr.has_data()
 
@@ -251,6 +254,32 @@ class TableLoader:
             return True
         except:
             return False
+
+class BasicStorageManager(StorageManager):
+    def __init__(self):
+        self.collections = {}
+
+    def get_col(self, name) -> dict:
+        if name not in self.collections:
+            self.collections[name] = {}
+        return self.collections[name]
+
+    def put_object(self, collection: str, id: str, values: dict) -> None:
+        self.get_col(collection)[id] = values
+
+    def get_object(self, collection: str, id: str) -> dict:
+        return self.get_col(collection)[id]
+
+    def delete_object(self, collection: str, id: str) -> bool:
+        col = self.get_col(collection)
+        if id in col:
+            del col[id]
+            return True
+        else:
+            return False
+            
+    def list_objects(self, collection: str) -> list[tuple]:
+        return [(key, val) for key, val in self.get_col(collection).items()]
 
 class ParserVisitor(Visitor):
     """ Utility class for visiting our parse tree and assembling the relevant parts
@@ -319,6 +348,10 @@ class ParserVisitor(Visitor):
     def delete_statement(self, tree):
         self._the_command = 'delete_statement'
 
+    def drop_schema(self, tree):
+        self._the_command = "drop_schema"
+        self._the_command_args["schema_ref"] = find_node_return_child("schema_ref", tree)
+
     def insert_statement(self, tree):
         self._the_command = 'insert_statement'
 
@@ -368,7 +401,7 @@ class RunCommand:
         self.__output = sys.stdout
         self.parser_visitor = ParserVisitor()
         self.loader = TableLoader()
-        self.command_handlers: list[Adapter] = self.loader.command_handlers
+        self.adapters: dict[str, Adapter] = self.loader.adapters
 
         if wide_display:
             pd.set_option('display.max_rows', 500)
@@ -392,8 +425,8 @@ class RunCommand:
         if m:
             first_word = m.group(1)
             rest_of_command = m.group(2)
-            if first_word in self.command_handlers:
-                handler: Adapter = self.command_handlers[first_word]
+            if first_word in self.adapters:
+                handler: Adapter = self.adapters[first_word]
                 handler.run_command(rest_of_command, output_buffer)
                 return True
 
@@ -403,7 +436,10 @@ class RunCommand:
         try:
             # Allow Adapters to process their special commands
             pre_result = self.pre_handle_command(cmd, output_buffer)
-            if pre_result:
+            if isinstance(pre_result, LoadTableRequest):
+                self.load_adapter_data(pre_result.schema_name, pre_result.table_name)
+                return {"response_type": "stream"}
+            elif pre_result:
                 return {"response_type": "stream"}
 
             with DuckContext() as duck:
@@ -445,6 +481,8 @@ class RunCommand:
         r = self.duck.execute(query)
         with pd.option_context('display.max_rows', None):
             df = r.df()
+            if df.shape[0] == 0:
+                return
             self._last_result = df
             fmt_opts = {
                 "index": False,
@@ -464,12 +502,22 @@ class RunCommand:
     def show_schemas(self):
         self._execute_duck(Queries.list_schemas)
 
+    def drop_schema(self, schema_ref):
+        print("Are you sure you want to drop the schema '{schema_ref}' (y/n)?", end=' ')
+        val = input()
+        if val == "y":
+            self._execute_duck(self._cmd)
+            
     def show_tables(self, schema_ref=None):
         # FIXME: merge tables known us but not yet to Duck
         #    for table in sorted(self.loader.tables.keys()):
         #        print(table, file=self.__output)
         print("tables\n--------------", file=self.__output)
         if schema_ref:
+            if schema_ref in self.adapters:
+                for tableDef in self.adapters[schema_ref].list_tables():
+                    print(tableDef.name)
+
             query = Queries.list_tables_filtered.format(schema_ref)
         else:
             query = Queries.list_tables
@@ -505,6 +553,13 @@ class RunCommand:
     def delete_statement(self):
         self._execute_duck(self._cmd)
 
+    def load_adapter_data(self, schema_name, table_name):
+        if self.loader.materialize_table(schema_name, table_name):
+            return True
+        else:
+            print("Loading table...", file=self.__output)
+            return False
+
     def select_query(self, fail_if_missing=False):
         try:
             self._execute_duck(self._cmd)
@@ -519,11 +574,8 @@ class RunCommand:
                 # Extract the schema from the original query
                 m = re.search(f"(\w+)\.{table}", self._cmd)
                 if m:
-                    table = m.group(1) + "." + table
-                    if self.loader.materialize_table(table):
-                        return self.select_query(self._cmd, fail_if_missing=True)
-                    else:
-                        print("Loading table...", file=self.__output)
+                    if self.load_adapter_data(m.group(1), table):
+                        return self.select_query(fail_if_missing=True)
                 else:
                     print(e, file=self.__output)
             else:

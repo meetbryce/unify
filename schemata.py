@@ -11,3 +11,10 @@ class Queries:
     select column_name, data_type from information_schema.columns where table_schema = '{}'
         and table_name = '{}' and column_name like '{}' order by column_name desc
     """
+
+class LoadTableRequest:
+    def __init__(self, schema_name, table_name, options={}):
+        self.schema_name = schema_name
+        self.table_name = table_name
+        self.options = options
+        

@@ -3,15 +3,20 @@ start: command
 command: list_files
         | search
         | info
+        | create_table
 
 list_files: "list files"
 search: "search" WS search_query
 info: "info" WS file_or_gsheet_id
 
-search_query: ANY
+create_table: "create table" WS table_name WS "from" WS file_or_gsheet_id (WS "tab" WS tab_name)?
+search_query: SINGLE_QUOTED_STRING
 
-file_or_gsheet_id: ANY
+table_name: WORD
+file_or_gsheet_id: SINGLE_QUOTED_STRING
+tab_name: SINGLE_QUOTED_STRING
 
+SINGLE_QUOTED_STRING  : /'[^']*'/
 ANY             : /.+/ [WS /.*/]*
 DIGIT           : "0".."9"
 LCASE_LETTER    : "a".."z"

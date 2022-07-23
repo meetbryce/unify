@@ -45,6 +45,9 @@ def test_parser(visitor, parser):
     verify_parse("create_view_statement", query="create view foo1 as select 5")
     verify_parse("insert_statement", query="insert into foo1 (id) values (5)")
     verify_parse("delete_statement", query="delete from foo1 where id = 5")
+    verify_parse("drop_schema", query="drop schema myscheme1",
+        args={"schema_ref": "myscheme1"})
+
 
     verify_parse("clear_table", query="clear table github.orgs", args={'table_schema_ref':"github.orgs"})
 

@@ -13,8 +13,15 @@ def test_parser(parser: GsheetCommandParser):
             assert key in parser._safe.args and parser._safe.args[key] == args[key]
 
     verify_parse("list_files", query="list files")
-    verify_parse("search", query="search Employee list",
+    verify_parse("search", query="search 'Employee list'",
         args={"search_query": "Employee list"})
 
-    verify_parse("info", query="info google.com/sheets/xyz123",
+    verify_parse("info", query="info 'google.com/sheets/xyz123'",
         args={"file_or_gsheet_id": "google.com/sheets/xyz123"})
+
+    verify_parse("create_table", query="create table employees from 'sheet1' tab 'tab1'",
+        args={"table_name": "employees", "file_or_gsheet_id": "sheet1", "tab_name": "tab1"})
+
+    verify_parse("create_table", query="create table fin_101 from 'Latest finances'",
+        args={"table_name": "fin_101", "file_or_gsheet_id": "Latest finances", "tab_name": None})
+        

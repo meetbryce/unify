@@ -18,6 +18,6 @@
 - gsheets:
     adapter: gsheets
     options:
-      client_json_path: ./ghseets/gauth_client_id.json
+      client_json_path: /Users/scottp/presto/unify/gsheets/gauth_client_id.json
       
 
