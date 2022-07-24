@@ -20,7 +20,7 @@ class Connection:
         self.adapter.validate()
 
     @classmethod
-    def setup_connections(cls, path=None, conn_list=None, storage_manager=None):
+    def setup_connections(cls, path=None, conn_list=None, storage_mgr_maker=None):
         adapter_table = {}
         for f in glob.glob(f"./rest_specs/*spec.yaml"):
             spec = yaml.load(open(f), Loader=yaml.FullLoader)
@@ -42,7 +42,7 @@ class Connection:
             schema_name = next(iter(opts))
             opts = opts[schema_name]
             adapter_klass, spec = adapter_table[opts['adapter']]
-            adapter = adapter_klass(spec, storage_manager)
+            adapter = adapter_klass(spec, storage_mgr_maker(schema_name))
             c = Connection(adapter, schema_name, opts)
             result.append(c)
         return result

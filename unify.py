@@ -2,6 +2,7 @@ import base64
 from email.parser import Parser
 from inspect import isfunction
 import io
+import json
 import os
 from threading import Thread
 import pydoc
@@ -190,10 +191,9 @@ class TableLoader:
        3. Table exists in the local db.
     """
     def __init__(self):
-        self.storage_manager = BasicStorageManager()
         self.connections = Connection.setup_connections(
             './connections.yaml', 
-            storage_manager=self.storage_manager
+            storage_mgr_maker=lambda schema: BasicStorageManager(schema)
         )
         self.tables = {}
 
@@ -256,30 +256,51 @@ class TableLoader:
             return False
 
 class BasicStorageManager(StorageManager):
-    def __init__(self):
-        self.collections = {}
+    """
+        Stores adapter metadata in DuckDB. Creates a "meta" schema, and creates
+        tables named <adapter schema>_<collection name>.
+    """
+    TABLE_SCHEMA = "(id VARCHAR PRIMARY KEY, blob JSON)"
 
-    def get_col(self, name) -> dict:
-        if name not in self.collections:
-            self.collections[name] = {}
-        return self.collections[name]
+    def __init__(self, adapter_schema: str):
+        self.adapter_schema = adapter_schema
+        with DuckContext() as duck:
+            duck.execute("create schema if not exists meta")
+
+    def ensure_col_table(self, duck, name) -> dict:
+        table = self.adapter_schema + "_" + name
+        duck.execute(
+            f"create table if not exists meta.{table} {self.TABLE_SCHEMA}"
+        )
+        return table
 
     def put_object(self, collection: str, id: str, values: dict) -> None:
-        self.get_col(collection)[id] = values
+        with DuckContext() as duck:
+            table = self.ensure_col_table(duck, collection)
+            duck.execute(f"delete from meta.{table} where id = ?", [id])
+            duck.execute(f"insert into meta.{table} values (?, ?)", [id, json.dumps(values)])
 
     def get_object(self, collection: str, id: str) -> dict:
-        return self.get_col(collection)[id]
+        with DuckContext() as duck:
+            table = self.ensure_col_table(duck, collection)
+            rows = duck.execute(f"select id, blob from meta.{table} where id = ?", [id]).fetchall()
+            if len(rows) > 0:
+                return json.loads(rows[0][1])
+        return None
 
     def delete_object(self, collection: str, id: str) -> bool:
-        col = self.get_col(collection)
-        if id in col:
-            del col[id]
-            return True
-        else:
-            return False
-            
+        with DuckContext() as duck:
+            table = self.ensure_col_table(duck, collection)
+            r = duck.execute(f"delete from meta.{table} where id = ?", [id])
+            print("Delete resulted in: ", r)
+
     def list_objects(self, collection: str) -> list[tuple]:
-        return [(key, val) for key, val in self.get_col(collection).items()]
+        with DuckContext() as duck:
+            table = self.ensure_col_table(duck, collection)
+            return [
+                (key, json.loads(val)) for key, val in \
+                    duck.execute(f"select id, blob from meta.{table}").fetchall()
+            ]
 
 class ParserVisitor(Visitor):
     """ Utility class for visiting our parse tree and assembling the relevant parts
@@ -514,15 +535,18 @@ class RunCommand:
         #        print(table, file=self.__output)
         print("tables\n--------------", file=self.__output)
         if schema_ref:
+            potential = []
             if schema_ref in self.adapters:
                 for tableDef in self.adapters[schema_ref].list_tables():
-                    print(tableDef.name)
+                    potential.append(schema_ref + "." + tableDef.name)
 
-            query = Queries.list_tables_filtered.format(schema_ref)
+            actual = [r[0] for r in \
+                self.duck.execute(Queries.list_tables_filtered.format(schema_ref)).fetchall()]
+            full = set(potential) | set(actual)
+            print("\n".join(list(full)), file=self.__output)
         else:
             query = Queries.list_tables
-
-        self._execute_duck(query, header=False)
+            self._execute_duck(query, header=False)
 
     def show_columns(self, table_ref, column_filter=None):
         if table_ref:

@@ -33,7 +33,7 @@ insert_statement: "insert" ANY
 
 delete_statement: "delete" ANY
 
-drop_schema: "drop schema" WS schema_ref
+drop_schema: "drop schema" WS schema_ref (WS "cascade")?
 
 clear_table: "clear table" WS table_schema_ref
 

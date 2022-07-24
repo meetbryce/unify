@@ -13,7 +13,7 @@ def connection():
                 }
             }]
     
-    connections = Connection.setup_connections(conn_list=config)
+    connections = Connection.setup_connections(conn_list=config, storage_mgr_maker=lambda x: x)
     return connections[0]
 
 def test_mocksvc_config(connection):
