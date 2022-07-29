@@ -96,12 +96,12 @@ delete a variable:
 
 ## Exporting data
 
-Unify supports the `>>` operator for exporting data out of the system:
+Some Adapters can support writing results to their connected system. Generally we don't
+try to follow `create table` semantics as much as "data export" semantics. This implies
+that data is "exported" to the target system as "append only". Typical use cases
+are exporting data to files on S3 or Google Sheets. 
 
-    > select * from orders >> file:./orders.csv     // exported as CSV
-    > select * from orders >> file:./orders.parquet // export as Parquet
-    > select * from orders >> file[parquet]:./orders_data // export as Parquet
-    > select * from orders >> s3:/bucket1/orders.parquet // export as Parquet
+See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 
 ### Integration with Google sheets
 

@@ -9,6 +9,8 @@ from typing import List, AnyStr, Dict
 import typing
 
 import requests
+from storage_manager import StorageManager
+import pandas as pd
 
 Adapter = typing.NewType("Adapter", None)
 
@@ -353,27 +355,6 @@ class RESTTable(TableDef):
                 print("Aborting table scan after {} pages", page-1)
                 break
 
-class StorageManager:
-    """
-        Passed to adapters to allow them to store additional metadata for their operation.
-        Exposes a simple object storage interface:
-
-        mgr.put_object(collection: str, id: str, values: dict)
-        mgr.get_object(collection: str, id: str) -> values: dict
-        mgr.list_objects(collection: str) -> results: list<dict>
-    """
-    def put_object(self, collection: str, id: str, values: dict) -> None:
-        pass
-
-    def get_object(self, collection: str, id: str) -> dict:
-        return {}
-
-    def delete_object(self, collection: str, id: str) -> bool:
-        return False
-
-    def list_objects(self, collection: str) -> list[dict]:
-        return []
-
 
 class Adapter:
     def __init__(self, name, storage: StorageManager):
@@ -388,7 +369,7 @@ class Adapter:
     def list_tables(self) -> List[TableDef]:
         pass
 
-    def lookupTable(self, tableName: str):
+    def lookupTable(self, tableName: str) -> TableDef:
         return next(t for t in self.tables if t.name == tableName)
 
     def resolve_auth(self, connection_name: AnyStr, connection_opts: Dict):
@@ -434,6 +415,17 @@ class Adapter:
             return True
         else:
             return False
+
+    # Exporting data
+    def create_output_table(self, file_name, opts={}):
+        raise RuntimeError(f"Adapter {self.name} does not support writing")
+
+    def write_page(self, output_handle, page: pd.DataFrame):
+        raise RuntimeError(f"Adapter {self.name} does not support writing")
+
+    def close_output_table(self, output_handle):
+        raise RuntimeError(f"Adapter {self.name} does not support writing")
+        
 
 class RESTAdapter(Adapter):
     def __init__(self, spec, storage: StorageManager=None):

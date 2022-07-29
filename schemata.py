@@ -6,6 +6,7 @@ class Queries:
     _ordering = "order by table_schema, table_name"
     _list_tables = "select concat(table_schema, '.', table_name) from information_schema.tables "
     list_tables = _list_tables + _ordering
+    list_all_tables = "select table_schema, table_name from information_schema.tables"
     list_tables_filtered = _list_tables + " where table_schema = '{}' " + _ordering
     list_columns = """
     select column_name, data_type from information_schema.columns where table_schema = '{}'

@@ -28,13 +28,15 @@ from timeit import default_timer as timer
 # DuckDB
 import duckdb
 
-from rest_schema import Adapter, Connection, StorageManager
+from rest_schema import Adapter, Connection
+from storage_manager import StorageManager
 from schemata import LoadTableRequest, Queries
 from parsing_utils import (
     find_subtree, 
     find_node_return_child, 
     find_node_return_children,
-    collect_child_strings
+    collect_child_strings,
+    collect_child_text
 )
 
 DATA_HOME = "./data"
@@ -72,6 +74,21 @@ class TableScan(Thread):
         # embedded lists. To work around that for now we are just removing those columns
         # from our results.
         # TODO: Convert the structured element into a JSON field
+
+        # It's easy to get columns containing mixed types, but this won't work well
+        # when we convert to a table. So we look for those and force convert them to
+        # strings
+
+        for column in df.columns:
+            if pd.api.types.infer_dtype(df[column]).startswith("mixed"):
+                df[column] = df[column].apply(lambda x: str(x))
+            # FIXME: sample 10 values and if more than 50% are numeric than convert to numeric
+            # convert numeric: df[column] = df[column].apply(lambda x: pd.to_numeric(x, errors = 'ignore'))
+            if df[column][0].count("/") == 2 or df[column][0].count(":") >= 2:
+                try:
+                    df[column] = pd.to_datetime(df[column])
+                except:
+                    pass
 
         schema = pa.Schema.from_pandas(df)
 
@@ -155,6 +172,23 @@ class TableScan(Thread):
             
         print("Finished table scan for: ", self.tableMgr.name)
 
+class TableExporter(Thread):
+    def __init__(self, duck, query: str, adapter: Adapter, target_file: str):
+        self.duck = duck
+        self.query = query
+        self.adapter: Adapter = adapter
+        self.target_file = target_file
+
+    def run(self):
+        # Runs the query against DuckDB in chunks, and sends those chunks to the adapter
+        self.output_handle = self.adapter.create_output_table(self.target_file)
+
+        r = self.duck.execute(self.query)
+        # FIXME: Use DF chunking and multiple pages
+        self.adapter.write_page(self.output_handle, r.df())
+
+        self.adapter.close_output_table(self.output_handle)
+
 
 class TableMgr:
     def __init__(self, schema, rest_spec, table_spec, auth = None, params={}):
@@ -193,7 +227,7 @@ class TableLoader:
     def __init__(self):
         self.connections = Connection.setup_connections(
             './connections.yaml', 
-            storage_mgr_maker=lambda schema: BasicStorageManager(schema)
+            storage_mgr_maker=lambda schema: DuckdbStorageManager(schema)
         )
         self.tables = {}
 
@@ -214,7 +248,7 @@ class TableLoader:
         with DuckContext() as duck:
             qual = schema + "." + table
             if qual in self.tables:
-                tmgr = self.tables[table]
+                tmgr = self.tables[qual]
             else:
                 table_spec = self.adapters[schema].lookupTable(table)
                 tmgr = TableMgr(schema, self.adapters[schema], table_spec)
@@ -255,7 +289,7 @@ class TableLoader:
         except:
             return False
 
-class BasicStorageManager(StorageManager):
+class DuckdbStorageManager(StorageManager):
     """
         Stores adapter metadata in DuckDB. Creates a "meta" schema, and creates
         tables named <adapter schema>_<collection name>.
@@ -315,9 +349,10 @@ class ParserVisitor(Visitor):
         'hbar_chart': 'barh'
     }
 
-    def perform_new_visit(self, parse_tree):
+    def perform_new_visit(self, parse_tree, full_code):
         self._the_command = None
         self._the_command_args = {}
+        self._full_code = full_code
         self.visit(parse_tree)
         return self._the_command
 
@@ -333,12 +368,11 @@ class ParserVisitor(Visitor):
     def show_columns(self, tree):
         """" Always returns 'table_ref' either qualified or unqualified by the schema name."""
         self._the_command = 'show_columns'
-        table = find_node_return_children("table_schema_ref", tree)
-        if table:
-            table = ".".join(table)
-        else:
-            table = find_node_return_child("table_ref", tree)
-        self._the_command_args['table_ref'] = table
+        self._the_command_args['table_ref'] = collect_child_text(
+            "table_ref", 
+            tree, 
+            full_code=self._full_code
+        )
         filter = collect_child_strings("column_filter", tree)
         if filter:
             self._the_command_args['column_filter'] = filter.strip()
@@ -346,20 +380,22 @@ class ParserVisitor(Visitor):
 
     def describe(self, tree):
         self._the_command = 'describe'
-        if len(tree.children) == 0:
-            self._the_command_args['table_ref'] = None
-        elif tree.children[0].data.value == 'table_ref':
-            table = tree.children[0].children[0].value
-            self._the_command_args['table_ref'] = table
-        else:
-            schema = tree.children[0].children[0].value
-            table = tree.children[0].children[1].value
-            self._the_command_args['table_ref'] = f"{schema}.{table}"
+        self._the_command_args['table_ref'] = collect_child_text(
+            "table_ref", 
+            tree, 
+            full_code=self._full_code
+        )
         return tree
 
     def select_query(self, tree):
         self._the_command = 'select_query'
     
+    def select_for_writing(self, tree):
+        self._the_command = "select_for_writing"
+        self._the_command_args["adapter_ref"] = find_node_return_child("adapter_ref", tree)
+        self._the_command_args["file_ref"] = find_node_return_child("file_ref", tree).strip("'")
+        self._the_command_args["select_query"] = collect_child_text("select_query", tree, self._full_code)
+
     def create_statement(self, tree):
         self._the_command = 'create_statement'
 
@@ -368,6 +404,14 @@ class ParserVisitor(Visitor):
 
     def delete_statement(self, tree):
         self._the_command = 'delete_statement'
+
+    def drop_table(self, tree):
+        self._the_command = "drop_table"
+        self._the_command_args['table_ref'] = collect_child_text(
+            "table_ref", 
+            tree, 
+            full_code=self._full_code
+        )
 
     def drop_schema(self, tree):
         self._the_command = "drop_schema"
@@ -418,7 +462,7 @@ class RunCommand:
             print("Database is locked. Is there a write process running?")
             sys.exit(1)
 
-        self.parser = Lark(open("grammar.lark").read())
+        self.parser = Lark(open("grammar.lark").read(), propagate_positions=True)
         self.__output = sys.stdout
         self.parser_visitor = ParserVisitor()
         self.loader = TableLoader()
@@ -470,7 +514,7 @@ class RunCommand:
                     self.__output = output_buffer
                 self._cmd = cmd
                 parse_tree = self.parser.parse(self._cmd)
-                command = self.parser_visitor.perform_new_visit(parse_tree)
+                command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
                 if command:
                     result = getattr(self, command)(**self.parser_visitor._the_command_args)
                     if result:
@@ -523,8 +567,14 @@ class RunCommand:
     def show_schemas(self):
         self._execute_duck(Queries.list_schemas)
 
+    def drop_table(self, table_ref):
+        print(f"Are you sure you want to drop the table '{table_ref}' (y/n)?", end=' ')
+        val = input()
+        if val == "y":
+            self._execute_duck(self._cmd)
+
     def drop_schema(self, schema_ref):
-        print("Are you sure you want to drop the schema '{schema_ref}' (y/n)?", end=' ')
+        print(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)?", end=' ')
         val = input()
         if val == "y":
             self._execute_duck(self._cmd)
@@ -533,7 +583,6 @@ class RunCommand:
         # FIXME: merge tables known us but not yet to Duck
         #    for table in sorted(self.loader.tables.keys()):
         #        print(table, file=self.__output)
-        print("tables\n--------------", file=self.__output)
         if schema_ref:
             potential = []
             if schema_ref in self.adapters:
@@ -543,10 +592,13 @@ class RunCommand:
             actual = [r[0] for r in \
                 self.duck.execute(Queries.list_tables_filtered.format(schema_ref)).fetchall()]
             full = set(potential) | set(actual)
+            print("tables\n--------------", file=self.__output)
             print("\n".join(list(full)), file=self.__output)
         else:
-            query = Queries.list_tables
-            self._execute_duck(query, header=False)
+            print("{:20s} {}".format("schema", "table"), file=self.__output)
+            print("{:20s} {}".format("---------", "----------"), file=self.__output)
+            for r in self.duck.execute(Queries.list_all_tables).fetchall():
+                print("{:20s} {}".format(r[0], r[1]), file=self.__output)
 
     def show_columns(self, table_ref, column_filter=None):
         if table_ref:
@@ -604,6 +656,19 @@ class RunCommand:
                     print(e, file=self.__output)
             else:
                 print(e, file=self.__output)
+
+    def print(self, *args, **kwargs):
+        kwargs["file"] = self.__output
+        print(*args, **kwargs)
+
+    def select_for_writing(self, select_query, adapter_ref, file_ref):
+        if adapter_ref in self.adapters:
+            adapter = self.adapter[adapter_ref]
+            exporter = TableExporter(select_query, adapter, file_ref)
+            exporter.run()
+            self.print(f"Exported query result to '{file_ref}'")
+        else:
+            self.print(f"Error, uknown adapter '{adapter_ref}'")
 
     def clear_table(self, table_schema_ref=None):
         self.loader.truncate_table(table_schema_ref)

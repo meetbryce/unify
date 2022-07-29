@@ -39,9 +39,26 @@ def find_node_return_child(rule, tree):
     else:
         return None
 
+def collect_strings(node):
+    if isinstance(node, Tree):
+        res = []
+        for c in node.children:
+            res.extend(collect_strings(c))
+        return res
+    else:
+        return [node.value]
+
 def collect_child_strings(rule, tree):
     st = find_subtree(rule, tree)
     if st:
-        return " ".join([c.value for c in st.children])
+        return " ".join(collect_strings(st))
     else:
         return None
+
+def collect_child_text(rule: str, tree: Tree, full_code: str) -> str:
+    st = find_subtree(rule, tree)
+    if st:
+        return full_code[st.meta.start_pos:st.meta.end_pos]
+    else:
+        return None
+

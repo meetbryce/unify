@@ -1,7 +1,7 @@
-from unify import BasicStorageManager
+from unify import DuckdbStorageManager
 
 def test_storage_manager():
-    store = BasicStorageManager("github")
+    store = DuckdbStorageManager("github")
 
     d1 = {"foo":"bar", "key2":"val2"}
     d2 = {"cat":"dog", "name":"house"}
@@ -23,7 +23,7 @@ def test_storage_manager():
     assert list(store.list_objects("col1")) == [("key2", d2)]
 
     # Ensure stores for different adapters don't clash
-    store2 = BasicStorageManager("jira")
+    store2 = DuckdbStorageManager("jira")
     store.put_object("col1", "key1", d1)
     store2.put_object("col1", "key1", d2)
 

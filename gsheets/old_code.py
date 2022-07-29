@@ -14,7 +14,6 @@ from google.oauth2.credentials import Credentials
 from googleapiclient import discovery
 import google.auth.transport.requests
 from google_auth_oauthlib.flow import InstalledAppFlow
-import pandas as pd
 
 # project
 from rest_schema import Adapter, StorageManager, TableDef
@@ -64,6 +63,7 @@ class GSheetsClient:
 
         self.DRIVE = discovery.build('drive', 'v3', credentials=self.creds)
         self.SHEETS = discovery.build('sheets', 'v4', credentials=self.creds)
+        print(self.SHEETS.spreadsheets().values().get(spreadsheetId='16YgB5XykiMBMXQfHk8lI9hYilJ2ctn6madVAJoKt12Q',range="A1:A2").execute())
         return True
 
     def stdin_available(self):
@@ -74,6 +74,46 @@ class GSheetsClient:
             # Pytest overrides stdin and throws exception on 'fileno'
             return False
         return True
+
+    def _loadMappedTables(self):
+        self.MAPPED.clear()
+        self.SCHEMA_CACHE.clear()
+        for key in self.TABLE_STORE.keys():
+            if key.endswith("<schema>"):
+                self.SCHEMA_CACHE[key[0:-8]] = self.TABLE_STORE[key]
+            else:
+                self.MAPPED.append(self.TABLE_STORE[key])
+
+    def listTables(self):
+        tables = [row['table_name'] for row in self.MAPPED]
+        tables.extend(
+            [GSheetsClient.ALL_SPREADSHEETS_TABLE, GSheetsClient.MAPPED_SHEETS_TABLE]
+        )
+        return tables
+
+    def columnList(self, table):
+        if table == GSheetsClient.ALL_SPREADSHEETS_TABLE:
+            return [("title", "VARCHAR"), ("spreadsheet_id", "VARCHAR"), ("url", "VARCHAR")]
+        elif table == GSheetsClient.MAPPED_SHEETS_TABLE:
+            return [("title", "VARCHAR"), ("table_name", "VARCHAR"), 
+                    ("spreadsheet_id", "VARCHAR"), ("sheet_name", "VARCHAR"),
+                    ("url", "VARCHAR")]
+        else:
+            if table in self.SCHEMA_CACHE:
+                return self.SCHEMA_CACHE[table]
+
+            try:
+                match = next( t for t in self.MAPPED if t['table_name'] == table)
+                columns = self._downloadSchema(match['spreadsheet_id'], match['sheet_name'])
+
+                self.storeColumnTuples(table, columns)
+                return columns
+
+            except StopIteration:
+                raise RuntimeError(f"Unknown table '{table}'")
+            except:
+                traceback.print_exc()
+                raise RuntimeError(f"Error downloading schema {table}")
 
 
     def get_all_sheets_files(self, name_match=None):
@@ -95,6 +135,65 @@ class GSheetsClient:
             if not page_token:
                 break
 
+    def getTableRows(self, table, lastRow):
+        if table == GSheetsClient.ALL_SPREADSHEETS_TABLE:
+            files = self.DRIVE.files().list(
+                q="mimeType='application/vnd.google-apps.spreadsheet'",
+                fields="files(id, name, mimeType, webContentLink, webViewLink)",
+                orderBy="name"
+            ).execute().get('files', [])
+
+            col_map = {'title': 'name', 'spreadsheet_id': 'id', 'url': 'webViewLink'}
+            return files, col_map, None
+        elif table == GSheetsClient.MAPPED_SHEETS_TABLE:
+            return self.MAPPED, None, None
+        else:
+            rows, lastRow = self._downloadSheetData(table, lastRow)
+            return rows, None, lastRow
+
+
+    def _downloadSheetData(self, tableName, lastRow = 0):
+        print(self.SCHEMA_CACHE)
+        colPairs = self.SCHEMA_CACHE[tableName]
+        spec = self.lookupTableInfo(tableName)
+        spreadsheetId = spec['spreadsheet_id']
+        sheet_name = spec['sheet_name']
+        pageSize = 1000
+        if lastRow is None:
+            lastRow = 0
+        range = f"{sheet_name}!A{lastRow+1}:Z{lastRow+pageSize}"
+        print("Downloading sheet range: ", range)
+        response = self.SHEETS.spreadsheets().values().get(
+            spreadsheetId=spreadsheetId, range=range).execute()
+        rows = response.get('values', [])
+        print('{0} rows retrieved.'.format(len(rows)))
+        results = []
+        if len(rows) > 0:
+            for row in rows[1:]:
+                rowdict = {}
+                for idx, c in enumerate(colPairs):
+                    try:
+                        rowdict[c[0]] = row[idx]
+                    except IndexError:
+                        rowdict[c[0]] = ''
+                results.append(rowdict)
+        if len(rows) >= pageSize:
+            lastRow = lastRow + len(results)
+            print("Returning nextRow ", lastRow)
+        else:
+            lastRow = None
+        return results, lastRow
+
+    def _downloadSchema(self, spreadsheetId, sheet_name):
+        response = self.SHEETS.spreadsheets().values().get(
+            spreadsheetId=spreadsheetId, range=f"{sheet_name}!A1:Z2").execute()
+        rows = response.get('values', [])
+        print('{0} rows retrieved.'.format(len(rows)))
+        columns = []
+        if len(rows) > 0:
+            for cell in rows[0]:
+                columns.append((makeTableSafeName(cell), 'VARCHAR'))
+        return columns
 
     def writeRows(self, table, records):
         print("***RECORDS: ", records)
@@ -143,39 +242,6 @@ class GSheetsClient:
 
         return len(records)
 
-    def peek_sheet(self, sheetId, tab = None):
-        range = "A1:Z10"
-        if tab:
-            range = tab + "!" + range
-        response = self.SHEETS.spreadsheets().values().get(
-            spreadsheetId=sheetId, 
-            range=range, 
-            #valueRenderOption="UNFORMATTED_VALUE"
-        ).execute()
-        return response.get('values', [])
-
-    def create_new_sheet(self, newSheetName: str):
-        # FIXME: Create a new sheet with the given name
-        spreadsheet_body = {"properties": {"title":newSheetName}}
-        response = self.SHEETS.spreadsheets().create(body=spreadsheet_body).execute()
-        return response['spreadsheetId']
-
-    def write_data_to_sheet(self, sheetId=None, page: pd.DataFrame = None):
-        # TODO: allow this to be called with multiple pages of data
-        # Q: What if you want to write to a new tab of an existing sheet?
-
-        # FIXME: handle different tabs
-        range = f"1:1"
-        # convert DataFrame to sheets data format
-        value_range_body = {"range": range, "values": page.values}
-        request = self.SHEETS.spreadsheets().values().append(
-            spreadsheetId=sheetId,
-            range=range,
-            valueInputOption='RAW', 
-            body=value_range_body)
-        response = request.execute()
-        print("Response: ", response)
-
     def storeSheetInfo(self, response, useTitle=None):
         info = {'title': response['properties']['title'],
                 'url': response['spreadsheetUrl'],
@@ -221,19 +287,42 @@ class GSheetsClient:
 
         return sheet_info['spreadsheet_id']
 
+    def getTypeMap(self, tableName):
+        # Returns a dict mapping column names to types
+        if tableName in [GSheetsClient.ALL_SPREADSHEETS_TABLE, GSheetsClient.MAPPED_SHEETS_TABLE]:
+            return {}
+        elif tableName in self.SCHEMA_CACHE:
+            return dict(self.SCHEMA_CACHE[tableName])
+        else:
+            raise RuntimeError(f"No schema for {tableName}")
+
+    def removeTableRecord(self, tableName):
+        if tableName in [GSheetsClient.ALL_SPREADSHEETS_TABLE, GSheetsClient.MAPPED_SHEETS_TABLE]:
+            raise RuntimeError("Cannot drop system tables")
+        else:
+            for i in range(len(self.MAPPED)):
+                if self.MAPPED[i]['table_name'] == tableName:
+                    del self.MAPPED[i]
+                    try:
+                        del self.SCHEMA_CACHE[tableName]
+                    except KeyError:
+                        pass
+                    try:
+                        del self.TABLE_STORE[f"{tableName}<schema>"]
+                    except KeyError:
+                        pass
+                    return
 
 class GSheetsTableSpec(TableDef):
-    # Represents a Google Sheet as a queryable Table spec to Unify.
-
-    def __init__(self, sheetsClient: GSheetsClient, table: str, opts: dict):
+    def __init__(self, sheetsClient, table: str, opts: dict):
         super().__init__(table)
         self.opts = opts # 'sheetId' and 'tab_name'
-        self.sheetsClient: GSheetsClient = sheetsClient
+        self.sheetsClient = sheetsClient
     
     def query_resource(self, tableLoader):
         """ Generator which yields (page, size_return) tuples for all rows from
-            a Google Sheet. Each row is returned as a dict mapping the column
-            names to value.
+            an API endpoint. Each page should be a list of dicts representing
+            each row of results.
         """
         spreadsheetId = self.opts['sheetId']
         sheet_name = self.opts['tab_name']
@@ -244,11 +333,7 @@ class GSheetsTableSpec(TableDef):
             range = sheet_name + "!" + range
         print("Downloading sheet range: ", range)
         response = self.sheetsClient.spreadsheets().values().get(
-            spreadsheetId=spreadsheetId, 
-            range=range, 
-            valueRenderOption="UNFORMATTED_VALUE",
-            dateTimeRenderOption="FORMATTED_STRING"
-        ).execute()
+            spreadsheetId=spreadsheetId, range=range, valueRenderOption="UNFORMATTED_VALUE").execute()
         rows = response.get('values', [])
         print('{0} rows retrieved.'.format(len(rows)))
         results = []
@@ -259,6 +344,97 @@ class GSheetsTableSpec(TableDef):
                 results.append(rowdict)
         size_return = []
         yield (results, size_return)
+
+
+class GSheetsAdapter(Adapter):
+    def __init__(self, spec, storage: StorageManager):
+        super().__init__(spec['name'], storage)
+        self.auth = spec['auth'].copy()
+        self.output = sys.stdout
+
+        self.parser: GsheetCommandParser = GsheetCommandParser()
+        self.help = """
+The GSheets connectors support reading and writing data from Google Sheets.
+Try these commands:
+  gsheets list files
+  gsheets search '<file name>'
+  gsheets info <file name> - list sheet names from a sheet  
+  gsheets create table <name> from file '<sheet title or id>' [tab '<tab name>']
+  gsheets create view <name> from file '<sheet title or id>' [tab '<tab name>']
+
+'create table' will copy all data from the sheet into a local table. This is a good
+option if the sheet is large and data is not changing frequently. By default the
+data from the first tab will be imported unless a different tab name is specified.
+
+Alternatively, 'create view' will create a view backed by the Google sheet, so that
+queries will pull from sheet dynamically each time. This incurs more latency but
+is a good option if the sheet data is changing frequenly. 
+        """
+        self.client: GSheetsClient = GSheetsClient(spec)
+        self.tables = None
+
+    def validate(self):
+        return self.client.validate(self)
+
+    def list_tables(self):
+        if not self.tables:
+            actuals = super().list_tables()
+            # FIXME: Have parent method return actual tables, and merge that list
+            # with "declared" ones
+            self.tables = [
+                GSheetsTableSpec(self.client.SHEETS, tup[0], tup[1]) \
+                    for tup in self.storage.list_objects('tables')
+            ]
+        return self.tables
+
+    def list_files(self):
+        for sheet in self.client.get_all_sheets_files():
+            print(sheet['name'], "\t", sheet['webViewLink'], file=self.output)
+
+    def search(self, search_query=None):
+        for sheet in self.client.get_all_sheets_files(search_query):
+            print(sheet['name'], "\t", sheet['webViewLink'], file=self.output)
+
+    def info(self, file_or_gsheet_id=None):
+        if len(file_or_gsheet_id) > 15 and file_or_gsheet_id.find(" ") == -1:
+            # assume a ghseet id
+            infos = [self.client.getSheetInfo(file_or_gsheet_id)]
+        else:
+            infos = (self.client.getSheetInfo(sh['id']) \
+                for sh in self.client.get_all_sheets_files(file_or_gsheet_id))
+        for sheet in infos:
+            t = sheet['properties']['title']
+            m = sheet['modifiedTime']
+            print("Sheet '{}', last modified {}, has tabs: ".format(t, m), file=self.output)
+            for idx, tab in enumerate(sheet['sheets']):
+                print((idx+1), " - ", tab['properties']['title'], file=self.output)
+            print("\n", file=self.output)
+
+    def create_table(self, table_name, file_or_gsheet_id, tab_name):
+        sheetId = file_or_gsheet_id               
+        self.storage.put_object(
+            'tables', 
+            table_name,
+            {'sheetId': sheetId, 'tab_name': tab_name}
+        )
+        # Todo: trigger a query which will load the table
+
+    def supports_commands(self) -> bool:
+        return True
+
+    def run_command(self, code: str, output_buffer: io.TextIOBase) -> None:
+        # see if base wants to run it
+        if output_buffer:
+            self.output = output_buffer
+        if not super().run_command(code, output_buffer):
+            self.last_code = code
+            command = self.parser.parse_and_run(code, output_buffer)
+            if command:
+                result = getattr(self, command)(**self.parser._safe.args)
+                if result:
+                    return result
+            return True
+        return True
 
 class HideOurInstanceVars:
     pass
@@ -292,16 +468,6 @@ class GsheetCommandParser(Visitor):
         self._safe.args['file_or_gsheet_id'] = collect_child_strings("file_or_gsheet_id", tree).strip("'")
         return tree
 
-    def peek(self, tree: Tree) -> Tree:
-        self._safe.command = "peek"
-        self._safe.args['file_or_gsheet_id'] = collect_child_strings("file_or_gsheet_id", tree).strip("'")
-        tab = collect_child_strings("tab_name", tree)
-        if tab:
-            self._safe.args['tab_name'] = tab.strip("'")
-        else:
-            self._safe.args['tab_name'] = None
-        return tree
-
     def create_table(self, tree: Tree) -> Tree:
         self._safe.command = "create_table"
         self._safe.args['table_name'] = find_node_return_child("table_name", tree)
@@ -312,144 +478,4 @@ class GsheetCommandParser(Visitor):
         else:
             self._safe.args['tab_name'] = None
         return tree
-
-    def create_view(self, tree: Tree) -> Tree:
-        res = self.create_table(tree)
-        self._safe.command = "create_view"
-        return res
-      
-
-class GSheetsAdapter(Adapter):
-    def __init__(self, spec, storage: StorageManager):
-        super().__init__(spec['name'], storage)
-        self.auth = spec['auth'].copy()
-        self.output = sys.stdout
-
-        self.parser: GsheetCommandParser = GsheetCommandParser()
-        self.help = """
-The GSheets connectors support reading and writing data from Google Sheets.
-Try these commands:
-  gsheets list files
-  gsheets search '<file name>'
-  gsheets info <file name> - list sheet names from a sheet  
-  gsheets peek <sheets file> [<tab name>]  # peak at the first few rows in a sheet
-  gsheets create table <name> from '<sheet title or id>' [tab '<tab name>']
-  gsheets create view <name> from '<sheet title or id>' [tab '<tab name>']
-
-'create table' will copy all data from the sheet into a local table. This is a good
-option if the sheet is large and data is not changing frequently. By default the
-data from the first tab will be imported unless a different tab name is specified.
-
-Alternatively, 'create view' will create a view backed by the Google sheet, so that
-queries will pull from the sheet dynamically each time. This incurs more latency but
-is a good option if the sheet data is changing frequenly. 
-        """
-        self.client: GSheetsClient = GSheetsClient(spec)
-        self.tables = None
-
-    def validate(self):
-        return self.client.validate(self)
-
-    def list_tables(self):
-        if not self.tables:
-            self.tables = [
-                GSheetsTableSpec(self.client.SHEETS, tup[0], tup[1]) \
-                    for tup in self.storage.list_objects('tables')
-            ]
-        return self.tables
-
-    def list_files(self):
-        for sheet in self.client.get_all_sheets_files():
-            print(sheet['name'], "\t", sheet['webViewLink'], file=self.output)
-
-    def get_matching_sheets(self, search_query):
-        return self.client.get_all_sheets_files(search_query)
-
-    def search(self, search_query=None):
-        for sheet in self.get_matching_sheets(search_query):
-            print(sheet['name'], "\t", sheet['webViewLink'], file=self.output)
-
-    def print_sheet_header(self, sheetInfo, msg):
-            t = sheetInfo['properties']['title']
-            m = sheetInfo['modifiedTime']
-            print("Sheet '{}', last modified {}, {}: ".format(t, m, msg), file=self.output)
-
-    def resolve_sheet_id(self, file_or_gsheet_id):
-        if len(file_or_gsheet_id) > 15 and file_or_gsheet_id.find(" ") == -1:
-            info = self.client.getSheetInfo(file_or_gsheet_id)
-            return info['id']
-        else:
-            # Find the sheet by name but it has to be an exact match
-            matches = list(self.get_matching_sheets(file_or_gsheet_id))
-            if len(matches) == 1:
-                return matches[0]['id']
-            else:
-                raise RuntimeError(f"Multiple sheets match name '{file_or_gsheet_id}'")
-
-    def info(self, file_or_gsheet_id=None):
-        if len(file_or_gsheet_id) > 15 and file_or_gsheet_id.find(" ") == -1:
-            # assume a ghseet id
-            infos = [self.client.getSheetInfo(file_or_gsheet_id)]
-        else:
-            infos = (self.client.getSheetInfo(sh['id']) \
-                for sh in self.client.get_all_sheets_files(file_or_gsheet_id))
-        for sheet in infos:
-            self.print_sheet_header(sheet, "has tabs")
-            for idx, tab in enumerate(sheet['sheets']):
-                print((idx+1), " - ", tab['properties']['title'], file=self.output)
-            print("\n", file=self.output)
-
-    def peek(self, file_or_gsheet_id=None, tab_name=None):
-        if len(file_or_gsheet_id) > 15 and file_or_gsheet_id.find(" ") == -1:
-            sheetId = file_or_gsheet_id
-        else:
-            matches = list(self.client.get_all_sheets_files(file_or_gsheet_id))
-            if len(matches) > 0:
-                sheetId = matches[0]['id']
-            else:
-                raise RuntimeError("No matching spreadsheets found")
-        info = self.client.getSheetInfo(sheetId)
-        rows = self.client.peek_sheet(sheetId, tab_name)
-        self.print_sheet_header(info, "peek")
-        print(pd.DataFrame(rows), file=self.output)
-
-    def create_table(self, table_name, file_or_gsheet_id, tab_name):
-        sheetId = self.resolve_sheet_id(file_or_gsheet_id)
-        self.storage.put_object(
-            'tables', 
-            table_name,
-            {'sheetId': sheetId, 'tab_name': tab_name}
-        )
-        self.tables = None
-        # Todo: trigger a query which will load the table
-
-    def supports_commands(self) -> bool:
-        return True
-
-    def run_command(self, code: str, output_buffer: io.TextIOBase) -> None:
-        # see if base wants to run it
-        if output_buffer:
-            self.output = output_buffer
-        if not super().run_command(code, output_buffer):
-            self.last_code = code
-            command = self.parser.parse_and_run(code, output_buffer)
-            if command:
-                result = getattr(self, command)(**self.parser._safe.args)
-                if result:
-                    return result
-            return True
-        return True
-
-    # Exporting data
-    def create_output_table(self, file_name, opts={}):
-        # FIXME: handle tabs
-        return self.client.create_new_sheet(file_name) # returns the sheetId
-
-    def write_page(self, output_handle, page: pd.DataFrame):
-        sheetId = output_handle
-        self.client.write_data_to_sheet(sheetId=sheetId, page=page)
-
-    def close_output_table(self, output_handle):
-        # Sheets REST API is stateless
-        pass
 
