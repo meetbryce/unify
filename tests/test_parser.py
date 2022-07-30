@@ -46,14 +46,16 @@ def test_select(visitor, parser):
 
     verify_parse(v, p, "select_query", query="select * from table")
     verify_parse(v, p, "select_query", query="select * from sch1.table2")
+    verify_parse(v, p, "select_query", query="select count(*) from sch1.table2")
+    verify_parse(v, p, "select_query", query="select name, count(*) as count from sch1.table2")
 
     # newlines in select are ok
     verify_parse(v, p, "select_query", query="select * \nfrom table")
     verify_parse(v, p, "select_query", query="select * \nfrom table\nlimit 10")
 
     verify_parse(v, p, "select_query", query="select * \nfrom table\nlimit 10")
-    complex_query = "select id, name, users.date from users, costs where \n" + \
-        " id = 5 and name != 'scooter' and users.date is today order by users.date"
+    complex_query = "select id, name, sch1.users.date from sch1.users, sch2.costs where \n" + \
+        " id = 5 and name != 'scooter' and sch1.users.date is today order by sch1.users.date"
     verify_parse(v, p, "select_query", complex_query)
 
 def test_other_statements(visitor, parser):

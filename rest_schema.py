@@ -19,7 +19,7 @@ class Connection:
         self.schema_name: str = schema_name
         self.adapter: Adapter = adapter
         self.adapter.resolve_auth(self.schema_name, opts['options'])
-        self.adapter.validate()
+        self.is_valid = self.adapter.validate()
 
     @classmethod
     def setup_connections(cls, path=None, conn_list=None, storage_mgr_maker=None):
@@ -46,7 +46,10 @@ class Connection:
             adapter_klass, spec = adapter_table[opts['adapter']]
             adapter = adapter_klass(spec, storage_mgr_maker(schema_name))
             c = Connection(adapter, schema_name, opts)
-            result.append(c)
+            if c.is_valid:
+                result.append(c)
+            else:
+                print("Failed to load connection {schema_name} as adapter is invalid", file=sys.stderr)
         return result
 
     def list_tables(self):
@@ -140,6 +143,15 @@ class OffsetAndCountPager(PagingHelper):
         self.current_offset += page_count
         return page_count >= self.page_size
 
+class UnifyLogger:
+    INFO = 1
+    WARNING = 2
+    ERROR = 3
+
+    def log_table(table: str, level: int, *args) -> None:
+        pass
+
+
 class TableDef:
     def __init__(self, name):
         self._name = name
@@ -162,7 +174,7 @@ class TableDef:
     def select_list(self, selects: list):
         self._select_list = selects
 
-    def query_resource(self, tableLoader):
+    def query_resource(self, tableLoader, logger: UnifyLogger):
         pass
 
     @property
@@ -225,13 +237,6 @@ class RESTTable(TableDef):
         # strip column annotations
         self.query_path = re.sub(r'{\*(\w+)\}', '{\\1}', self.query_path)        
 
-        # if dictvals.get('json_response'):
-        #     self.columns.extend(self.parse_json_for_columns(json.loads(dictvals['json_response'])))
-        #     if self.result_body_path is None:
-        #         self.result_type = 'object'
-        # else:
-        #     self.columns.extend([RESTCol(d) for d in dictvals.get('columns', [])])
-
         self.colmap = {col.name: col for col in self.columns}
         self.params = dictvals.get('params', {})
         self.request_data = dictvals.get('body')
@@ -287,7 +292,7 @@ class RESTTable(TableDef):
     def qualified_name(self):
         return self.spec.name + "." + self.name
 
-    def query_resource(self, tableLoader):
+    def query_resource(self, tableLoader, logger: UnifyLogger):
         """ Generator which yields (page, size_return) tuples for all rows from
             an API endpoint. Each page should be a list of dicts representing
             each row of results.
@@ -307,19 +312,27 @@ class RESTTable(TableDef):
                         if parent_col in record:
                             record[key] = record[parent_col]
                             if record[key] in self.args_query_exclusions:
-                                print("Excluding parent row with key: ", record[key])
+                                logger.log_table(
+                                    self.name, 
+                                    UnifyLogger.DEBUG,
+                                    "Excluding parent row with key: ", record[key]
+                                )
                                 do_row = False
                         else:
-                            print(f"Error: parent record missing col {parent_col}: ", record)
+                            logger.log_table(
+                                self.name,
+                                UnifyLogger.WARNING,
+                                f"Error: parent record missing col {parent_col}: ", record
+                            )
                     if do_row:
-                        for page, size_return in self._query_resource(record):
+                        for page, size_return in self._query_resource(record, logger):
                             yield (page, size_return)
         else:
             # Simple query
-            for page, size_return in self._query_resource():
+            for page, size_return in self._query_resource(logger=logger):
                 yield (page, size_return)
 
-    def _query_resource(self, query_params={}):
+    def _query_resource(self, query_params={}, logger: UnifyLogger = None):
         session = requests.Session()
         self.spec._setup_request_auth(session)
 
@@ -336,12 +349,18 @@ class RESTTable(TableDef):
             if r.status_code >= 400:
                 print(r.text)
             if r.status_code == 404:
-                raise Exception("Query returned no results")
+                logger.log_table(self.name, UnifyLogger.ERROR, f"404 returned from {url}")
+                return
             if r.status_code == 401:
-                print("Auth failed. Spec auth is: ", self.spec.auth)
+                logger.log_table(self.name, UnifyLogger.ERROR, f"401 returned from {url}")
                 raise Exception("API call unauthorized: " + r.text)
             if r.status_code >= 400:
-                raise Exception("API call failed: " + r.text)
+                logger.log_table(
+                    self.name, 
+                    UnifyLogger.ERROR, 
+                    f"HTTP error {r.status_code} returned from {url}"
+                )
+                return
 
             size_return = []
 
@@ -402,6 +421,9 @@ class Adapter:
     def __repr__(self) -> AnyStr:
         return f"{self.__class__.__name__}({self.name}) ->\n" + \
             ", ".join(map(lambda t: str(t), self.tables)) + "\n"
+
+    def __str__(self) -> str:
+        return self.name
 
     def supports_commands(self) -> bool:
         return self.help is not None

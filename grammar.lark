@@ -49,7 +49,9 @@ clear_table: "clear table" WS table_schema_ref
 
 col_list: col_ref WS? ("," WS? col_ref)*
 
-col_ref: WORD ("." WORD)? | "*"
+col_ref: (WORD ("." WORD)* | "*" | agg_func) (WS "as" WS WORD)?
+
+agg_func: WORD WS* "(" /[^)]+/ ")"
 
 table_ref: WORD ("." WORD)?
 table_list: table_ref WS? ("," WS? table_ref)*

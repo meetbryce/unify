@@ -9,13 +9,14 @@ import pydoc
 import re
 import sys
 import traceback
+import lark
 from lark import Lark, Visitor
 from lark.visitors import v_args
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 import urllib
-from typing import Dict
+from typing import Dict, Tuple
 # CHARTING
 from matplotlib import ticker
 import matplotlib.pyplot as plt
@@ -28,7 +29,7 @@ from timeit import default_timer as timer
 # DuckDB
 import duckdb
 
-from rest_schema import Adapter, Connection
+from rest_schema import Adapter, Connection, UnifyLogger, TableDef
 from storage_manager import StorageManager
 from schemata import LoadTableRequest, Queries
 from parsing_utils import (
@@ -56,6 +57,13 @@ class DuckContext:
         self.duck.close()
         
 
+class SimpleLogger(UnifyLogger):
+    def __init__(self, adapter: Adapter):
+        self.adapter = adapter
+
+    def log_table(self, table: str, level: int, *args):
+        print(f"[{str(self.adapter)}: {table}] ", *args, file=sys.stderr)
+
 class TableScan(Thread):
     """
         Thread class for querying a REST API, by pages, and storing the results as 
@@ -63,7 +71,7 @@ class TableScan(Thread):
     """
     def __init__(self, tableMgr=None, tableLoader=None, select: list = None):
         Thread.__init__(self)
-        self.tableMgr = tableMgr
+        self.tableMgr: TableMgr = tableMgr
         self.tableLoader = tableLoader
         self.select = select
 
@@ -84,7 +92,9 @@ class TableScan(Thread):
                 df[column] = df[column].apply(lambda x: str(x))
             # FIXME: sample 10 values and if more than 50% are numeric than convert to numeric
             # convert numeric: df[column] = df[column].apply(lambda x: pd.to_numeric(x, errors = 'ignore'))
-            if df[column][0].count("/") == 2 or df[column][0].count(":") >= 2:
+            testval = df[column][0]
+            if hasattr(testval, 'count') and \
+                (testval.count("/") == 2 or testval.count(":") >= 2):
                 try:
                     df[column] = pd.to_datetime(df[column])
                 except:
@@ -129,18 +139,17 @@ class TableScan(Thread):
                 # FIXME: The following shouldn't be neccessary, but it seems like `Duck.append`
                 # does not work properly with qualified table names, so we hack around it
                 # by setting the search path
-                duck.execute(f"set search_path='{tableMgr.rest_spec.name}'")
-            else:
-                duck.append(tableMgr.table_spec.name, row_buffer_df)
+                duck.execute(f"set search_path='{tableMgr.adapter.name}'")
+            duck.append(tableMgr.table_spec.name, row_buffer_df)
 
         page = 1
         page_flush_count = 5 # flush 5 REST calls worth of data to the db
         row_buffer_df = None
         table_cols = set()
+        logger = SimpleLogger(self.tableMgr.adapter)
 
-        for json_page, size_return in self.tableMgr.table_spec.query_resource(self.tableLoader):
+        for json_page, size_return in self.tableMgr.table_spec.query_resource(self.tableLoader, logger):
             record_path = self.tableMgr.table_spec.result_body_path
-            breakpoint()
             df = pd.json_normalize(json_page, record_path=record_path, sep='_')
             size_return.append(df.shape[0])
 
@@ -191,11 +200,11 @@ class TableExporter(Thread):
 
 
 class TableMgr:
-    def __init__(self, schema, rest_spec, table_spec, auth = None, params={}):
+    def __init__(self, schema, adapter, table_spec, auth = None, params={}):
         self.schema = schema
         self.name = schema + "." + table_spec.name
-        self.rest_spec = rest_spec
-        self.table_spec = table_spec
+        self.adapter = adapter
+        self.table_spec: TableDef = table_spec
         self.synchronous_scanning = True
 
     def has_data(self):
@@ -225,7 +234,7 @@ class TableLoader:
        3. Table exists in the local db.
     """
     def __init__(self):
-        self.connections = Connection.setup_connections(
+        self.connections: list[Connection] = Connection.setup_connections(
             './connections.yaml', 
             storage_mgr_maker=lambda schema: DuckdbStorageManager(schema)
         )
@@ -455,15 +464,8 @@ class RunCommand:
 
     def __init__(self, wide_display=False, read_only=False):
         self.debug = True
-        try:
-            #self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=read_only)
-            pass
-        except RuntimeError:
-            print("Database is locked. Is there a write process running?")
-            sys.exit(1)
-
         self.parser = Lark(open("grammar.lark").read(), propagate_positions=True)
-        self.__output = sys.stdout
+        self.__output: io.IOBase = sys.stdout
         self.parser_visitor = ParserVisitor()
         self.loader = TableLoader()
         self.adapters: dict[str, Adapter] = self.loader.adapters
@@ -496,7 +498,7 @@ class RunCommand:
                 return True
 
 
-    def _run_command(self, cmd, output_buffer=None, use_pager=True):
+    def _run_command(self, cmd, output_buffer=None, use_pager=True, input_func=input) -> tuple[list, pd.DataFrame]:
         save_output = self.__output    
         try:
             # Allow Adapters to process their special commands
@@ -508,19 +510,24 @@ class RunCommand:
                 return {"response_type": "stream"}
 
             with DuckContext() as duck:
+                self.print_buffer = []
                 self.duck = duck
                 self._allow_pager = use_pager
                 if output_buffer:
                     self.__output = output_buffer
                 self._cmd = cmd
-                parse_tree = self.parser.parse(self._cmd)
-                command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
-                if command:
-                    result = getattr(self, command)(**self.parser_visitor._the_command_args)
-                    if result:
-                        return result
-                    else:
-                        return {"response_type": "stream"}
+                result = None
+                self.input_func = input_func
+                try:
+                    parse_tree = self.parser.parse(self._cmd)
+                    command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
+                    if command:
+                        result = getattr(self, command)(**self.parser_visitor._the_command_args)
+                    return (self.print_buffer, result)
+                except lark.exceptions.LarkError:
+                    # Let any parsing exceptions send the command down to the db
+                    result = self._execute_duck(self._cmd)
+                    return (self.print_buffer, result)
         finally:
             self.__output = save_output
             self.duck = None
@@ -532,7 +539,24 @@ class RunCommand:
             while True:
                 try:
                     cmd = session.prompt("> ", auto_suggest=suggester)
-                    self._run_command(cmd)
+                    outputs, df = self._run_command(cmd)
+                    print("\n".join(outputs))
+                    if df is not None:
+                        with pd.option_context('display.max_rows', None):
+                            if df.shape[0] == 0:
+                                return
+                            self._last_result = df
+                            fmt_opts = {
+                                "index": False,
+                                "max_rows" : None,
+                                "min_rows" : 10,
+                                "max_colwidth": 50,
+                                "header": True
+                            }
+                            if df.shape[0] > 40 and self._allow_pager:
+                                pydoc.pager(df.to_string(**fmt_opts))
+                            else:
+                                print(df.to_string(**fmt_opts), file=self.__output)
                 except RuntimeError as e:
                     print(e)
                 except Exception as e:
@@ -543,46 +567,36 @@ class RunCommand:
             sys.exit(0)
 
     def _execute_duck(self, query, header=True):
-        r = self.duck.execute(query)
-        with pd.option_context('display.max_rows', None):
-            df = r.df()
-            if df.shape[0] == 0:
-                return
-            self._last_result = df
-            fmt_opts = {
-                "index": False,
-                "max_rows" : None,
-                "min_rows" : 10,
-                "max_colwidth": 50,
-                "header": header
-            }
-            if df.shape[0] > 40 and self._allow_pager:
-                pydoc.pager(df.to_string(**fmt_opts))
-            else:
-                print(df.to_string(**fmt_opts), file=self.__output)
+        return self.duck.execute(query).df()
+
+    def print(self, *args):
+        self.print_buffer.append("".join([str(a) for a in args]))
+
+    def get_input(self, prompt: str):
+        return self.input_func(prompt)
 
     ################
     ## Commands 
+    #
+    # All commands either "print" to the result buffer, or else they return
+    # a DataFrame result (or both). It the the responsibilty of the host
+    # program to render the result. Commands should call `get_input` to
+    # retrieve input from the user interactively.
     ################
     def show_schemas(self):
-        self._execute_duck(Queries.list_schemas)
+        return self._execute_duck(Queries.list_schemas)
 
     def drop_table(self, table_ref):
-        print(f"Are you sure you want to drop the table '{table_ref}' (y/n)?", end=' ')
-        val = input()
+        val = self.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
         if val == "y":
-            self._execute_duck(self._cmd)
+            return self._execute_duck(self._cmd)
 
     def drop_schema(self, schema_ref):
-        print(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)?", end=' ')
-        val = input()
+        val = input(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)? ")
         if val == "y":
-            self._execute_duck(self._cmd)
+            return self._execute_duck(self._cmd)
             
     def show_tables(self, schema_ref=None):
-        # FIXME: merge tables known us but not yet to Duck
-        #    for table in sorted(self.loader.tables.keys()):
-        #        print(table, file=self.__output)
         if schema_ref:
             potential = []
             if schema_ref in self.adapters:
@@ -592,57 +606,58 @@ class RunCommand:
             actual = [r[0] for r in \
                 self.duck.execute(Queries.list_tables_filtered.format(schema_ref)).fetchall()]
             full = set(potential) | set(actual)
-            print("tables\n--------------", file=self.__output)
-            print("\n".join(list(full)), file=self.__output)
+            #self.print("tables\n--------------")
+            #self.print("\n".join(list(full)))
+            return pd.DataFrame({"tables": list(full)})
         else:
-            print("{:20s} {}".format("schema", "table"), file=self.__output)
-            print("{:20s} {}".format("---------", "----------"), file=self.__output)
+            self.print("{:20s} {}".format("schema", "table"))
+            self.print("{:20s} {}".format("---------", "----------"))
             for r in self.duck.execute(Queries.list_all_tables).fetchall():
-                print("{:20s} {}".format(r[0], r[1]), file=self.__output)
+                self.print("{:20s} {}".format(r[0], r[1]))
 
     def show_columns(self, table_ref, column_filter=None):
         if table_ref:
             if column_filter:
                 parts = table_ref.split(".")
                 column_filter = re.sub(r"\*", "%", column_filter)
-                self._execute_duck(Queries.list_columns.format(parts[0], parts[1], column_filter))
+                return self._execute_duck(Queries.list_columns.format(parts[0], parts[1], column_filter))
             else:
-                self._execute_duck(f"describe {table_ref}")
+                return self._execute_duck(f"describe {table_ref}")
         else:
-            self._execute_duck("describe")
+            return self._execute_duck("describe")
 
     def describe(self, table_ref):
         if table_ref is None:
-            self._execute_duck("describe")
+            return self._execute_duck("describe")
         else:
-            self._execute_duck(f"describe {table_ref}")
+            return self._execute_duck(f"describe {table_ref}")
 
     def create_statement(self):
-        self._execute_duck(self._cmd)
+        return self._execute_duck(self._cmd)
 
     def create_view_statement(self):
-        self._execute_duck(self._cmd)
+        return self._execute_duck(self._cmd)
 
     def insert_statement(self):
-        self._execute_duck(self._cmd)
+        return self._execute_duck(self._cmd)
 
     def delete_statement(self):
-        self._execute_duck(self._cmd)
+        return self._execute_duck(self._cmd)
 
     def load_adapter_data(self, schema_name, table_name):
         if self.loader.materialize_table(schema_name, table_name):
             return True
         else:
-            print("Loading table...", file=self.__output)
+            self.print("Loading table...")
             return False
 
     def select_query(self, fail_if_missing=False):
         try:
-            self._execute_duck(self._cmd)
+            return self._execute_duck(self._cmd)
 
         except RuntimeError as e:
             if fail_if_missing:
-                print(e, file=self.__output)
+                self.print(e)
                 return
             m = re.search("Table with name (\S+) does not exist", str(e))
             if m:
@@ -653,13 +668,9 @@ class RunCommand:
                     if self.load_adapter_data(m.group(1), table):
                         return self.select_query(fail_if_missing=True)
                 else:
-                    print(e, file=self.__output)
+                    self.print(e)
             else:
-                print(e, file=self.__output)
-
-    def print(self, *args, **kwargs):
-        kwargs["file"] = self.__output
-        print(*args, **kwargs)
+                self.print(e)
 
     def select_for_writing(self, select_query, adapter_ref, file_ref):
         if adapter_ref in self.adapters:
@@ -672,7 +683,7 @@ class RunCommand:
 
     def clear_table(self, table_schema_ref=None):
         self.loader.truncate_table(table_schema_ref)
-        print("Table cleared: ", table_schema_ref, file=self.__output)
+        self.print("Table cleared: ", table_schema_ref)
 
     def create_chart(
         self, 
@@ -705,7 +716,7 @@ class RunCommand:
         imgdata.seek(0)
         self.__output.write(urllib.parse.quote(
             base64.b64encode(imgdata.getvalue())))
-        return {"response_type": "display_data"}
+        return {"response_type": "image/png"}
 
 
 if __name__ == '__main__':

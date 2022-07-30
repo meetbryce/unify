@@ -17,7 +17,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 import pandas as pd
 
 # project
-from rest_schema import Adapter, StorageManager, TableDef
+from rest_schema import Adapter, UnifyLogger, StorageManager, TableDef
 from parsing_utils import collect_child_strings, find_node_return_child
 from schemata import LoadTableRequest
 
@@ -230,7 +230,7 @@ class GSheetsTableSpec(TableDef):
         self.opts = opts # 'sheetId' and 'tab_name'
         self.sheetsClient: GSheetsClient = sheetsClient
     
-    def query_resource(self, tableLoader):
+    def query_resource(self, tableLoader, logger: UnifyLogger):
         """ Generator which yields (page, size_return) tuples for all rows from
             a Google Sheet. Each row is returned as a dict mapping the column
             names to value.

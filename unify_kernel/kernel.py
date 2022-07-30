@@ -69,17 +69,17 @@ class UnifyKernel(Kernel):
                    allow_stdin=False):
 
         buffer = io.StringIO()
+        self._allow_stdin = allow_stdin
         try:
-            response = self.unify_runner._run_command(code, output_buffer=buffer, use_pager=False)
+            lines, df = self.unify_runner._run_command(code, output_buffer=buffer, use_pager=False,
+                input_func=self.raw_input)
             if not silent:
-                if response["response_type"] == "stream":
-                    buffer.seek(0)
-                    stream_content = {'name': 'stdout', 'text': buffer.read()}
-                    self.send_response(self.iopub_socket, 'stream', stream_content)
-                elif response["response_type"] == "display_data":
+                if lines:
+                    self.send_response(self.iopub_socket, 'stream', {'name': 'stdout', 'text': "\n".join(lines)})
+                if df is not None:
                     content = {
                         'source': 'kernel',
-                        'data': { 'image/png': buffer.getvalue() },
+                        'data': { 'text/html': df.to_html(index=False) },
                         # We can specify the image size
                         # in the metadata field.
                         'metadata' : {}
@@ -87,6 +87,18 @@ class UnifyKernel(Kernel):
                     # We send the display_data message with
                     # the contents.
                     self.send_response(self.iopub_socket, 'display_data', content)
+
+                # elif response["response_type"] == "display_data":
+                #     content = {
+                #         'source': 'kernel',
+                #         'data': { 'image/png': buffer.getvalue() },
+                #         # We can specify the image size
+                #         # in the metadata field.
+                #         'metadata' : {}
+                #     }
+                #     # We send the display_data message with
+                #     # the contents.
+                #     self.send_response(self.iopub_socket, 'display_data', content)
 
             return {'status': 'ok',
                     # The base class increments the execution count
