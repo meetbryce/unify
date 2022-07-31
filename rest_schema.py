@@ -143,6 +143,27 @@ class OffsetAndCountPager(PagingHelper):
         self.current_offset += page_count
         return page_count >= self.page_size
 
+class OutputLogger:
+    def __init__(self) -> None:
+        self.buffer = []
+        self.df = None
+
+    def print(self, *args) -> None:
+        self.buffer.append("".join([str(s) for s in args]))
+
+    def print_block(self, msg):
+        """ Print a (potentially) multi-line message """
+        self.buffer.extend(msg.split("\n"))
+
+    def print_df(self, df):
+        self.df = df
+
+    def get_output(self):
+        return self.buffer
+
+    def get_df(self):
+        return self.df
+        
 class UnifyLogger:
     INFO = 1
     WARNING = 2
@@ -428,12 +449,12 @@ class Adapter:
     def supports_commands(self) -> bool:
         return self.help is not None
 
-    def run_command(self, code: str, output_buffer: io.TextIOBase) -> bool:
+    def run_command(self, code: str, output_logger: OutputLogger) -> bool:
         if code.strip() == 'help':
             if self.help:
-                print(self.help, file=output_buffer)
+                output_logger.print_block(self.help)
             else:
-                print(f"No help available for connector {self.name}")
+                output_logger.print(f"No help available for connector {self.name}")
             return True
         else:
             return False

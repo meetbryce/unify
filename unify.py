@@ -1,4 +1,3 @@
-import base64
 from email.parser import Parser
 from inspect import isfunction
 import io
@@ -15,7 +14,6 @@ from lark.visitors import v_args
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-import urllib
 from typing import Dict, Tuple
 # CHARTING
 from matplotlib import ticker
@@ -28,8 +26,9 @@ from timeit import default_timer as timer
 
 # DuckDB
 import duckdb
+from setuptools import Command
 
-from rest_schema import Adapter, Connection, UnifyLogger, TableDef
+from rest_schema import Adapter, Connection, OutputLogger, UnifyLogger, TableDef
 from storage_manager import StorageManager
 from schemata import LoadTableRequest, Queries
 from parsing_utils import (
@@ -447,7 +446,6 @@ class ParserVisitor(Visitor):
         key = value = None
         params = {}
         for child in self._the_command_args['chart_where'].children:
-            print(child)
             key = key or find_node_return_child("chart_param", child)
             value = value or find_node_return_child("param_value", child)
             if value and value[0] == '"':
@@ -459,21 +457,21 @@ class ParserVisitor(Visitor):
                 key = value = None
         self._the_command_args['chart_params'] = params
 
-class RunCommand:
+class CommandInterpreter:
+    """
+        The interpretr for Unify. You call `run_command` with the code you want to execute
+        and this class will parse it and execute the command, returning the result as a
+        tuple of (output_lines[], result_object) where result_object is usually a DataFrame
+        but could be a dict containing an image result instead.
+    """
     _last_result: pd.DataFrame = None
 
-    def __init__(self, wide_display=False, read_only=False):
-        self.debug = True
+    def __init__(self, debug=False):
+        self.debug = debug
         self.parser = Lark(open("grammar.lark").read(), propagate_positions=True)
-        self.__output: io.IOBase = sys.stdout
         self.parser_visitor = ParserVisitor()
         self.loader = TableLoader()
         self.adapters: dict[str, Adapter] = self.loader.adapters
-
-        if wide_display:
-            pd.set_option('display.max_rows', 500)
-            pd.set_option('display.max_columns', 500)
-            pd.set_option('display.width', 1000)
 
     def _list_schemas(self, match_prefix=None):
         with DuckContext() as duck:
@@ -487,34 +485,46 @@ class RunCommand:
         table = table or ''
         return sorted(list(t.name[len(table):] for t in conn.list_tables() if t.name.startswith(table)))
 
-    def pre_handle_command(self, code, output_buffer: io.TextIOBase):
+    def pre_handle_command(self, code):
         m = re.match(r"\s*([\w_0-9]+)\s+(.*$)", code)
         if m:
             first_word = m.group(1)
             rest_of_command = m.group(2)
             if first_word in self.adapters:
+                logger: OutputLogger = OutputLogger()
                 handler: Adapter = self.adapters[first_word]
-                handler.run_command(rest_of_command, output_buffer)
-                return True
+                return handler.run_command(rest_of_command, logger)
 
 
-    def _run_command(self, cmd, output_buffer=None, use_pager=True, input_func=input) -> tuple[list, pd.DataFrame]:
-        save_output = self.__output    
+    def run_command(self, cmd, input_func=input) -> tuple[list, pd.DataFrame]:
+        """
+            Executes a command through our interpreter and returns the results
+            as a tuple of (output_lines, output_object) where output_line contains
+            a list of string to print and output_object is an object which should
+            be rendered to the user. 
+
+            Support object types are: 
+            - a DataFrame
+            - A dict containing keys: "mime_type" and "data" for images
+        """
+        def clean_df(object):
+            if isinstance(object, pd.DataFrame):
+                self._last_result = object
+                if 'count_star()' in object.columns:
+                    object.rename(columns={'count_star()': 'count'}, inplace=True)
+
         try:
             # Allow Adapters to process their special commands
-            pre_result = self.pre_handle_command(cmd, output_buffer)
-            if isinstance(pre_result, LoadTableRequest):
-                self.load_adapter_data(pre_result.schema_name, pre_result.table_name)
+            output: OutputLogger = self.pre_handle_command(cmd)
+            if isinstance(output, LoadTableRequest):
+                self.load_adapter_data(output.schema_name, output.table_name)
                 return {"response_type": "stream"}
-            elif pre_result:
-                return {"response_type": "stream"}
+            elif output is not None:
+                return (output.get_output(), output.get_df())
 
             with DuckContext() as duck:
                 self.print_buffer = []
                 self.duck = duck
-                self._allow_pager = use_pager
-                if output_buffer:
-                    self.__output = output_buffer
                 self._cmd = cmd
                 result = None
                 self.input_func = input_func
@@ -523,48 +533,15 @@ class RunCommand:
                     command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
                     if command:
                         result = getattr(self, command)(**self.parser_visitor._the_command_args)
+                    clean_df(result)
                     return (self.print_buffer, result)
                 except lark.exceptions.LarkError:
                     # Let any parsing exceptions send the command down to the db
                     result = self._execute_duck(self._cmd)
+                    clean_df(result)
                     return (self.print_buffer, result)
         finally:
-            self.__output = save_output
             self.duck = None
-
-    def loop(self):
-        session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
-        suggester = AutoSuggestFromHistory()
-        try:
-            while True:
-                try:
-                    cmd = session.prompt("> ", auto_suggest=suggester)
-                    outputs, df = self._run_command(cmd)
-                    print("\n".join(outputs))
-                    if df is not None:
-                        with pd.option_context('display.max_rows', None):
-                            if df.shape[0] == 0:
-                                return
-                            self._last_result = df
-                            fmt_opts = {
-                                "index": False,
-                                "max_rows" : None,
-                                "min_rows" : 10,
-                                "max_colwidth": 50,
-                                "header": True
-                            }
-                            if df.shape[0] > 40 and self._allow_pager:
-                                pydoc.pager(df.to_string(**fmt_opts))
-                            else:
-                                print(df.to_string(**fmt_opts), file=self.__output)
-                except RuntimeError as e:
-                    print(e)
-                except Exception as e:
-                    if isinstance(e, EOFError):
-                        raise
-                    traceback.print_exc(file=self.__output)
-        except EOFError:
-            sys.exit(0)
 
     def _execute_duck(self, query, header=True):
         return self.duck.execute(query).df()
@@ -714,11 +691,51 @@ class RunCommand:
         imgdata = io.BytesIO()
         plt.savefig(imgdata, format='png')
         imgdata.seek(0)
-        self.__output.write(urllib.parse.quote(
-            base64.b64encode(imgdata.getvalue())))
-        return {"response_type": "image/png"}
+        return {"mime_type": "image/png", "data": imgdata.getvalue()}
 
+class UnifyRepl:
+    def __init__(self, interpreter: CommandInterpreter, wide_display=False):
+        self.interpreter = interpreter
+        if wide_display:
+            pd.set_option('display.max_rows', 500)
+            pd.set_option('display.max_columns', 500)
+            pd.set_option('display.width', 1000)
+
+        
+    def loop(self):
+        session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
+        suggester = AutoSuggestFromHistory()
+        try:
+            while True:
+                try:
+                    cmd = session.prompt("> ", auto_suggest=suggester)
+                    outputs, df = self.interpreter.run_command(cmd)
+                    print("\n".join(outputs))
+                    if df is not None:
+                        with pd.option_context('display.max_rows', None):
+                            if df.shape[0] == 0:
+                                return
+                            fmt_opts = {
+                                "index": False,
+                                "max_rows" : None,
+                                "min_rows" : 10,
+                                "max_colwidth": 50,
+                                "header": True
+                            }
+                            if df.shape[0] > 40:
+                                pydoc.pager(df.to_string(**fmt_opts))
+                            else:
+                                print(df.to_string(**fmt_opts))
+                except RuntimeError as e:
+                    print(e)
+                except Exception as e:
+                    if isinstance(e, EOFError):
+                        raise
+                    traceback.print_exc()
+        except EOFError:
+            sys.exit(0)
 
 if __name__ == '__main__':
-    RunCommand(read_only=True).loop()    
+    interpreter = CommandInterpreter(debug=True)
+    UnifyRepl(interpreter).loop()
 

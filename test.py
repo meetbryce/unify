@@ -47,4 +47,7 @@ db = DatabaseManager(config)
 results = db.select("select 1")
 print(list(results))
 
+from orator import Model
+
+Model.set_connection_resolver(db)
 

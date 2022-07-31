@@ -1,8 +1,11 @@
 import io
 import traceback
+import pandas as pd
+import urllib
+import base64
 
 from ipykernel.kernelbase import Kernel
-from unify import RunCommand
+from unify import CommandInterpreter
 from lark.visitors import Visitor
 from parsing_utils import find_node_return_children
 
@@ -58,7 +61,7 @@ class UnifyKernel(Kernel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.unify_runner = RunCommand(wide_display=True, read_only=True)
+        self.unify_runner = CommandInterpreter()
         self.autocomplete_parser = AutocompleteParser(self.unify_runner.parser)
 
     def _send_string(self, msg):
@@ -68,37 +71,34 @@ class UnifyKernel(Kernel):
     def do_execute(self, code, silent, store_history=True, user_expressions=None,
                    allow_stdin=False):
 
-        buffer = io.StringIO()
         self._allow_stdin = allow_stdin
         try:
-            lines, df = self.unify_runner._run_command(code, output_buffer=buffer, use_pager=False,
-                input_func=self.raw_input)
+            lines, object = self.unify_runner.run_command(code, input_func=self.raw_input)
             if not silent:
                 if lines:
                     self.send_response(self.iopub_socket, 'stream', {'name': 'stdout', 'text': "\n".join(lines)})
-                if df is not None:
+                if isinstance(object, pd.DataFrame):
                     content = {
                         'source': 'kernel',
-                        'data': { 'text/html': df.to_html(index=False) },
-                        # We can specify the image size
-                        # in the metadata field.
+                        'data': { 
+                            'text/html': object.to_html(index=False),
+                            'text/plain': object.to_string(index=False)
+                        },
                         'metadata' : {}
                     }
-                    # We send the display_data message with
-                    # the contents.
                     self.send_response(self.iopub_socket, 'display_data', content)
-
-                # elif response["response_type"] == "display_data":
-                #     content = {
-                #         'source': 'kernel',
-                #         'data': { 'image/png': buffer.getvalue() },
-                #         # We can specify the image size
-                #         # in the metadata field.
-                #         'metadata' : {}
-                #     }
-                #     # We send the display_data message with
-                #     # the contents.
-                #     self.send_response(self.iopub_socket, 'display_data', content)
+                elif isinstance(object, dict) and 'mime_type' in object:
+                    print("Got a dict with mime_type: ", object['mime_type'], " returning image")
+                    enc_data = urllib.parse.quote(base64.b64encode(object['data']))
+                    content = {
+                        'source': 'kernel',
+                        'data': { object['mime_type']:  enc_data},
+                        'metadata' : {}
+                    }
+                    print(content)
+                    self.send_response(self.iopub_socket, 'display_data', content)
+                else:
+                    self._send_string("Unrecognized internal result object")
 
             return {'status': 'ok',
                     # The base class increments the execution count

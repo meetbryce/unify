@@ -145,46 +145,6 @@ To import from Gsheets, configure a Gsheets connection and use the custom
     1. Custom charting command
     1. Implement more autocompletions
 
-### GUI
-
-Instead of creating a custom GUI, we are integrating with Jupyter and Jupyterlab instead.
-
-The basic SQL command line integration is straightforward, except that we want to 
-offer intelligent autocompletion for schemas, tables, and columns.
-
-Beyond SQL, we want to make it easy to construct charts, and eventually dashboards,from
-the results of queries.
-
-There are many charting libraries for Jupyter, but most of them are extremely complicated.
-So for now we are implementing our own charting commands, and internally mapping those
-onto MatPlotLib.
-
-    select count(*) as count, user_login from github.pulls group by user_login
-    create chart prs_by_user as bar_chart where x = user_login and y = count
-
-    select sum(spend) as revenue, date_trunc('month','timestamp') as month
-    create chart rev_by_month as line_chart where x = month and y = revenue
-
-The full chart syntax should look like:
-
-    create chart [<name>] [from <chart source>] as <chart type> where x = <column> and y = <column>
-
-<name> - any identifier
-<chart source> - $var, table name, chart name list, or a sub-query in parens
-<chart type> - bar_chart, line_chart, pie_chart
-<column> - column reference
-
-More parameters to the chart can be captured in more k=<val> stanzas in the where clause.
-
-Multiple charts can be combined as:
-
-    create chart from <chart1>, <chart2>
-
-So:
-    create chart chart1 as ...
-    create chart chart2 as ...
-    create chart combo as chart1, chart2
-        
 ## Developing
 
 Make sure to setup the environment with:

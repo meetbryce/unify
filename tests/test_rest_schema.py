@@ -3,6 +3,7 @@ import os
 import yaml
 
 from rest_schema import Adapter, RESTAdapter, RESTTable, Connection
+from unify import OutputLogger
 
 def test_apispec_class():
     config = {
@@ -34,10 +35,9 @@ def test_apispec_class():
     assert rest_tables[0].query_path == "/repos"
 
     assert spec.supports_commands()
-    buffer = io.StringIO()
-    spec.run_command("help", buffer)
-    buffer.seek(0)
-    assert buffer.read().strip() == config["help"]
+    output = OutputLogger()
+    spec.run_command("help", output)
+    assert "\n".join(output.get_output()) == config["help"]
 
 
 def test_connector():
