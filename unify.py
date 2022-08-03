@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 
 import pandas as pd
 import pyarrow as pa
+import numpy as np
 
 from timeit import default_timer as timer
 
@@ -36,10 +37,11 @@ from parsing_utils import (
     find_node_return_child, 
     find_node_return_children,
     collect_child_strings,
-    collect_child_text
+    collect_child_text,
+    collect_strings
 )
 
-DATA_HOME = "./data"
+DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_HOME, exist_ok=True)
 
 class DuckContext:
@@ -95,7 +97,8 @@ class TableScan(Thread):
             if hasattr(testval, 'count') and \
                 (testval.count("/") == 2 or testval.count(":") >= 2):
                 try:
-                    df[column] = pd.to_datetime(df[column])
+                    df[column] = pd.to_datetime(df[column], errors="coerce")
+                    df[column].replace({np.nan: None}, inplace = True)
                 except:
                     pass
 
@@ -130,16 +133,18 @@ class TableScan(Thread):
     def perform_scan(self, duck):
         print("Running table scan for: ", self.tableMgr.name)
 
-        def flush_rows(tableMgr, df, page, flush_count):
-            if page <= page_flush_count:
+        def flush_rows(tableMgr, next_df, page, flush_count):
+            if page <= flush_count:
                 # First set of pages, so create the table
-                duck.register('df1', row_buffer_df)
+                duck.register('df1', next_df)
+                # create the table AND flush current row_buffer values to the db
                 duck.execute(f"create table {tableMgr.name} as select * from df1")
                 # FIXME: The following shouldn't be neccessary, but it seems like `Duck.append`
                 # does not work properly with qualified table names, so we hack around it
                 # by setting the search path
                 duck.execute(f"set search_path='{tableMgr.adapter.name}'")
-            duck.append(tableMgr.table_spec.name, row_buffer_df)
+            else:
+                duck.append(tableMgr.table_spec.name, next_df)
 
         page = 1
         page_flush_count = 5 # flush 5 REST calls worth of data to the db
@@ -181,21 +186,34 @@ class TableScan(Thread):
         print("Finished table scan for: ", self.tableMgr.name)
 
 class TableExporter(Thread):
-    def __init__(self, duck, query: str, adapter: Adapter, target_file: str):
-        self.duck = duck
+    def __init__(
+        self, query: str=None, 
+        table: str=None, 
+        adapter: Adapter=None, 
+        target_file: str=None,
+        allow_overwrite=False,
+        allow_append=False):
         self.query = query
+        self.table = table
         self.adapter: Adapter = adapter
         self.target_file = target_file
+        self.overwrite = allow_overwrite
+        self.append = allow_append
 
-    def run(self):
+    def run(self, output_logger: OutputLogger):
         # Runs the query against DuckDB in chunks, and sends those chunks to the adapter
-        self.output_handle = self.adapter.create_output_table(self.target_file)
+        self.output_handle = self.adapter.create_output_table(self.target_file, output_logger, overwrite=self.overwrite)
 
-        r = self.duck.execute(self.query)
-        # FIXME: Use DF chunking and multiple pages
-        self.adapter.write_page(self.output_handle, r.df())
+        with DuckContext() as duck:
+            if self.query:
+                r = duck.execute(self.query)
+            else:
+                r = duck.execute(f"select * from {self.table}")
 
-        self.adapter.close_output_table(self.output_handle)
+            # FIXME: Use DF chunking and multiple pages
+            self.adapter.write_page(self.output_handle, r.df(), output_logger, append=self.append)
+
+            self.adapter.close_output_table(self.output_handle)
 
 
 class TableMgr:
@@ -216,12 +234,10 @@ class TableMgr:
     def load_table(self, waitForScan=False, tableLoader=None):
         # Spawn a thread to query the table source
         self.scan = TableScan(self, tableLoader=tableLoader, select=self.table_spec.select_list)
-        if self.synchronous_scanning:
+        if self.synchronous_scanning or waitForScan:
             self.scan.run()
         else:
             self.scan.start()
-            if waitForScan:
-                self.scan.join()
 
 class TableLoader:
     """Master loader class. This class can load the data for any table, either by 
@@ -234,10 +250,10 @@ class TableLoader:
     """
     def __init__(self):
         self.connections: list[Connection] = Connection.setup_connections(
-            './connections.yaml', 
+            os.path.join(os.path.dirname(__file__), "connections.yaml"), 
             storage_mgr_maker=lambda schema: DuckdbStorageManager(schema)
         )
-        self.tables = {}
+        self.tables: dict[str, TableMgr] = {}
 
         self.adapters: dict[str, Adapter] = dict(
             [(conn.schema_name, conn.adapter) for conn in self.connections if conn.adapter.supports_commands()]
@@ -268,7 +284,7 @@ class TableLoader:
         with DuckContext() as duck:
             if not self.table_exists_in_db(table):
                 tmgr = self.tables[table]
-                tmgr.load_table(duck, tableLoader=self, waitForScan=True)
+                tmgr.load_table(tableLoader=self, waitForScan=True)
 
             if self.table_exists_in_db(table):
                 r = duck.execute(f"select * from {table}")
@@ -364,69 +380,14 @@ class ParserVisitor(Visitor):
         self.visit(parse_tree)
         return self._the_command
 
-    def show_tables(self, tree):
-        self._the_command = 'show_tables'
-        self._the_command_args['schema_ref'] = find_node_return_child("schema_ref", tree)
-        return tree
-
-    def show_schemas(self, tree):
-        self._the_command = 'show_schemas'
-        return tree
-
-    def show_columns(self, tree):
-        """" Always returns 'table_ref' either qualified or unqualified by the schema name."""
-        self._the_command = 'show_columns'
-        self._the_command_args['table_ref'] = collect_child_text(
-            "table_ref", 
-            tree, 
-            full_code=self._full_code
-        )
-        filter = collect_child_strings("column_filter", tree)
-        if filter:
-            self._the_command_args['column_filter'] = filter.strip()
-        return tree
-
-    def describe(self, tree):
-        self._the_command = 'describe'
+    def count_table(self, tree):
+        self._the_command = "count_table"
         self._the_command_args['table_ref'] = collect_child_text(
             "table_ref", 
             tree, 
             full_code=self._full_code
         )
         return tree
-
-    def select_query(self, tree):
-        self._the_command = 'select_query'
-    
-    def select_for_writing(self, tree):
-        self._the_command = "select_for_writing"
-        self._the_command_args["adapter_ref"] = find_node_return_child("adapter_ref", tree)
-        self._the_command_args["file_ref"] = find_node_return_child("file_ref", tree).strip("'")
-        self._the_command_args["select_query"] = collect_child_text("select_query", tree, self._full_code)
-
-    def create_statement(self, tree):
-        self._the_command = 'create_statement'
-
-    def create_view_statement(self, tree):
-        self._the_command = 'create_view_statement'
-
-    def delete_statement(self, tree):
-        self._the_command = 'delete_statement'
-
-    def drop_table(self, tree):
-        self._the_command = "drop_table"
-        self._the_command_args['table_ref'] = collect_child_text(
-            "table_ref", 
-            tree, 
-            full_code=self._full_code
-        )
-
-    def drop_schema(self, tree):
-        self._the_command = "drop_schema"
-        self._the_command_args["schema_ref"] = find_node_return_child("schema_ref", tree)
-
-    def insert_statement(self, tree):
-        self._the_command = 'insert_statement'
 
     def clear_table(self, tree):
         self._the_command = 'clear_table'
@@ -434,6 +395,12 @@ class ParserVisitor(Visitor):
         if self._the_command_args['table_schema_ref']:
             self._the_command_args['table_schema_ref'] = ".".join(self._the_command_args['table_schema_ref'])
         return tree
+
+    def create_statement(self, tree):
+        self._the_command = 'create_statement'
+
+    def create_view_statement(self, tree):
+        self._the_command = 'create_view_statement'
 
     def create_chart(self, tree):
         self._the_command = 'create_chart'
@@ -457,6 +424,76 @@ class ParserVisitor(Visitor):
                 key = value = None
         self._the_command_args['chart_params'] = params
 
+    def delete_statement(self, tree):
+        self._the_command = 'delete_statement'
+
+    def describe(self, tree):
+        self._the_command = 'describe'
+        self._the_command_args['table_ref'] = collect_child_text(
+            "table_ref", 
+            tree, 
+            full_code=self._full_code
+        )
+        return tree
+
+    def drop_table(self, tree):
+        self._the_command = "drop_table"
+        self._the_command_args['table_ref'] = collect_child_text(
+            "table_ref", 
+            tree, 
+            full_code=self._full_code
+        )
+
+    def drop_schema(self, tree):
+        self._the_command = "drop_schema"
+        self._the_command_args["schema_ref"] = find_node_return_child("schema_ref", tree)
+
+    def export_table(self, tree):
+        self._the_command = "export_table"
+        self._the_command_args['table_ref'] = collect_child_text("table_ref", tree, full_code=self._full_code)
+        self._the_command_args['adapter_ref'] = find_node_return_child("adapter_ref", tree)
+        self._the_command_args['file_ref'] = find_node_return_child("file_ref", tree).strip("'")
+        self._the_command_args['write_option'] = find_node_return_child("write_option", tree)
+
+    def help(self, tree):
+        self._the_command = 'help'
+        self._the_command_args['help_choice'] = collect_child_strings('HELP_CHOICE', tree)
+
+    def insert_statement(self, tree):
+        self._the_command = 'insert_statement'
+
+    def select_query(self, tree):
+        self._the_command = 'select_query'
+    
+    def select_for_writing(self, tree):
+        self._the_command = "select_for_writing"
+        self._the_command_args["adapter_ref"] = find_node_return_child("adapter_ref", tree)
+        self._the_command_args["file_ref"] = find_node_return_child("file_ref", tree).strip("'")
+        self._the_command_args["select_query"] = collect_child_text("select_query", tree, self._full_code)
+
+    def show_tables(self, tree):
+        self._the_command = 'show_tables'
+        self._the_command_args['schema_ref'] = find_node_return_child("schema_ref", tree)
+        return tree
+
+    def show_schemas(self, tree):
+        self._the_command = 'show_schemas'
+        return tree
+
+    def show_columns(self, tree):
+        """" Always returns 'table_ref' either qualified or unqualified by the schema name."""
+        self._the_command = 'show_columns'
+        self._the_command_args['table_ref'] = collect_child_text(
+            "table_ref", 
+            tree, 
+            full_code=self._full_code
+        )
+        filter = collect_child_strings("column_filter", tree)
+        if filter:
+            self._the_command_args['column_filter'] = filter.strip()
+        return tree
+
+
 class CommandInterpreter:
     """
         The interpretr for Unify. You call `run_command` with the code you want to execute
@@ -468,10 +505,12 @@ class CommandInterpreter:
 
     def __init__(self, debug=False):
         self.debug = debug
-        self.parser = Lark(open("grammar.lark").read(), propagate_positions=True)
+        path = os.path.join(os.path.dirname(__file__), "grammar.lark")
+        self.parser = Lark(open(path).read(), propagate_positions=True)
         self.parser_visitor = ParserVisitor()
         self.loader = TableLoader()
         self.adapters: dict[str, Adapter] = self.loader.adapters
+        self.logger: OutputLogger = None
 
     def _list_schemas(self, match_prefix=None):
         with DuckContext() as duck:
@@ -516,10 +555,7 @@ class CommandInterpreter:
         try:
             # Allow Adapters to process their special commands
             output: OutputLogger = self.pre_handle_command(cmd)
-            if isinstance(output, LoadTableRequest):
-                self.load_adapter_data(output.schema_name, output.table_name)
-                return {"response_type": "stream"}
-            elif output is not None:
+            if output is not None:
                 return (output.get_output(), output.get_df())
 
             with DuckContext() as duck:
@@ -528,18 +564,19 @@ class CommandInterpreter:
                 self._cmd = cmd
                 result = None
                 self.input_func = input_func
+                self.logger: OutputLogger = OutputLogger()
                 try:
                     parse_tree = self.parser.parse(self._cmd)
                     command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
                     if command:
                         result = getattr(self, command)(**self.parser_visitor._the_command_args)
-                    clean_df(result)
-                    return (self.print_buffer, result)
                 except lark.exceptions.LarkError:
                     # Let any parsing exceptions send the command down to the db
                     result = self._execute_duck(self._cmd)
-                    clean_df(result)
-                    return (self.print_buffer, result)
+                if isinstance(result, pd.DataFrame):
+                    self.print("{} row{}".format(result.shape[0], "s" if result.shape[0] != 1 else ""))
+                clean_df(result)
+                return (self.logger.get_output(), result)
         finally:
             self.duck = None
 
@@ -547,7 +584,7 @@ class CommandInterpreter:
         return self.duck.execute(query).df()
 
     def print(self, *args):
-        self.print_buffer.append("".join([str(a) for a in args]))
+        self.logger.print(*args)
 
     def get_input(self, prompt: str):
         return self.input_func(prompt)
@@ -560,9 +597,35 @@ class CommandInterpreter:
     # program to render the result. Commands should call `get_input` to
     # retrieve input from the user interactively.
     ################
-    def show_schemas(self):
-        return self._execute_duck(Queries.list_schemas)
+    def count_table(self, table_ref):
+        return self._execute_duck(f"select count(*) from {table_ref}")
 
+    def help(self, help_choice):
+        helps = {
+            "schemas": """Every connected system is represented in the Unify database as a schema.
+            The resources for the system appear as tables within this schema. Initially all tables
+            are empty, but they are imported on demand from the connected system whenver you access
+            the table.
+
+            Some systems support custom commands, which you can invoke by using the schema name
+            as the command prefix. You can get help on the connected system and its commands by
+            typing "help <schema>".
+            """,
+            "charts": """Help for charts"""
+        }
+        if help_choice:
+            msg = helps[help_choice]
+        else:
+            msg = """
+help - show this message
+help schemas
+help charts
+help import
+help export
+        """
+        for l in msg.splitlines():
+            self.print(l.strip())
+    
     def drop_table(self, table_ref):
         val = self.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
         if val == "y":
@@ -572,7 +635,30 @@ class CommandInterpreter:
         val = input(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)? ")
         if val == "y":
             return self._execute_duck(self._cmd)
-            
+
+    def export_table(self, adapter_ref, table_ref, file_ref, write_option=None):
+        if file_ref.startswith("(") and file_ref.endswith(")"):
+            # Evaluate an expression for the file name
+            result = self.duck.execute(f"select {file_ref}").fetchone()[0]
+            file_ref = result
+
+        if adapter_ref in self.adapters:
+            adapter = self.adapters[adapter_ref]
+            exporter = TableExporter(
+                table=table_ref, 
+                adapter=adapter, 
+                target_file=file_ref,
+                allow_overwrite=(write_option == "overwrite"),
+                allow_append=(write_option == "append")
+            )
+            exporter.run(self.logger)
+            self.print(f"Exported query result to '{file_ref}'")
+        else:
+            self.print(f"Error, uknown adapter '{adapter_ref}'")
+
+    def show_schemas(self):
+        return self._execute_duck(Queries.list_schemas)
+
     def show_tables(self, schema_ref=None):
         if schema_ref:
             potential = []
@@ -714,7 +800,7 @@ class UnifyRepl:
                     if df is not None:
                         with pd.option_context('display.max_rows', None):
                             if df.shape[0] == 0:
-                                return
+                                continue
                             fmt_opts = {
                                 "index": False,
                                 "max_rows" : None,

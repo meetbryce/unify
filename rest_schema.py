@@ -1,5 +1,4 @@
 import glob
-import io
 import os
 import re
 import string
@@ -24,7 +23,7 @@ class Connection:
     @classmethod
     def setup_connections(cls, path=None, conn_list=None, storage_mgr_maker=None):
         adapter_table = {}
-        for f in glob.glob(f"./rest_specs/*spec.yaml"):
+        for f in glob.glob(os.path.join(os.path.dirname(__file__), "rest_specs/*spec.yaml")):
             spec = yaml.load(open(f), Loader=yaml.FullLoader)
             if spec.get('enabled') == False:
                 continue
@@ -449,21 +448,21 @@ class Adapter:
     def supports_commands(self) -> bool:
         return self.help is not None
 
-    def run_command(self, code: str, output_logger: OutputLogger) -> bool:
+    def run_command(self, code: str, output_logger: OutputLogger) -> OutputLogger:
         if code.strip() == 'help':
             if self.help:
                 output_logger.print_block(self.help)
             else:
                 output_logger.print(f"No help available for connector {self.name}")
-            return True
+            return output_logger
         else:
-            return False
+            return None
 
     # Exporting data
-    def create_output_table(self, file_name, opts={}):
+    def create_output_table(self, file_name, output_logger:OutputLogger, overwrite=False, opts={}):
         raise RuntimeError(f"Adapter {self.name} does not support writing")
 
-    def write_page(self, output_handle, page: pd.DataFrame):
+    def write_page(self, output_handle, page: pd.DataFrame, output_logger:OutputLogger, append=False):
         raise RuntimeError(f"Adapter {self.name} does not support writing")
 
     def close_output_table(self, output_handle):

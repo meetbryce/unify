@@ -20,6 +20,13 @@ def verify_parse(visitor, parser, rule, query, args = {}):
     for key in args.keys():
         assert key in visitor._the_command_args and visitor._the_command_args[key] == args[key]
 
+def test_help_commands(visitor, parser):
+    v = visitor
+    p = parser
+    verify_parse(v, p, "help", query="help")
+    verify_parse(v, p, "help", query="help schemas", args={"help_choice": "schemas"})
+    verify_parse(v, p, "help", query="help charts", args={"help_choice": "charts"})
+
 def test_show_commands(visitor, parser):
     v = visitor
     p = parser
@@ -101,6 +108,17 @@ def test_export_commands(visitor, parser):
     verify_parse(v, p, "select_for_writing", sql,
             args={"select_query":select, "adapter_ref": "gsheets", "file_ref": "foo"})
 
+    verify_parse(v, p, "export_table", "export github.coders to gsheets 'Coders'",
+            args={"table_ref": "github.coders", "adapter_ref": "gsheets", "file_ref": "Coders"})
+
+    verify_parse(v, p, "export_table", "export github.coders to gsheets 'Coders' overwrite",
+            args={"write_option": "overwrite"})
+
+    verify_parse(v, p, "export_table", "export github.coders to gsheets 'Coders' append",
+            args={"write_option": "append"})
+
+    verify_parse(v, p, "export_table", "export coders to gsheets ('Coders' || current_date || '.txt') append",
+            args={"write_option": "append", "file_ref": "('Coders' || current_date || '.txt')"})
 
 def test_autocomplete_parser(visitor, parser):
     # Test parser snippets use for auto-completion

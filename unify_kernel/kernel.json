@@ -1,5 +1,6 @@
 {
-    "argv": ["python", "-m", "debugpy", "--listen", "5678", "-m", "unify_kernel", "-f", "{connection_file}"],
+    "argv_for_debug": ["python", "-m", "debugpy", "--listen", "5678", "-m", "unify_kernel", "-f", "{connection_file}"],
+    "argv": ["python", "-m", "unify_kernel", "-f", "{connection_file}"],
     "display_name": "Unify",
     "language": "text"
 }

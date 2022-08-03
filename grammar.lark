@@ -14,6 +14,9 @@ command: show_tables
          | describe
          | clear_table
          | create_chart
+         | count_table
+         | export_table
+         | help
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
 
@@ -28,8 +31,14 @@ select_query: "select" WS col_list WS "from" WS table_list (WS where_clause)? (W
 select_for_writing: select_query ">>" adapter_ref file_ref writing_args?
 
 adapter_ref: WORD
-file_ref: SINGLE_QUOTED_STRING
+file_ref: SINGLE_QUOTED_STRING | PAREN_EXPR
 writing_args: ANY
+
+export_table: "export" WS table_ref WS "to" adapter_ref file_ref (write_option)?
+
+write_option: OVERWRITE | APPEND
+OVERWRITE: "overwrite"
+APPEND: "append"
 
 describe: "describe" table_ref?
 
@@ -46,6 +55,10 @@ drop_table: "drop" WS "table" table_ref
 drop_schema: "drop schema" WS schema_ref (WS "cascade")?
 
 clear_table: "clear table" WS table_schema_ref
+
+help: "help" (WS HELP_CHOICE)?
+
+HELP_CHOICE: "info" | "schemas" | "charts" | "import" | "export"
 
 col_list: col_ref WS? ("," WS? col_ref)*
 
@@ -66,7 +79,7 @@ order_col_list: col_ref (WS "asc"|"desc")? WS? ("," WS? col_ref)*
 
 
 TABLE: WORD
-SCHEMA: WORD            
+SCHEMA: WORD
 
 create_chart_where: "where" (WS chart_param WS? "=" WS? param_value) (WS "and" WS chart_param WS? "=" WS? param_value)*
 create_chart: "create chart" WS chart_name? WS? ("from" chart_source)? "as" chart_type WS create_chart_where
@@ -99,7 +112,9 @@ HBAR_CHART: "hbar_chart"
 LINE_CHART: "line_chart"
 AREA_CHART: "area_chart" 
 
+// SQL extensions
 
+count_table: "count" WS table_ref
 
 parts: WORD ","? [ WS WORD+ ]
 
@@ -112,6 +127,7 @@ LITERAL         : SINGLE_QUOTED_STRING | NUMBER
 ALPHA           : UCASE_LETTER | LCASE_LETTER | "_"
 ALPHANUM        : ALPHA [ ALPHA | DIGIT ]*
 SINGLE_QUOTED_STRING  : /'[^']*'/
+PAREN_EXPR      : "(" /[^)]+/ ")"
 
 SPACE           : " "
 TAB             : SPACE+

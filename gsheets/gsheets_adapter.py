@@ -17,7 +17,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 import pandas as pd
 
 # project
-from rest_schema import Adapter, UnifyLogger, StorageManager, TableDef
+from rest_schema import Adapter, OutputLogger, UnifyLogger, StorageManager, TableDef
 from parsing_utils import collect_child_strings, find_node_return_child
 from schemata import LoadTableRequest
 
@@ -154,27 +154,36 @@ class GSheetsClient:
         ).execute()
         return response.get('values', [])
 
-    def create_new_sheet(self, newSheetName: str):
-        # FIXME: Create a new sheet with the given name
+    def create_new_sheet(self, newSheetName: str, overwrite: bool=False):
+        for info in self.get_all_sheets_files(newSheetName):
+            if info['name'] == newSheetName:
+                if overwrite:
+                    return info['id']
+                else:
+                    raise RuntimeError(f"Sheet {newSheetName} already exists")
+        # No match so go ahead and create a new sheet
         spreadsheet_body = {"properties": {"title":newSheetName}}
         response = self.SHEETS.spreadsheets().create(body=spreadsheet_body).execute()
         return response['spreadsheetId']
 
-    def write_data_to_sheet(self, sheetId=None, page: pd.DataFrame = None):
+    def write_data_to_sheet(self, sheetId=None, page: pd.DataFrame = None, append=False):
         # TODO: allow this to be called with multiple pages of data
         # Q: What if you want to write to a new tab of an existing sheet?
 
         # FIXME: handle different tabs
         range = f"1:1"
         # convert DataFrame to sheets data format
-        value_range_body = {"range": range, "values": page.values}
+        value_range_body = {"range": range, "values": [list(page.columns)] + page.astype(str).values.tolist()}
         request = self.SHEETS.spreadsheets().values().append(
             spreadsheetId=sheetId,
             range=range,
             valueInputOption='RAW', 
             body=value_range_body)
         response = request.execute()
-        print("Response: ", response)
+        if 'updates' in response and 'updatedRows' in response['updates']:
+            return response['updates']['updatedRows']
+        else:
+            return None
 
     def storeSheetInfo(self, response, useTitle=None):
         info = {'title': response['properties']['title'],
@@ -269,10 +278,9 @@ class GsheetCommandParser(Visitor):
         self._safe.parser = Lark(open(
             os.path.join(os.path.dirname(__file__), "gsheets_grammar.lark")).read())
 
-    def parse_and_run(self, code: str, output_buffer: io.TextIOBase) -> str:
+    def parse_and_run(self, code: str, output_logger: OutputLogger) -> str:
         self._safe.command = None
         self._safe.args = {}
-        self._safe.output_buffer = output_buffer
 
         parse_tree = self._safe.parser.parse(code)
         self.visit(parse_tree)
@@ -323,7 +331,7 @@ class GSheetsAdapter(Adapter):
     def __init__(self, spec, storage: StorageManager):
         super().__init__(spec['name'], storage)
         self.auth = spec['auth'].copy()
-        self.output = sys.stdout
+        self.logger: OutputLogger = None
 
         self.parser: GsheetCommandParser = GsheetCommandParser()
         self.help = """
@@ -360,19 +368,19 @@ is a good option if the sheet data is changing frequenly.
 
     def list_files(self):
         for sheet in self.client.get_all_sheets_files():
-            print(sheet['name'], "\t", sheet['webViewLink'], file=self.output)
+            self.logger.print(sheet['name'], "\t", sheet['webViewLink'])
 
     def get_matching_sheets(self, search_query):
         return self.client.get_all_sheets_files(search_query)
 
     def search(self, search_query=None):
         for sheet in self.get_matching_sheets(search_query):
-            print(sheet['name'], "\t", sheet['webViewLink'], file=self.output)
+            self.logger.print(sheet['name'], "\t", sheet['webViewLink'])
 
     def print_sheet_header(self, sheetInfo, msg):
             t = sheetInfo['properties']['title']
             m = sheetInfo['modifiedTime']
-            print("Sheet '{}', last modified {}, {}: ".format(t, m, msg), file=self.output)
+            self.logger.print("Sheet '{}', last modified {}, {}: ".format(t, m, msg))
 
     def resolve_sheet_id(self, file_or_gsheet_id):
         if len(file_or_gsheet_id) > 15 and file_or_gsheet_id.find(" ") == -1:
@@ -396,8 +404,8 @@ is a good option if the sheet data is changing frequenly.
         for sheet in infos:
             self.print_sheet_header(sheet, "has tabs")
             for idx, tab in enumerate(sheet['sheets']):
-                print((idx+1), " - ", tab['properties']['title'], file=self.output)
-            print("\n", file=self.output)
+                self.logger.print((idx+1), " - ", tab['properties']['title'])
+            self.logger.print("\n")
 
     def peek(self, file_or_gsheet_id=None, tab_name=None):
         if len(file_or_gsheet_id) > 15 and file_or_gsheet_id.find(" ") == -1:
@@ -411,7 +419,7 @@ is a good option if the sheet data is changing frequenly.
         info = self.client.getSheetInfo(sheetId)
         rows = self.client.peek_sheet(sheetId, tab_name)
         self.print_sheet_header(info, "peek")
-        print(pd.DataFrame(rows), file=self.output)
+        return pd.DataFrame(rows)
 
     def create_table(self, table_name, file_or_gsheet_id, tab_name):
         sheetId = self.resolve_sheet_id(file_or_gsheet_id)
@@ -422,32 +430,37 @@ is a good option if the sheet data is changing frequenly.
         )
         self.tables = None
         # Todo: trigger a query which will load the table
+        self.logger.print("Table created")
 
     def supports_commands(self) -> bool:
         return True
 
-    def run_command(self, code: str, output_buffer: io.TextIOBase) -> None:
+    def run_command(self, code: str, output_logger: OutputLogger) -> None:
         # see if base wants to run it
-        if output_buffer:
-            self.output = output_buffer
-        if not super().run_command(code, output_buffer):
+        self.logger = output_logger
+        res = super().run_command(code, output_logger)
+        if res:
+            return res
+        else:
             self.last_code = code
-            command = self.parser.parse_and_run(code, output_buffer)
+            command = self.parser.parse_and_run(code, output_logger)
             if command:
                 result = getattr(self, command)(**self.parser._safe.args)
-                if result:
-                    return result
-            return True
-        return True
+                if isinstance(result, pd.DataFrame):
+                    output_logger.print_df(result)
+                return output_logger
+            return None
 
     # Exporting data
-    def create_output_table(self, file_name, opts={}):
+    def create_output_table(self, file_name, output_logger: OutputLogger, overwrite=False, opts={}):
         # FIXME: handle tabs
-        return self.client.create_new_sheet(file_name) # returns the sheetId
+        return self.client.create_new_sheet(file_name, overwrite=overwrite) # returns the sheetId
 
-    def write_page(self, output_handle, page: pd.DataFrame):
+    def write_page(self, output_handle, page: pd.DataFrame, output_logger: OutputLogger, append=False):
         sheetId = output_handle
-        self.client.write_data_to_sheet(sheetId=sheetId, page=page)
+        updated_rows = self.client.write_data_to_sheet(sheetId=sheetId, page=page, append=append)
+        if updated_rows:
+            output_logger.print(f"Wrote {updated_rows} rows to sheet")
 
     def close_output_table(self, output_handle):
         # Sheets REST API is stateless

@@ -6,7 +6,8 @@ def find_subtree(rule, tree):
     if getattr(getattr(tree, 'data', {}), 'value', None) == rule:
         found = tree
     for node in getattr(tree, 'children', []):
-        if getattr(getattr(node, 'data', {}), 'value', None) == rule:
+        if getattr(getattr(node, 'data', {}), 'value', None) == rule or \
+            getattr(node, 'type', None) == rule:
             found = node
             break
         else:

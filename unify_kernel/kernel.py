@@ -97,7 +97,7 @@ class UnifyKernel(Kernel):
                     }
                     print(content)
                     self.send_response(self.iopub_socket, 'display_data', content)
-                else:
+                elif object is not None:
                     self._send_string("Unrecognized internal result object")
 
             return {'status': 'ok',
