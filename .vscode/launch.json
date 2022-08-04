@@ -5,6 +5,17 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "pytest",
+            "type": "python",
+            "request": "launch",
+            "program": "${fileDirname}/venv/bin/pytest",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${fileDirname}",
+            "python.envFile": ".env",
+            "args": ["tests/test_variables.py"],
+        },
+        {
             "name": "Unify main",
             "type": "python",
             "request": "launch",

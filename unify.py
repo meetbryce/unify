@@ -4,6 +4,7 @@ import io
 import json
 import os
 from threading import Thread
+import pickle
 import pydoc
 import re
 import sys
@@ -332,6 +333,41 @@ class DuckdbStorageManager(StorageManager):
         )
         return table
 
+    def create_var_storage_table(self, duck):
+        table = "system__vars"
+        SCHEMA = "(name VARCHAR PRIMARY KEY, value BLOB)"
+        duck.execute(
+            f"create table if not exists meta.{table} {SCHEMA}"
+        )
+        return table
+
+    def put_var(self, name, value):
+        with DuckContext() as duck:
+            table = self.create_var_storage_table(duck)
+            duck.execute(f"delete from meta.{table} where name = '{name}'")
+            if isinstance(value, pd.DataFrame):
+                duck.register('df1', value)
+                # create the table AND flush current row_buffer values to the db
+                name = name.lower() + "__var"
+                duck.execute(f"create or replace table meta.{name} as select * from df1")
+                duck.unregister("df1")
+            else:
+                duck.execute(
+                    f"insert into meta.{table} (name, value) values (?, ?)",
+                    (name, pickle.dumps(value))
+                )
+
+    def get_var(self, name):
+        with DuckContext() as duck:
+            table = self.create_var_storage_table(duck)
+            rows = duck.execute(f"select value from meta.{table} where name = ?", [name]).fetchall()
+            if len(rows) > 0:
+                return pickle.loads(rows[0][0])
+            else:
+                name = name.lower() + "__var"
+                return duck.execute(f"select * from meta.{name}").df()
+                #raise RuntimeError(f"No value stored for global variable '{name}'")
+
     def put_object(self, collection: str, id: str, values: dict) -> None:
         with DuckContext() as duck:
             table = self.ensure_col_table(duck, collection)
@@ -550,18 +586,17 @@ class CommandInterpreter:
 
         def lookup_var(match):
             var_name = match.group(1)
-            if var_name in self.session_vars:
-                value = self.session_vars[var_name]
-                if isinstance(value, pd.DataFrame):
-                    ref_var =f"{var_name}__actualized"
-                    self.duck.register(ref_var, value)
-                    return ref_var
+            value = self._get_variable(var_name)
+            if isinstance(value, pd.DataFrame):
+                ref_var =f"{var_name}__actualized"
+                self.duck.register(ref_var, value)
+                return ref_var
+            elif value is not None:
+                # literal substitution
+                if isinstance(value, str):
+                    return f"'{value}'"
                 else:
-                    # literal substitution
-                    if isinstance(value, str):
-                        return f"'{value}'"
-                    else:
-                        return str(self.session_vars[var_name])
+                    return str(self.session_vars[var_name])
             else:
                 return "$" + var_name
                 #raise RuntimeError(f"Unknown variable reference '{var_name}'")
@@ -697,16 +732,32 @@ help export
         else:
             self.print(f"Error, uknown adapter '{adapter_ref}'")
 
-    def set_variable(self, var_ref, var_expression):
+    def set_variable(self, var_ref: str, var_expression: str):
+        is_global = var_ref.upper() == var_ref
         if not var_expression.lower().startswith("select "):
             # Need to evaluate the scalar expression
             val = self.duck.execute("select " + var_expression).fetchone()[0]
-            self.session_vars[var_ref] = val
+            self._save_variable(var_ref, val, is_global)
             self.print(val)
         else:
             val = self.duck.execute(var_expression).df()
-            self.session_vars[var_ref] = val
+            self._save_variable(var_ref, val, is_global)
             return val
+
+    def _get_variable(self, name: str):
+        if name.upper() == name:
+            store: DuckdbStorageManager =DuckdbStorageManager(None)
+            return store.get_var(name)
+        else:
+            return self.session_vars[name]
+
+    def _save_variable(self, name: str, value, is_global: bool):
+        if is_global:
+            # Save a scalar to our system table in meta
+            store: DuckdbStorageManager =DuckdbStorageManager(None)
+            store.put_var(name, value)
+        else:
+            self.session_vars[name] = value
 
     def show_schemas(self):
         return self._execute_duck(Queries.list_schemas)
@@ -799,6 +850,13 @@ help export
     def show_variable(self, var_ref):
         if var_ref in self.session_vars:
             self.print(self.session_vars[var_ref])
+        elif var_ref.upper() == var_ref:
+            store: DuckdbStorageManager =DuckdbStorageManager(None)
+            value = store.get_var(var_ref)
+            if isinstance(value, pd.DataFrame):
+                return value
+            else:
+                self.print(value)
         else:
             self.print(f"Error, unknown variable '{var_ref}'")
 
