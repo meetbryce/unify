@@ -2,6 +2,7 @@ start: command+ ";"?
 
 command: show_tables
          | show_schemas
+         | show_variables
          | show_columns
          | select_for_writing
          | select_query
@@ -16,11 +17,15 @@ command: show_tables
          | create_chart
          | count_table
          | export_table
+         | set_variable
+         | show_variable
          | help
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
 
-show_schemas: "show schemas"
+show_schemas: "show" WS "schemas"
+
+show_variables: "show" WS "variables"
 
 show_columns: "show columns" (WS FROM WS table_ref WS? column_filter?)?
 
@@ -39,6 +44,12 @@ export_table: "export" WS table_ref WS "to" adapter_ref file_ref (write_option)?
 write_option: OVERWRITE | APPEND
 OVERWRITE: "overwrite"
 APPEND: "append"
+
+set_variable: var_ref WS? "=" var_expression
+
+show_variable: var_ref
+
+var_expression: ANY
 
 describe: "describe" table_ref?
 
@@ -71,6 +82,7 @@ table_list: table_ref WS? ("," WS? table_ref)*
 table_schema_ref: WORD "." WORD?
 schema_ref: WORD
 limit_clause: "limit" WS NUMBER
+var_ref: "$" WORD
 
 where_clause: "where" WS where_comp (["and" | "or"] WS where_comp)*
 where_comp: col_ref OPERATOR [LITERAL | col_ref]
@@ -97,7 +109,7 @@ TITLE_PARAM: "title"
 X_AXIS_LABEL: "x_axis_label"
 STACKED_PARAM: "stacked"
 
-param_value: WORD | /"[^"]*"/
+param_value: WORD | SINGLE_QUOTED_STRING
 column_ref: WORD
 chart_source: "$"? table_schema_ref
 chart_type: PIE_CHART 

@@ -18,7 +18,8 @@ def verify_parse(visitor, parser, rule, query, args = {}):
     ast = parser.parse(query)
     assert visitor.perform_new_visit(ast, full_code=query) == rule
     for key in args.keys():
-        assert key in visitor._the_command_args and visitor._the_command_args[key] == args[key]
+        assert key in visitor._the_command_args
+        assert visitor._the_command_args[key] == args[key]
 
 def test_help_commands(visitor, parser):
     v = visitor
@@ -46,6 +47,8 @@ def test_show_commands(visitor, parser):
                 args={'table_ref':"table1"})
     verify_parse(v, p, "describe", query="describe github", args={'table_ref':"github"})
     verify_parse(v, p, "describe", query="describe github.orgs", args={'table_ref':"github.orgs"})
+
+    verify_parse(v, p, "show_variables", query="show variables")
 
 def test_select(visitor, parser):
     v = visitor
@@ -91,7 +94,7 @@ def test_chart_commands(visitor, parser):
                 "x = col1 and y = col2 and x_axis_label = green",
                 args={'chart_source': ['github', 'users'], 'chart_name':"chr1", 'chart_type':"pie_chart"})
 
-    verify_parse(v, p, "create_chart", query="create chart as pie_chart where title = \"Awesome chart\"",
+    verify_parse(v, p, "create_chart", query="create chart as pie_chart where title = 'Awesome chart'",
                 args={"chart_params": {"title": "Awesome chart"}})
 
     verify_parse(v, p, "create_chart", query="create chart as bar_chart where x = col1 and stacked = true",
@@ -128,3 +131,25 @@ def test_autocomplete_parser(visitor, parser):
 
     verify_parse("show_tables", query="show tables  from ")
 
+def test_variables(visitor, parser):
+    v = visitor
+    p = parser
+
+    verify_parse(v, p, "set_variable", "$foo = 100",
+        args={"var_ref": "foo", "var_expression": "100"})
+
+    verify_parse(v, p, "show_variable", "$foo",
+        args={"var_ref": "foo"})
+
+    verify_parse(v, p, "set_variable", "$foo='hello world'",
+        args={"var_ref": "foo", "var_expression": "'hello world'"})
+
+    verify_parse(v, p, "show_variable", "  $foo  ",
+        args={"var_ref": "foo"})
+
+    verify_parse(v, p, "set_variable", "  $USER = 'john ' || 'adams'",
+        args={"var_ref": "USER", "var_expression": "'john ' || 'adams'"})
+
+    q = "select id, name, date from hubspot.orders limit 10"
+    verify_parse(v, p, "set_variable", f"$orders = {q}",
+        args={"var_ref": "orders", "var_expression": q})

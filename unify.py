@@ -415,10 +415,8 @@ class ParserVisitor(Visitor):
         for child in self._the_command_args['chart_where'].children:
             key = key or find_node_return_child("chart_param", child)
             value = value or find_node_return_child("param_value", child)
-            if value and value[0] == '"':
-                value = value[1:-1]
-            if value and value[-1] == '"':
-                value = value[:-1]
+            if value is not None:
+                value = value.strip("'")
             if key and value:
                 params[key] = value
                 key = value = None
@@ -471,14 +469,10 @@ class ParserVisitor(Visitor):
         self._the_command_args["file_ref"] = find_node_return_child("file_ref", tree).strip("'")
         self._the_command_args["select_query"] = collect_child_text("select_query", tree, self._full_code)
 
-    def show_tables(self, tree):
-        self._the_command = 'show_tables'
-        self._the_command_args['schema_ref'] = find_node_return_child("schema_ref", tree)
-        return tree
-
-    def show_schemas(self, tree):
-        self._the_command = 'show_schemas'
-        return tree
+    def set_variable(self, tree):
+        self._the_command = "set_variable"
+        self._the_command_args["var_ref"] = find_node_return_child("var_ref", tree)
+        self._the_command_args["var_expression"] = collect_child_text("var_expression", tree, self._full_code).strip()
 
     def show_columns(self, tree):
         """" Always returns 'table_ref' either qualified or unqualified by the schema name."""
@@ -493,6 +487,21 @@ class ParserVisitor(Visitor):
             self._the_command_args['column_filter'] = filter.strip()
         return tree
 
+    def show_schemas(self, tree):
+        self._the_command = 'show_schemas'
+        return tree
+
+    def show_tables(self, tree):
+        self._the_command = 'show_tables'
+        self._the_command_args['schema_ref'] = find_node_return_child("schema_ref", tree)
+        return tree
+
+    def show_variable(self, tree):
+        self._the_command = "show_variable"
+        self._the_command_args["var_ref"] = find_node_return_child("var_ref", tree)        
+
+    def show_variables(self, tree):
+        self._the_command = "show_variables"
 
 class CommandInterpreter:
     """
@@ -511,6 +520,7 @@ class CommandInterpreter:
         self.loader = TableLoader()
         self.adapters: dict[str, Adapter] = self.loader.adapters
         self.logger: OutputLogger = None
+        self.session_vars: dict[str, object] = {}
 
     def _list_schemas(self, match_prefix=None):
         with DuckContext() as duck:
@@ -534,6 +544,35 @@ class CommandInterpreter:
                 handler: Adapter = self.adapters[first_word]
                 return handler.run_command(rest_of_command, logger)
 
+    def substitute_variables(self, code):
+        if re.match(r"\s*\$[\w_0-9]+\s*$", code):
+            return code # simple request to show the variable value
+
+        def lookup_var(match):
+            var_name = match.group(1)
+            if var_name in self.session_vars:
+                value = self.session_vars[var_name]
+                if isinstance(value, pd.DataFrame):
+                    ref_var =f"{var_name}__actualized"
+                    self.duck.register(ref_var, value)
+                    return ref_var
+                else:
+                    # literal substitution
+                    if isinstance(value, str):
+                        return f"'{value}'"
+                    else:
+                        return str(self.session_vars[var_name])
+            else:
+                return "$" + var_name
+                #raise RuntimeError(f"Unknown variable reference '{var_name}'")
+
+        match = re.match(r"\s*(\$[\w_0-9]+)\s*=(.*)", code, re.DOTALL)
+        if match:
+            # var assignment, only interpolate the right hand side
+            return match.group(1) + "=" + self.substitute_variables(match.group(2))
+        else:
+            # interpolate the whole command
+            return re.sub("\$([\w_0-9]+)", lookup_var, code)
 
     def run_command(self, cmd, input_func=input) -> tuple[list, pd.DataFrame]:
         """
@@ -553,14 +592,16 @@ class CommandInterpreter:
                     object.rename(columns={'count_star()': 'count'}, inplace=True)
 
         try:
-            # Allow Adapters to process their special commands
-            output: OutputLogger = self.pre_handle_command(cmd)
-            if output is not None:
-                return (output.get_output(), output.get_df())
-
             with DuckContext() as duck:
-                self.print_buffer = []
                 self.duck = duck
+
+                cmd = self.substitute_variables(cmd)
+                # Allow Adapters to process their special commands
+                output: OutputLogger = self.pre_handle_command(cmd)
+                if output is not None:
+                    return (output.get_output(), output.get_df())
+
+                self.print_buffer = []
                 self._cmd = cmd
                 result = None
                 self.input_func = input_func
@@ -656,6 +697,17 @@ help export
         else:
             self.print(f"Error, uknown adapter '{adapter_ref}'")
 
+    def set_variable(self, var_ref, var_expression):
+        if not var_expression.lower().startswith("select "):
+            # Need to evaluate the scalar expression
+            val = self.duck.execute("select " + var_expression).fetchone()[0]
+            self.session_vars[var_ref] = val
+            self.print(val)
+        else:
+            val = self.duck.execute(var_expression).df()
+            self.session_vars[var_ref] = val
+            return val
+
     def show_schemas(self):
         return self._execute_duck(Queries.list_schemas)
 
@@ -743,6 +795,16 @@ help export
             self.print(f"Exported query result to '{file_ref}'")
         else:
             self.print(f"Error, uknown adapter '{adapter_ref}'")
+
+    def show_variable(self, var_ref):
+        if var_ref in self.session_vars:
+            self.print(self.session_vars[var_ref])
+        else:
+            self.print(f"Error, unknown variable '{var_ref}'")
+
+    def show_variables(self):
+        rows = [(k, "[query result]" if isinstance(v, pd.DataFrame) else v) for k, v in self.session_vars.items()]
+        return pd.DataFrame(rows, columns=["variable", "value"])
 
     def clear_table(self, table_schema_ref=None):
         self.loader.truncate_table(table_schema_ref)

@@ -77,9 +77,21 @@ to webhooks to be notified of changes to any records in the source system.
 
 Unify extends normal SQL syntax to support `$name` format variables:
 
-    set $last_record = (select * from items order by created desc limit 1)
-    ...
-    select * from items where created > $last_record.created
+    $last_record = <expr>
+    $VAR1 = <expr>
+    
+where <expr> will generally be either a scalar expression, including some literal value, or
+the result of a SELECT query.
+
+Examples:
+    $current = select current_date
+    $maxval = 100
+
+    $last_item = select * from items order by created desc limit 1
+
+Variables that use all upper case letters are automatically treated as globals, meaning
+they are globally defined, available, and persistent. Other variables are considered transient
+and only live the lifetime a session.
 
 By default variables will be evaluated into a result when the `set` operation occurs.
 However, you can request "lazy" evaluation in which case the variable acts like
@@ -103,38 +115,12 @@ are exporting data to files on S3 or Google Sheets.
 
 See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 
-### Integration with Google sheets
-
-Unify integrates to read and write data with Google Sheets.
-
-To export a query to a Gsheets file, use this syntax:
-
-    > select * from orders >> gsheets:<file name or sheetId>[/<tab name>]
-
-
-To import from Gsheets, configure a Gsheets connection and use the custom
-`gsheets` command to import data from your spreadsheets:
-
-    > gsheets list files
-    ...lists all Gsheet files
-    > gsheets search <query>
-    ...searches for Gsheet files whose title matches the query
-    > gsheets info <file name or gsheet Id>
-    ...lists the tabs of the idicated gsheet file
-    > gsheets import <file name or gsheet Id> 
-    ...imports the first sheet from the indicated Gsheet file. This will create
-    a new table in the gsheets connection schema with a name derived from the file name
-    > gsheets import <file name or gsheet Id> sheet <sheet name or number>
-    ...indicates the specific sheet to import (by sheet name or numeric index starting with 1)
-    > gsheets import <file> sheet <sheet> as table <name>
-    ...imports the indicated sheet into a table with the indicated table name. If the
-    table already exists then data from the sheet will be appended to the table
 
 ## TODO
 
 1. [done] Implement unit tests
 1. Implement table refresh, with support for strategies
-1. Implement GSheets adapter
+1. [done] Implement GSheets adapter
 1. Implement AWS Cost Reporting adapter
 1. [done] Implement Lark parser for more complex syntax support
 1. [done] Implement full `show` commands
@@ -142,7 +128,7 @@ To import from Gsheets, configure a Gsheets connection and use the custom
 1. Unobtrusive table loading status supporting interrupts
 1. Jupyter UI integration: 
     1. Schema browser tree panel
-    1. Custom charting command
+    1. [done] Custom charting command
     1. Implement more autocompletions
 
 ## Developing
