@@ -1,6 +1,11 @@
 enabled: true
 name: jira
 base_url: https://tatari.atlassian.net
+help: |
+          The JIRA connector loads all JIRA issues and lets you query them easily.
+          Use `issues` table to query issues.
+          Use `resolutions` table to query the list of defined resolution states.
+          Use `projects` table to query the set of JIRA projects.
 paging:
   strategy: offsetAndCount
   offset_param: startAt
@@ -18,71 +23,20 @@ auth:
   uservar: JIRAUSER
   tokenvar: JIRATOKEN
 tables:
-  - name: help_
-    resource_path: <inline>
-    columns:
-      - name: msg
-        key: True
-    values:
-      - msg: |
-          The JIRA connector loads all JIRA issues and lets you query them easily.
-          Use `issues` table to query issues.
-          Use `resolutions` table to query the list of defined resolution states.
-          Use `projects` table to query the set of JIRA projects.
   - name: issues
     query_resource: GET /rest/api/3/search
 # This API: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-get    
     supports_paging: True
     params:
       jql: created > 2021-06-30 order by created DESC
-    refresh_params:
-      jql: updated >= '{checkpoint}'
+    refresh:
+      strategy: updates
+      param_expr: 
+        jql: updated >= '{checkpoint}' by created DESC
     result_body_path: issues
     select: "id, key, fields_project_id, fields_project_key, fields_summary, fields_reporter_.+, fields_assignee_.+, \n
     fields_status_.+, fields.created, fields.updated, fields_issuetype_name, fields_priority_name, \n
     fields_resolution_name"
-    columns:
-      - name: id
-        type: VARCHAR
-      - name: key
-        key: true
-      - name: link
-        source: self
-      - name: project_id
-        source: fields.project.id
-      - name: summary
-        source: fields.summary
-      - name: reporter_name
-        source: fields.reporter.displayName
-      - name: reporter_email
-        source: fields.reporter.emailAddress
-      - name: assignee_name
-        source: fields.assignee.displayName
-      - name: assignee_email
-        source: fields.assignee.emailAddress
-      - name: project_key
-        source: fields.project.key
-      - name: status
-        source: fields.status.name  
-      - name: created
-        type: TIMESTAMP
-        source: fields.created
-      - name: updated
-        type: TIMESTAMP
-        timestamp: true
-        source: fields.updated
-      - name: issuetype
-        source: fields.issuetype.name
-      - name: priority
-        source: fields.priority.name
-      - name: labels
-        source: fields.labels
-        type: JSON
-      - name: resolution
-        source: fields.resolution.name
-      - name: description
-        source: fields.description.content[*].content[0].text
-        hidden: True
   - name: myself
     resource_path: /rest/api/3/myself
     result_type: object

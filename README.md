@@ -52,27 +52,6 @@ You can store sensitive values directly into `connections.yml`, or you can use
 `$<name>` syntax to reference an environment variable and store secrets in the
 environment instead.
 
-## Updates to the source system
-
-Each API spec can define a "refresh strategy" which indicates how changes to the
-system should be queried and merged into the local copy.
-
-**Full Reload**
-
-The default and simplest model is simply to perform a full table load again from
-the source system.
-
-**Incremental load**
-
-In this model the REST API must support a filter which returns "all changes since
-time t". The system will track the timestamp and provide it as a filter for the
-next query.
-
-**(future) Change data capture**
-
-If the system support webhooks for broadcasting change events, then Unify can subscribe
-to webhooks to be notified of changes to any records in the source system.
-
 ## Variables
 
 Unify extends normal SQL syntax to support `$name` format variables:

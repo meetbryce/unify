@@ -46,3 +46,40 @@ connected system. The output handle from `create_output_table` will be passed
 in as well as the source data as a DataFrame.
 
 `close_output_table` - Invoked when all data has been written
+
+## Updates to the source system
+
+Each API spec can define a "refresh strategy" which indicates how changes to the
+system should be queried and merged into the local copy.
+
+**Full Reload**
+
+The default and simplest model is simply to perform a full table load again from
+the source system.
+
+    refresh:
+      strategy: reload
+
+**Incremental load**
+
+In this model the REST API must support a filter which returns "all changes since
+time t". The system will track the timestamp and provide it as a filter for the
+next query. The REST resource must also have a unique identifying key. This key is
+used to delete the old record before the new recorded is inserted into the database.
+
+    refresh:
+      strategy: updates
+      params:
+        name: <value expr>
+    key: <column>
+
+The `params` should refer to query parameters for passing the date filter to the
+REST API, using`{timestamp}` to reference the value. For example:
+      params: 
+        filter: updated_at>{timestamp}
+    
+**(future) Change data capture**
+
+If the system support webhooks for broadcasting change events, then Unify can subscribe
+to webhooks to be notified of changes to any records in the source system.
+

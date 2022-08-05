@@ -1,5 +1,6 @@
 from email.parser import Parser
 from inspect import isfunction
+from datetime import datetime
 import io
 import json
 import os
@@ -15,9 +16,8 @@ from lark.visitors import v_args
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from typing import Dict, Tuple
+from typing import Dict
 # CHARTING
-from matplotlib import ticker
 import matplotlib.pyplot as plt
 
 import pandas as pd
@@ -25,12 +25,20 @@ import pyarrow as pa
 import numpy as np
 
 from timeit import default_timer as timer
+import yappi
 
 # DuckDB
 import duckdb
 from setuptools import Command
 
-from rest_schema import Adapter, Connection, OutputLogger, UnifyLogger, TableDef
+from rest_schema import (
+    Adapter, 
+    Connection, 
+    OutputLogger, 
+    TableDef,
+    UnifyLogger
+)
+
 from storage_manager import StorageManager
 from schemata import LoadTableRequest, Queries
 from parsing_utils import (
@@ -76,6 +84,7 @@ class TableScan(Thread):
         self.tableMgr: TableMgr = tableMgr
         self.tableLoader = tableLoader
         self.select = select
+        self.storage_mgr: StorageManager = DuckdbStorageManager("_system_")
 
     def cleanup_df_page(self, df, cols_to_drop=[]):
         # Pandas json_normalize does not have a clever way to normalize embedded lists
@@ -131,8 +140,22 @@ class TableScan(Thread):
         with DuckContext() as duck:
             self.perform_scan(duck)
 
+    def save_scan_record(self):
+        self.storage_mgr.put_object(
+            "tablescans", 
+            self.tableMgr.name,
+            {"timestamp": datetime.utcnow()}
+        )
+
+    def get_last_scan_record(self):
+        return self.storage_mgr.get_object("tablescans", self.tableMgr.name)
+
     def perform_scan(self, duck):
         print("Running table scan for: ", self.tableMgr.name)
+        rec = self.get_last_scan_record()
+        last_scan_time = rec.get("timestamp", None)
+
+        self.save_scan_record()
 
         def flush_rows(tableMgr, next_df, page, flush_count):
             if page <= flush_count:
@@ -153,7 +176,11 @@ class TableScan(Thread):
         table_cols = set()
         logger = SimpleLogger(self.tableMgr.adapter)
 
-        for json_page, size_return in self.tableMgr.table_spec.query_resource(self.tableLoader, logger):
+        query_mgr = self.tableMgr.table_spec
+        if last_scan_time:
+            query_mgr = self.tableMgr.table_spec.get_table_updater(last_scan_time)
+
+        for json_page, size_return in query_mgr.query_resource(self.tableLoader, logger):
             record_path = self.tableMgr.table_spec.result_body_path
             df = pd.json_normalize(json_page, record_path=record_path, sep='_')
             size_return.append(df.shape[0])
@@ -249,11 +276,17 @@ class TableLoader:
        2. Never queried. Call the Adapter to query the data and store it to local db.
        3. Table exists in the local db.
     """
-    def __init__(self):
-        self.connections: list[Connection] = Connection.setup_connections(
-            os.path.join(os.path.dirname(__file__), "connections.yaml"), 
-            storage_mgr_maker=lambda schema: DuckdbStorageManager(schema)
-        )
+    def __init__(self, silence_errors):
+        try:
+            self.connections: list[Connection] = Connection.setup_connections(
+                os.path.join(os.path.dirname(__file__), "connections.yaml"), 
+                storage_mgr_maker=lambda schema: DuckdbStorageManager(schema)
+            )
+        except:
+            if not silence_errors:
+                raise
+            else:
+                self.connections = []
         self.tables: dict[str, TableMgr] = {}
 
         self.adapters: dict[str, Adapter] = dict(
@@ -320,6 +353,7 @@ class DuckdbStorageManager(StorageManager):
         tables named <adapter schema>_<collection name>.
     """
     TABLE_SCHEMA = "(id VARCHAR PRIMARY KEY, blob JSON)"
+    VAR_NAME_SENTINAL = '__var__'
 
     def __init__(self, adapter_schema: str):
         self.adapter_schema = adapter_schema
@@ -348,7 +382,7 @@ class DuckdbStorageManager(StorageManager):
             if isinstance(value, pd.DataFrame):
                 duck.register('df1', value)
                 # create the table AND flush current row_buffer values to the db
-                name = name.lower() + "__var"
+                name = name.lower() + self.VAR_NAME_SENTINAL
                 duck.execute(f"create or replace table meta.{name} as select * from df1")
                 duck.unregister("df1")
             else:
@@ -357,6 +391,17 @@ class DuckdbStorageManager(StorageManager):
                     (name, pickle.dumps(value))
                 )
 
+    def list_vars(self):
+        with DuckContext() as duck:
+            table = self.create_var_storage_table(duck)
+            scalars = duck.execute(f"select name from meta.{table}").fetchall()
+            scalars.extend(list(
+                duck.execute(
+                    Queries.saved_var_tables.format(self.VAR_NAME_SENTINAL)
+                ).fetchall()
+            ))
+            return scalars
+
     def get_var(self, name):
         with DuckContext() as duck:
             table = self.create_var_storage_table(duck)
@@ -364,7 +409,7 @@ class DuckdbStorageManager(StorageManager):
             if len(rows) > 0:
                 return pickle.loads(rows[0][0])
             else:
-                name = name.lower() + "__var"
+                name = name.lower() + self.VAR_NAME_SENTINAL
                 return duck.execute(f"select * from meta.{name}").df()
                 #raise RuntimeError(f"No value stored for global variable '{name}'")
 
@@ -548,12 +593,12 @@ class CommandInterpreter:
     """
     _last_result: pd.DataFrame = None
 
-    def __init__(self, debug=False):
+    def __init__(self, debug=False, silence_errors=False):
         self.debug = debug
         path = os.path.join(os.path.dirname(__file__), "grammar.lark")
         self.parser = Lark(open(path).read(), propagate_positions=True)
         self.parser_visitor = ParserVisitor()
-        self.loader = TableLoader()
+        self.loader = TableLoader(silence_errors)
         self.adapters: dict[str, Adapter] = self.loader.adapters
         self.logger: OutputLogger = None
         self.session_vars: dict[str, object] = {}
@@ -862,6 +907,9 @@ help export
 
     def show_variables(self):
         rows = [(k, "[query result]" if isinstance(v, pd.DataFrame) else v) for k, v in self.session_vars.items()]
+        store: DuckdbStorageManager =DuckdbStorageManager(None)
+        vars = [k[0][0:-len(store.VAR_NAME_SENTINAL)].upper() for k in store.list_vars()]
+        rows.extend([(k, "[query result]") for k in vars])
         return pd.DataFrame(rows, columns=["variable", "value"])
 
     def clear_table(self, table_schema_ref=None):
@@ -911,9 +959,12 @@ class UnifyRepl:
     def loop(self):
         session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
         suggester = AutoSuggestFromHistory()
+        yappi.set_clock_type("wall")
         try:
             while True:
                 try:
+                     # Use set_clock_type("wall") for wall time
+                    yappi.start()
                     cmd = session.prompt("> ", auto_suggest=suggester)
                     outputs, df = self.interpreter.run_command(cmd)
                     print("\n".join(outputs))
@@ -932,6 +983,10 @@ class UnifyRepl:
                                 pydoc.pager(df.to_string(**fmt_opts))
                             else:
                                 print(df.to_string(**fmt_opts))
+                    stats = yappi.get_func_stats(
+                        filter_callback=lambda x: yappi.module_matches(x, [sys.modules['os']])
+                    )  # x is a yappi.YFuncStat object
+                    stats.sort("name", "desc").print_all()                                
                 except RuntimeError as e:
                     print(e)
                 except Exception as e:
@@ -942,6 +997,10 @@ class UnifyRepl:
             sys.exit(0)
 
 if __name__ == '__main__':
-    interpreter = CommandInterpreter(debug=True)
+    if '-silent' in sys.argv:
+        silent = True
+    else:
+        silent = False
+    interpreter = CommandInterpreter(debug=True, silence_errors=silent)
     UnifyRepl(interpreter).loop()
 

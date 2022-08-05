@@ -6,12 +6,14 @@ import sys
 import yaml
 from typing import List, AnyStr, Dict
 import typing
+from datetime import datetime
 
 import requests
 from storage_manager import StorageManager
 import pandas as pd
 
 Adapter = typing.NewType("Adapter", None)
+TableUpdater = typing.NewType("TableUpdater", None)
 
 class Connection:
     def __init__(self, adapter, schema_name, opts):
@@ -177,6 +179,8 @@ class TableDef:
         self._name = name
         self._select_list = []
         self._result_body_path = None
+        self._key = None
+        self._queryDateFormat = None #Use some ISO default
 
     @property
     def name(self):
@@ -185,6 +189,22 @@ class TableDef:
     @name.setter
     def name(self, val):
         self._name = val
+
+    @property
+    def key(self):
+        return self._key
+
+    @key.setter
+    def key(self, val):
+        self._key = val
+
+    @property
+    def query_date_format(self) -> str:
+        return self._queryDateFormat
+
+    @query_date_format.setter
+    def query_date_format(self, val):
+        self._queryDateFormat = val
 
     @property
     def select_list(self) -> list:
@@ -204,6 +224,31 @@ class TableDef:
     @result_body_path.setter
     def result_body_path(self, val):
         self._result_body_path = val
+
+    def get_table_updater(self, updates_since: datetime) -> TableUpdater:
+        pass
+
+class TableUpdater:
+    def __init__(self, table_def: TableDef, updates_since: datetime) -> None:
+        self.table_def: TableDef = table_def
+        self.updates_timestamp = updates_since
+
+    """
+        Defines the contract for classes which update existing tables. We support 
+        multiple update strategies (the "refresh strategy") so we have a subclass
+        for each strategy.
+    """
+    def should_truncate() -> bool:
+        """ Returns True if the existing table should be truncated before refresh.
+            Generally this is only used by the "reload" refresh strategy.
+        """
+        return False
+
+    def query_resource(self, tableLoader, logger: UnifyLogger):
+        """ Generator which yields (page, size_return) tuples for all records updated
+            since the `updates_since` timestamp.
+        """
+        pass
 
 
 class RESTTable(TableDef):
@@ -229,6 +274,13 @@ class RESTTable(TableDef):
         if self.select_list:
             self.select_list = re.split(r",\s*", self.select_list)
 
+        if 'refresh' in dictvals:
+            self.refresh = dictvals['refresh']
+            self.refresh_strategy = self.refresh['strategy']
+        else:
+            self.refresh_strategy = 'reload'
+
+        # REMOVE OLD REFRESH CODE
         self.refresh_params = dictvals.get('refresh_params', {})
         if '_ts_format' in self.refresh_params:
             self.refresh_ts_format = self.refresh_params.pop('_ts_format')
@@ -312,6 +364,16 @@ class RESTTable(TableDef):
     def qualified_name(self):
         return self.spec.name + "." + self.name
 
+    def get_table_updater(self, updates_since: datetime) -> TableUpdater:
+        if self.refresh_strategy == 'reload':
+            return ReloadStrategy(self)
+        elif self.refresh_strategy == 'updates':
+            return UpdatesStrategy(self)
+        else:
+            raise RuntimeError(
+                f"Invalid refresh strategy '{self.refresh_strategy}' for table {self.name}"
+            )
+
     def query_resource(self, tableLoader, logger: UnifyLogger):
         """ Generator which yields (page, size_return) tuples for all rows from
             an API endpoint. Each page should be a list of dicts representing
@@ -352,7 +414,11 @@ class RESTTable(TableDef):
             for page, size_return in self._query_resource(logger=logger):
                 yield (page, size_return)
 
-    def _query_resource(self, query_params={}, logger: UnifyLogger = None):
+    def _query_resource(
+        self, 
+        query_params={}, 
+        logger: UnifyLogger = None
+        ):
         session = requests.Session()
         self.spec._setup_request_auth(session)
 
@@ -363,6 +429,7 @@ class RESTTable(TableDef):
         while True:
             url = (self.spec.base_url + self.query_path).format(**query_params)
             params.update(pager.get_request_params())
+            
             print(url, params)
             r = session.get(url, params=params)
 
@@ -393,6 +460,44 @@ class RESTTable(TableDef):
             if page > self.max_pages:
                 print("Aborting table scan after {} pages", page-1)
                 break
+
+class ReloadStrategy(TableUpdater):
+    def __init__(self, table_def: TableDef) -> None:
+        super().__init__(self, table_def)
+
+    def should_truncate(self) -> bool:
+        return True
+
+    def query_resource(self, updates_since: datetime, tableLoader, logger: UnifyLogger):
+        """ Just delegate to the TableDef like a first load. """
+        for page, size_return in self.table_def.query_resource(updates_since, tableLoader, logger):
+            yield (page, size_return)
+
+class UpdatesStrategy(TableUpdater):
+    def __init__(self, table_def: TableDef, updates_since: datetime) -> None:
+        super().__init__(self, table_def, updates_since)
+        # The refresh strategy config spec should indicate the query parameter
+        # expression to use for filtering for updated records. The source table
+        # must also define a key column
+        if self.table_def.key is None:
+            raise RuntimeError(
+                f"Table '{self.table_def.name}' needs to define a key to use 'updates' refresh strategy")
+        self.params = self.table_def.refresh.get('params')
+        if not self.params:
+            raise RuntimeError(
+                f"Table '{self.table_def.name}' missing 'params' for 'updates' refresh strategy")
+
+
+    def query_resource(self, tableLoader, logger: UnifyLogger):
+        # Need interpolate the checkpoint time into the GET request
+        # parameters, using the right format for the source system
+
+        timestamp = self.updates_timestamp.strftime(self.tableSpec.query_date_format)
+        args = ({k, v.replace("{timestamp}",timestamp)} for k,v in self.refresh.params.items())
+
+        """ Just delegate to the TableDef like a first load. """
+        for page, size_return in self.table_def.query_resource(args, tableLoader, logger):
+            yield (page, size_return)
 
 
 class Adapter:
@@ -485,7 +590,7 @@ class RESTAdapter(Adapter):
         self.page_cursor_arg = spec.get('page_cursor_arg')
         self.pageMaxArg = spec.get('pageMaxArg')
         self.dateParserFormat = spec.get('dateParser')
-        self.queryDateFormat = spec.get('queryDateFormat')
+        self.query_date_format = spec.get('queryDateFormat')
         self.maxPerPage  = spec.get('maxPerPage', 100)
         self.cacheTTLSecs = spec.get('cacheTTLSecs')
         self.polling_interval_secs = spec.get('polling_interval_secs', 60*60*4)
