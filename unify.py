@@ -1,5 +1,6 @@
 from email.parser import Parser
 from inspect import isfunction
+import time
 from datetime import datetime
 import io
 import json
@@ -25,7 +26,6 @@ import pyarrow as pa
 import numpy as np
 
 from timeit import default_timer as timer
-import yappi
 
 # DuckDB
 import duckdb
@@ -61,9 +61,14 @@ class DuckContext:
 
     def __enter__(self):
         self.duck = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=False)
+        self.duck.execute("PRAGMA log_query_path='/tmp/duckdb_log'")
         return self.duck
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            self.duck.execute("COMMIT")
+        except:
+            pass
         self.duck.close()
         
 
@@ -76,8 +81,8 @@ class SimpleLogger(UnifyLogger):
 
 class TableScan(Thread):
     """
-        Thread class for querying a REST API, by pages, and storing the results as 
-        parquet files in the table's data directory.
+        Thread class for querying a REST API, by pages, and storing the results
+        into the local database.
     """
     def __init__(self, tableMgr=None, tableLoader=None, select: list = None):
         Thread.__init__(self)
@@ -140,29 +145,46 @@ class TableScan(Thread):
         with DuckContext() as duck:
             self.perform_scan(duck)
 
-    def save_scan_record(self):
+    def save_scan_record(self, scan_start: float):
+        print("*SAVING SCAN RECORD")
         self.storage_mgr.put_object(
             "tablescans", 
             self.tableMgr.name,
-            {"timestamp": datetime.utcnow()}
+            {"timestamp": scan_start}
         )
 
     def get_last_scan_record(self):
         return self.storage_mgr.get_object("tablescans", self.tableMgr.name)
 
+    def clear_scan_record(self):
+        self.storage_mgr.delete_object("tablescans", self.tableMgr.name)
+
     def perform_scan(self, duck):
         print("Running table scan for: ", self.tableMgr.name)
+        breakpoint()
         rec = self.get_last_scan_record()
-        last_scan_time = rec.get("timestamp", None)
-
-        self.save_scan_record()
+        last_scan_time: datetime = None
+        if rec and "timestamp" in rec:
+            last_scan_time = datetime.fromtimestamp(rec.get("timestamp"))
+        
+        scan_start = time.time()
 
         def flush_rows(tableMgr, next_df, page, flush_count):
+            print(f"Saving page {page} with {next_df.shape[1]} columns")
             if page <= flush_count:
                 # First set of pages, so create the table
                 duck.register('df1', next_df)
                 # create the table AND flush current row_buffer values to the db
-                duck.execute(f"create table {tableMgr.name} as select * from df1")
+                try:
+                    duck.execute(f"describe {tableMgr.name}")
+                    # table already exists, so assume we are updating
+                    duck.execute(f"set search_path='{tableMgr.adapter.name}'")
+                    duck.append(tableMgr.table_spec.name, next_df)
+                except Exception as e:
+                    if 'Catalog Error' in str(e):
+                        duck.execute(f"create table {tableMgr.name} as select * from df1")
+                    else:
+                        raise
                 # FIXME: The following shouldn't be neccessary, but it seems like `Duck.append`
                 # does not work properly with qualified table names, so we hack around it
                 # by setting the search path
@@ -210,7 +232,10 @@ class TableScan(Thread):
 
         if row_buffer_df.shape[0] > 0:
             flush_rows(self.tableMgr, row_buffer_df, page, page_flush_count)
-            
+
+        # We save at the end in case we encounter an error
+        self.save_scan_record(scan_start)
+
         print("Finished table scan for: ", self.tableMgr.name)
 
 class TableExporter(Thread):
@@ -257,6 +282,7 @@ class TableMgr:
 
     def truncate(self, duck):
         # Remove table from duck db
+        TableScan(self).clear_scan_record()
         duck.execute(f"drop table {self.name}")
 
     def load_table(self, waitForScan=False, tableLoader=None):
@@ -266,6 +292,9 @@ class TableMgr:
             self.scan.run()
         else:
             self.scan.start()
+
+    def refresh_table(self, tableLoader):
+        self.load_table(tableLoader=tableLoader)
 
 class TableLoader:
     """Master loader class. This class can load the data for any table, either by 
@@ -311,8 +340,11 @@ class TableLoader:
                 table_spec = self.adapters[schema].lookupTable(table)
                 tmgr = TableMgr(schema, self.adapters[schema], table_spec)
                 self.tables[tmgr.name] = tmgr           
-            tmgr.load_table(duck, tableLoader=self)
+            tmgr.load_table(tableLoader=self)
             return tmgr.has_data()
+
+    def refresh_table(self, table_ref):
+        self.tables[table_ref].refresh_table(tableLoader=self)
 
     def read_table_rows(self, table):
         with DuckContext() as duck:
@@ -430,7 +462,7 @@ class DuckdbStorageManager(StorageManager):
     def delete_object(self, collection: str, id: str) -> bool:
         with DuckContext() as duck:
             table = self.ensure_col_table(duck, collection)
-            r = duck.execute(f"delete from meta.{table} where id = ?", [id])
+            r = duck.execute(f"delete from meta.{table} where id = ?", [id]).fetchall()
             print("Delete resulted in: ", r)
 
     def list_objects(self, collection: str) -> list[tuple]:
@@ -540,6 +572,11 @@ class ParserVisitor(Visitor):
 
     def insert_statement(self, tree):
         self._the_command = 'insert_statement'
+
+    def refresh_table(self, tree):
+        self._the_command = 'refresh_table'
+        self._the_command_args['table_ref'] = \
+            collect_child_text("table_ref", tree, full_code=self._full_code)
 
     def select_query(self, tree):
         self._the_command = 'select_query'
@@ -722,6 +759,7 @@ class CommandInterpreter:
         return self._execute_duck(f"select count(*) from {table_ref}")
 
     def help(self, help_choice):
+        # FIXME: collect help from each function
         helps = {
             "schemas": """Every connected system is represented in the Unify database as a schema.
             The resources for the system appear as tables within this schema. Initially all tables
@@ -776,6 +814,9 @@ help export
             self.print(f"Exported query result to '{file_ref}'")
         else:
             self.print(f"Error, uknown adapter '{adapter_ref}'")
+
+    def refresh_table(self, table_ref):
+        self.loader.refresh_table(table_ref)
 
     def set_variable(self, var_ref: str, var_expression: str):
         is_global = var_ref.upper() == var_ref
@@ -913,6 +954,7 @@ help export
         return pd.DataFrame(rows, columns=["variable", "value"])
 
     def clear_table(self, table_schema_ref=None):
+        breakpoint()
         self.loader.truncate_table(table_schema_ref)
         self.print("Table cleared: ", table_schema_ref)
 
@@ -959,12 +1001,9 @@ class UnifyRepl:
     def loop(self):
         session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
         suggester = AutoSuggestFromHistory()
-        yappi.set_clock_type("wall")
         try:
             while True:
                 try:
-                     # Use set_clock_type("wall") for wall time
-                    yappi.start()
                     cmd = session.prompt("> ", auto_suggest=suggester)
                     outputs, df = self.interpreter.run_command(cmd)
                     print("\n".join(outputs))
@@ -983,10 +1022,6 @@ class UnifyRepl:
                                 pydoc.pager(df.to_string(**fmt_opts))
                             else:
                                 print(df.to_string(**fmt_opts))
-                    stats = yappi.get_func_stats(
-                        filter_callback=lambda x: yappi.module_matches(x, [sys.modules['os']])
-                    )  # x is a yappi.YFuncStat object
-                    stats.sort("name", "desc").print_all()                                
                 except RuntimeError as e:
                     print(e)
                 except Exception as e:

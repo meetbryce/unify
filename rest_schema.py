@@ -181,6 +181,7 @@ class TableDef:
         self._result_body_path = None
         self._key = None
         self._queryDateFormat = None #Use some ISO default
+        self._params: dict = {}
 
     @property
     def name(self):
@@ -199,6 +200,14 @@ class TableDef:
         self._key = val
 
     @property
+    def params(self) -> dict:
+        return self._params
+
+    @params.setter
+    def params(self, val: dict) -> None:
+        self._params = val
+
+    @property
     def query_date_format(self) -> str:
         return self._queryDateFormat
 
@@ -208,7 +217,7 @@ class TableDef:
 
     @property
     def select_list(self) -> list:
-        return []
+        return self._select_list
 
     @select_list.setter
     def select_list(self, selects: list):
@@ -229,7 +238,7 @@ class TableDef:
         pass
 
 class TableUpdater:
-    def __init__(self, table_def: TableDef, updates_since: datetime) -> None:
+    def __init__(self, table_def: TableDef, updates_since: datetime=None) -> None:
         self.table_def: TableDef = table_def
         self.updates_timestamp = updates_since
 
@@ -253,6 +262,7 @@ class TableUpdater:
 
 class RESTTable(TableDef):
     def __init__(self, spec, dictvals):
+        super().__init__(dictvals['name'])
         fmt = string.Formatter()
         self.max_pages = 50000
 
@@ -263,9 +273,12 @@ class RESTTable(TableDef):
             self.paging_options = None
 
         self.spec = spec
+        self.key = dictvals.get('key_column')
         self.name = dictvals['name']
         self.query_path = dictvals.get('resource_path', '')
         self.query_method = dictvals.get('method', 'GET')
+        self.query_date_format = spec.query_date_format
+
         if dictvals.get('query_resource'):
             self.query_method, self.query_path = self.parse_resource(dictvals.get('query_resource'))
         self.query_args = [t[1] for t in fmt.parse(self.query_path) if t[1] is not None]        
@@ -368,7 +381,7 @@ class RESTTable(TableDef):
         if self.refresh_strategy == 'reload':
             return ReloadStrategy(self)
         elif self.refresh_strategy == 'updates':
-            return UpdatesStrategy(self)
+            return UpdatesStrategy(self, updates_since=updates_since)
         else:
             raise RuntimeError(
                 f"Invalid refresh strategy '{self.refresh_strategy}' for table {self.name}"
@@ -475,14 +488,15 @@ class ReloadStrategy(TableUpdater):
 
 class UpdatesStrategy(TableUpdater):
     def __init__(self, table_def: TableDef, updates_since: datetime) -> None:
-        super().__init__(self, table_def, updates_since)
+        super().__init__(table_def, updates_since)
         # The refresh strategy config spec should indicate the query parameter
         # expression to use for filtering for updated records. The source table
         # must also define a key column
         if self.table_def.key is None:
             raise RuntimeError(
                 f"Table '{self.table_def.name}' needs to define a key to use 'updates' refresh strategy")
-        self.params = self.table_def.refresh.get('params')
+        self.refresh = self.table_def.refresh
+        self.params = self.refresh.get('params')
         if not self.params:
             raise RuntimeError(
                 f"Table '{self.table_def.name}' missing 'params' for 'updates' refresh strategy")
@@ -492,12 +506,19 @@ class UpdatesStrategy(TableUpdater):
         # Need interpolate the checkpoint time into the GET request
         # parameters, using the right format for the source system
 
-        timestamp = self.updates_timestamp.strftime(self.tableSpec.query_date_format)
-        args = ({k, v.replace("{timestamp}",timestamp)} for k,v in self.refresh.params.items())
+        timestamp = self.updates_timestamp.strftime(self.table_def.query_date_format)
+        args = {k:v.replace("{timestamp}",timestamp) for (k,v) in self.params.items()}
 
-        """ Just delegate to the TableDef like a first load. """
-        for page, size_return in self.table_def.query_resource(args, tableLoader, logger):
-            yield (page, size_return)
+        # Overwride the static params set in the Table spec
+        try:
+            save_params = self.table_def.params
+            self.table_def.params = dict(args)
+
+            """ Just delegate to the TableDef like a first load. """
+            for page, size_return in self.table_def.query_resource(tableLoader, logger):
+                yield (page, size_return)
+        finally:
+            self.table_def.params = save_params
 
 
 class Adapter:

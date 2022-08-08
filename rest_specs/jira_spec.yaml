@@ -31,12 +31,13 @@ tables:
       jql: created > 2021-06-30 order by created DESC
     refresh:
       strategy: updates
-      param_expr: 
-        jql: updated >= '{checkpoint}' by created DESC
+      params: 
+        jql: updated >= '{timestamp}' and created > 2022-07-28 order by created DESC
     result_body_path: issues
     select: "id, key, fields_project_id, fields_project_key, fields_summary, fields_reporter_.+, fields_assignee_.+, \n
     fields_status_.+, fields.created, fields.updated, fields_issuetype_name, fields_priority_name, \n
     fields_resolution_name"
+    key_column: id
   - name: myself
     resource_path: /rest/api/3/myself
     result_type: object

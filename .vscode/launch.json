@@ -23,8 +23,7 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "cwd": "${fileDirname}",
-            "python.envFile": ".env",
-            "args": ["-silent"]
+            "python.envFile": ".env"
         },
         {
             "name": "Juyper console: attach",

@@ -29,12 +29,11 @@ defusedxml==0.7.1
 duckdb==0.4.0
 entrypoints==0.4
 executing==0.8.3
-Faker==0.8.18
 fastjsonschema==2.15.3
 fonttools==4.34.0
 google-api-core==1.30.0
 google-api-python-client==2.11.0
-google-auth==2.9.0
+#google-auth==2.9.0
 google-auth-httplib2==0.1.0
 google-auth-oauthlib==0.5.2
 googleapis-common-protos==1.53.0
@@ -108,7 +107,6 @@ pyperclip==1.8.2
 pyrsistent==0.18.1
 pytest==7.1.2
 python-dateutil==2.8.2
-python-slugify==6.1.2
 pytz==2022.1
 pytzdata==2020.1
 PyYAML==5.4.1
@@ -126,13 +124,11 @@ sniffio==1.2.0
 soupsieve==2.3.2.post1
 stack-data==0.3.0
 terminado==0.15.0
-text-unidecode==1.2
 tinycss2==1.1.1
 tomli==2.0.1
 tornado==6.1
 traitlets==5.3.0
 tzlocal==1.5.1
--e git+ssh://git@github.com/scottpersinger/unify.git@5ad3a8f5d8538169bfb4913b8aab072646798c7c#egg=unify_extension&subdirectory=unify_extension
 uritemplate==3.0.1
 urllib3==1.26.9
 values==2020.12.3

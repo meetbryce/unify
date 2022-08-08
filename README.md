@@ -63,6 +63,7 @@ where <expr> will generally be either a scalar expression, including some litera
 the result of a SELECT query.
 
 Examples:
+
     $current = select current_date
     $maxval = 100
 
