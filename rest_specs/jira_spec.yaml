@@ -28,11 +28,11 @@ tables:
 # This API: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-get    
     supports_paging: True
     params:
-      jql: created > 2021-06-30 order by created DESC
+      jql: created > 2022-07-28 order by created DESC
     refresh:
       strategy: updates
       params: 
-        jql: updated >= '{timestamp}' and created > 2022-07-28 order by created DESC
+        jql: "updated >= '{timestamp}' and created > 2022-07-28 order by created"
     result_body_path: issues
     select: "id, key, fields_project_id, fields_project_key, fields_summary, fields_reporter_.+, fields_assignee_.+, \n
     fields_status_.+, fields.created, fields.updated, fields_issuetype_name, fields_priority_name, \n

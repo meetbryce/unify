@@ -75,3 +75,31 @@ def test_updates_strategy(connections):
     finally:
         with DuckContext() as duck:
             duck.execute(f"DROP TABLE mocksvc.{table}")
+
+def test_reload_strategy(connections):
+    table = "repos100"
+    try:
+        with requests_mock.Mocker() as mock:
+            MockSvc.setup_mocksvc_api(mock)
+
+            loader = TableLoader(given_connections=connections)
+            try:
+                loader.truncate_table("mocksvc." + table)
+            except:
+                pass
+            loader.materialize_table("mocksvc", table)
+
+            assert loader.table_exists_in_db(f"mocksvc.{table}")
+
+            with DuckContext() as duck:
+                count = duck.execute("select count(*) from mocksvc.{}".format(table)).fetchone()[0]
+                assert count == 100
+                
+            loader.refresh_table(f"mocksvc.{table}")
+
+            with DuckContext() as duck:
+                count = duck.execute("select count(*) from mocksvc.{}".format(table)).fetchone()[0]
+                assert count == 100
+    finally:
+        with DuckContext() as duck:
+            duck.execute(f"DROP TABLE mocksvc.{table}")

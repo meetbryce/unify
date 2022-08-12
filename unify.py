@@ -1,7 +1,7 @@
 from email.parser import Parser
 from inspect import isfunction
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
 import json
 import os
@@ -58,6 +58,7 @@ os.makedirs(DATA_HOME, exist_ok=True)
 
 class DuckContext:
     DUCK_CONN = None
+    REF_COUNTER = 0
 
     """ A cheap hack around DuckDB only usable in a single process. We just open/close
         each time to manage. Context manager for accessing the DuckDB database """
@@ -65,13 +66,15 @@ class DuckContext:
         pass
 
     def __enter__(self):
+        DuckContext.REF_COUNTER += 1
         if self.__class__.DUCK_CONN is None:
             self.__class__.DUCK_CONN = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=False)
             self.__class__.DUCK_CONN.execute("PRAGMA log_query_path='/tmp/duckdb_log'")
         return self.__class__.DUCK_CONN
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.__class__.DUCK_CONN is not None:
+        DuckContext.REF_COUNTER -= 1
+        if DuckContext.REF_COUNTER == 0 and self.__class__.DUCK_CONN is not None:
             try:
                 self.__class__.DUCK_CONN.execute("COMMIT")
             except:
@@ -173,12 +176,31 @@ class BaseTableScan(Thread):
     def clear_scan_record(self):
         self.storage_mgr.delete_log_objects("tablescans", self.tableMgr.name)
 
-    def _flush_rows_to_db(self, duck, tableMgr, next_df, page, flush_count):
-        # Subclasses must implement
-        pass
+    def create_table_with_first_page(self, duck, next_df, schema, table_root):
+        duck.register('df1', next_df)
+        table = schema + "." + table_root
+        # create the table AND flush current row_buffer values to the db
+        try:
+            duck.execute(f"describe {table}")
+            # table already exists, so assume we are updating
+            duck.execute(f"set search_path='{schema}'")
+            duck.append(table_root, next_df)
+        except Exception as e:
+            if 'Catalog Error' in str(e):
+                duck.execute(f"create table {table} as select * from df1")
+            else:
+                raise
+        # FIXME: The following shouldn't be neccessary, but it seems like `Duck.append`
+        # does not work properly with qualified table names, so we hack around it
+        # by setting the search path
+        duck.execute(f"set search_path='{schema}'")
 
     def get_query_mgr(self):
         return self.tableMgr.table_spec
+
+    def get_table_columns(self, duck, table):
+        # Returns the column names for the table in their insert order
+        return duck.execute("describe " + table).df()["column_name"].values.tolist()
 
     def perform_scan(self, duck):
         print("Running table scan for: ", self.tableMgr.name)
@@ -221,7 +243,7 @@ class BaseTableScan(Thread):
 
             page += 1
 
-        if row_buffer_df.shape[0] > 0:
+        if row_buffer_df is not None and row_buffer_df.shape[0] > 0:
             self._flush_rows_to_db(duck, self.tableMgr, row_buffer_df, page, page_flush_count)
 
         # We save at the end in case we encounter an error
@@ -230,29 +252,12 @@ class BaseTableScan(Thread):
         print("Finished table scan for: ", self.tableMgr.name)
 
 class InitialTableLoad(BaseTableScan):
-    """
-       Specialization of BaseTableScan for the initial loading of a table.
-    """
     def _flush_rows_to_db(self, duck, tableMgr, next_df, page, flush_count):
+        ## Default version works when loading a new table
         print(f"Saving page {page} with {next_df.shape[1]} columns")
         if page <= flush_count:
             # First set of pages, so create the table
-            duck.register('df1', next_df)
-            # create the table AND flush current row_buffer values to the db
-            try:
-                duck.execute(f"describe {tableMgr.name}")
-                # table already exists, so assume we are updating
-                duck.execute(f"set search_path='{tableMgr.adapter.name}'")
-                duck.append(tableMgr.table_spec.name, next_df)
-            except Exception as e:
-                if 'Catalog Error' in str(e):
-                    duck.execute(f"create table {tableMgr.name} as select * from df1")
-                else:
-                    raise
-            # FIXME: The following shouldn't be neccessary, but it seems like `Duck.append`
-            # does not work properly with qualified table names, so we hack around it
-            # by setting the search path
-            duck.execute(f"set search_path='{tableMgr.adapter.name}'")
+            self.create_table_with_first_page(duck, next_df, tableMgr.adapter.name, tableMgr.table_spec.name)
         else:
             duck.append(tableMgr.table_spec.name, next_df)
 
@@ -275,7 +280,8 @@ class TableUpdateScan(BaseTableScan):
         last_scan_time = None
         try:
             start_rec = next(record for record in scan_records if 'scan_start' in record)
-            last_scan_time = datetime.utcfromtimestamp(start_rec['scan_start'])
+            slop = timedelta(hours=24)
+            last_scan_time = datetime.utcfromtimestamp(start_rec['scan_start']) - slop
         except StopIteration:
             # Failed to find a start time
             pass
@@ -294,7 +300,7 @@ class TableUpdateScan(BaseTableScan):
             # Now swap the new table into place
             duck.execute(f"""
             BEGIN;
-            DROP TABLE {self.tableMgr.name};
+            DROP TABLE IF EXISTS {self.tableMgr.name};
             ALTER TABLE {self._target_table} RENAME TO {self.tableMgr.table_spec.name};
             COMMIT;
             """)
@@ -307,7 +313,26 @@ class TableUpdateScan(BaseTableScan):
         return self._query_mgr
 
     def _flush_rows_to_db(self, duck, tableMgr, next_df, page, flush_count):
-        print(f"Saving page {page} with {next_df.shape[1]} columns")
+        if self._query_mgr.should_replace():
+            # Loading into a temp table so just do simple load
+            if page <= flush_count:
+                # First set of pages, so create the table
+                self.create_table_with_first_page(
+                    duck, 
+                    next_df, 
+                    tableMgr.adapter.name, 
+                    self._target_table_root
+                )
+            else:
+                duck.append(self._target_table_root, next_df)
+            return
+
+        # To update a table we have to both remove existing copies of any rows
+        # we downloaded and align our downloaded columns with the existing table.
+        cols = self.get_table_columns(duck, self._target_table)
+        # filter and order to the right columns
+        next_df = next_df[cols]
+        print(f"Saving update page {page} with {next_df.shape[1]} columns")
         if page <= flush_count:
             duck.execute(f"set search_path='{tableMgr.adapter.name}'")
         # First delete any existing records
@@ -777,7 +802,6 @@ class CommandInterpreter:
                 return handler.run_command(rest_of_command, logger)
 
     def substitute_variables(self, code):
-        breakpoint()
         if re.match(r"\s*\$[\w_0-9]+\s*$", code):
             return code # simple request to show the variable value
 
@@ -1069,7 +1093,6 @@ help export
         return pd.DataFrame(rows, columns=["variable", "value"])
 
     def clear_table(self, table_schema_ref=None):
-        breakpoint()
         self.loader.truncate_table(table_schema_ref)
         self.print("Table cleared: ", table_schema_ref)
 
