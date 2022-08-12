@@ -247,8 +247,9 @@ class TableUpdater:
         multiple update strategies (the "refresh strategy") so we have a subclass
         for each strategy.
     """
-    def should_truncate() -> bool:
-        """ Returns True if the existing table should be truncated before refresh.
+    def should_replace(self) -> bool:
+        """ Returns True if data should be loaded into a temp table and that table used
+            to replace the existing table. Otherwise data is appended in place. 
             Generally this is only used by the "reload" refresh strategy.
         """
         return False
@@ -476,14 +477,14 @@ class RESTTable(TableDef):
 
 class ReloadStrategy(TableUpdater):
     def __init__(self, table_def: TableDef) -> None:
-        super().__init__(self, table_def)
+        super().__init__(table_def)
 
-    def should_truncate(self) -> bool:
+    def should_replace(self) -> bool:
         return True
 
-    def query_resource(self, updates_since: datetime, tableLoader, logger: UnifyLogger):
+    def query_resource(self, tableLoader, logger: UnifyLogger):
         """ Just delegate to the TableDef like a first load. """
-        for page, size_return in self.table_def.query_resource(updates_since, tableLoader, logger):
+        for page, size_return in self.table_def.query_resource(tableLoader, logger):
             yield (page, size_return)
 
 class UpdatesStrategy(TableUpdater):
@@ -497,6 +498,14 @@ class UpdatesStrategy(TableUpdater):
                 f"Table '{self.table_def.name}' needs to define a key to use 'updates' refresh strategy")
         self.refresh = self.table_def.refresh
         self.params = self.refresh.get('params')
+        for k, v in self.params.items():
+            if not isinstance(k, str):
+                raise RuntimeError(
+                    f"Invalid refresh strategy parameter '{k}' type {type(k)} for table '{self.table_def.name}'")
+            elif not isinstance(v, str):
+                raise RuntimeError(
+                    f"Invalid refresh strategy parameter '{v}' type {type(v)} table '{self.table_def.name}'")
+
         if not self.params:
             raise RuntimeError(
                 f"Table '{self.table_def.name}' missing 'params' for 'updates' refresh strategy")

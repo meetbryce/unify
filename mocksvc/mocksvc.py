@@ -1,6 +1,7 @@
 import os
 import requests_mock
 import json
+import random
 
 class MockSvc:
     @classmethod
@@ -25,7 +26,11 @@ class MockSvc:
         mock.get(f"https://mocksvc.com/api/repos_1100", text=rows100, request_headers=auth_header)
 
         for page in range(1, 12):
-            body = rows100
+            # randomize the id's because they are supposed to be unique (but we are re-using
+            # the same 100 records)
+            for r in records:
+                r['id'] = random.randint(0, 999999)
+            body = json.dumps(records)
             if page == 11:
                 body = rows27
             mock.get(f"https://mocksvc.com/api/repos_1100?page={page}&count=100", 

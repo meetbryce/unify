@@ -6,6 +6,7 @@ paging:
   page_param: page
   count_param: count
   page_size: 100
+queryDateFormat: "%Y/%m/%d %H:%M"  
 auth:
   type: BASIC
   uservar: MOCKSVC_USER
@@ -20,3 +21,8 @@ tables:
   - name: repos1100
     resource_path: /api/repos_1100
     supports_paging: True
+    key_column: id
+    refresh:
+      strategy: updates
+      params:
+        later_than: "{timestamp}"
