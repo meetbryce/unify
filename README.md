@@ -1,7 +1,7 @@
 # Unify
 
 Unify is a simple tool which allows you to use SQL to query information from any
-cloud based system that supports a JSON-result REST API. 
+cloud based system that supports a REST API. 
 
 System APIs are described in a configuration which models API endpoints as tables.
 The JSON payload results from API calls are automatically flattened so that
@@ -73,13 +73,10 @@ Variables that use all upper case letters are automatically treated as globals, 
 they are globally defined, available, and persistent. Other variables are considered transient
 and only live the lifetime a session.
 
-By default variables will be evaluated into a result when the `set` operation occurs.
-However, you can request "lazy" evaluation in which case the variable acts like
-a VIEW which is evaluated when you reference it.
-
-    lazy set $scotts_items = (select * from items where owner = 'scott')
-    ...
-    select * from $scotts_items  // query will be evaluated when referenced
+Creating a variable as the result of a select statement is equivalent to creating
+a _materialized_ view - the query is evaulated immediate and the results are stored
+as the present and future value of the variable. To create a variable which executes the
+query each time it is used you should just create a normal `view` using `create view`.
 
 Note that variables are automatically persisted across sessions. Use `unset` to
 delete a variable:
@@ -99,12 +96,13 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 ## TODO
 
 1. [done] Implement unit tests
-1. Implement table refresh, with support for strategies
+1. [done] Implement table refresh, with support for strategies
+1. Implement scheduled automatic table refresh
 1. [done] Implement GSheets adapter
 1. Implement AWS Cost Reporting adapter
 1. [done] Implement Lark parser for more complex syntax support
 1. [done] Implement full `show` commands
-1. Implement dollar variables
+1. [done] Implement dollar variables
 1. Unobtrusive table loading status supporting interrupts
 1. Jupyter UI integration: 
     1. Schema browser tree panel

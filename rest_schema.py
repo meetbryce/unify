@@ -4,13 +4,14 @@ import re
 import string
 import sys
 import yaml
-from typing import List, AnyStr, Dict
+from typing import List, AnyStr, Dict, Union
 import typing
 from datetime import datetime
 
 import requests
 from storage_manager import StorageManager
 import pandas as pd
+from jsonpath_ng import parse
 
 Adapter = typing.NewType("Adapter", None)
 TableUpdater = typing.NewType("TableUpdater", None)
@@ -94,8 +95,13 @@ class PagingHelper:
             return PageAndCountPager(options)
         elif options['strategy'] == 'offsetAndCount':
             return OffsetAndCountPager(options)
+        elif options['strategy'] == 'pagerToken':
+            return PagerTokenPager(options)
         else:
             raise RuntimeError("Unknown paging strategy: ", options)
+
+    def next_page(self, last_page_size: int, json_result: Union[dict, list]) -> bool:
+        return False
 
 class NullPager(PagingHelper):
     def __init__(self, options):
@@ -104,7 +110,7 @@ class NullPager(PagingHelper):
     def get_request_params(self):
         return {}
 
-    def next_page(self, page_count):
+    def next_page(self, last_page_size: int, json_result: Union[dict, list]) -> bool:
         return False
 
 
@@ -122,9 +128,9 @@ class PageAndCountPager(PagingHelper):
     def get_request_params(self):
         return {self.index_param: self.current_page, self.count_param: self.page_size}
 
-    def next_page(self, page_count):
+    def next_page(self, last_page_size: int, json_result: Union[dict, list]) -> bool:
         self.current_page += 1
-        return page_count >= self.page_size
+        return last_page_size >= self.page_size
 
 class OffsetAndCountPager(PagingHelper):
     def __init__(self, options):
@@ -140,9 +146,35 @@ class OffsetAndCountPager(PagingHelper):
     def get_request_params(self):
         return {self.offset_param: self.current_offset, self.count_param: self.page_size}
 
-    def next_page(self, page_count):
-        self.current_offset += page_count
-        return page_count >= self.page_size
+    def next_page(self, last_page_size: int, json_result: Union[dict, list]) -> bool:
+        self.current_offset += last_page_size
+        return last_page_size >= self.page_size
+
+class PagerTokenPager(PagingHelper):
+    def __init__(self, options):
+        super().__init__(options)
+        if 'token_param' not in options:
+            raise RuntimeError("pager_token_param not specified in options")
+        if 'count_param' not in options:
+            raise RuntimeError("count_param not specified in options")
+        if 'pager_token_path' not in options:
+            raise RuntimeError("pager_token_path not specified in options")
+        self.token_param = options['token_param']
+        self.count_param = options['count_param']
+        self.token_expr = parse(options['pager_token_path'])
+        self.current_token = None
+
+    def get_request_params(self):
+        if self.current_token:
+            return {self.token_param: self.current_token, self.count_param: self.page_size}
+        else:
+            return {self.count_param: self.page_size}
+
+    def next_page(self, last_page_size: int, json_result: Union[dict, list]) -> bool:
+        for match in self.token_expr.find(json_result):
+            self.current_token = match.value
+            return last_page_size >= self.page_size
+        return False
 
 class OutputLogger:
     def __init__(self) -> None:
@@ -439,8 +471,9 @@ class RESTTable(TableDef):
         pager = PagingHelper.get_pager(self.paging_options)
         params = self.params.copy()
         page = 1
+        safety_max_pages = 200000 # prevent infinite loop in case "pages finished logic" fails
 
-        while True:
+        while page < safety_max_pages:
             url = (self.spec.base_url + self.query_path).format(**query_params)
             params.update(pager.get_request_params())
             
@@ -465,9 +498,10 @@ class RESTTable(TableDef):
 
             size_return = []
 
-            yield (r.json(), size_return)
+            json_result = r.json()
+            yield (json_result, size_return)
 
-            if not pager.next_page(size_return[0]):
+            if not pager.next_page(size_return[0], json_result):
                 break
 
             page += 1
@@ -569,6 +603,9 @@ class Adapter:
                 else:
                     if value in conn_opts:
                         auth_tree[key] = conn_opts[value]
+                    elif "{" in  value:
+                        # Resolve a string with connection opt references
+                        auth_tree[key] = value.format(**conn_opts)
                     else:
                         print(f"Error: auth key {key} missing value in connection options")
         resolve_auth_values(self.auth, connection_opts)
@@ -612,16 +649,8 @@ class RESTAdapter(Adapter):
         self.auth = spec.get('auth', {}).copy()
         self.help = spec.get('help', None)
 
-        # Pages are indicated by absolute row offset
-        self.pageStartArg = spec.get('pageStartArg')
-        # Pages are indicated by "page number"
-        self.pageIndexArg = spec.get('pageIndexArg')
-        # Pages are indicated by providing the "next cursor" from the previous call
-        self.page_cursor_arg = spec.get('page_cursor_arg')
-        self.pageMaxArg = spec.get('pageMaxArg')
         self.dateParserFormat = spec.get('dateParser')
         self.query_date_format = spec.get('queryDateFormat')
-        self.maxPerPage  = spec.get('maxPerPage', 100)
         self.cacheTTLSecs = spec.get('cacheTTLSecs')
         self.polling_interval_secs = spec.get('polling_interval_secs', 60*60*4)
         self.next_page_token = spec.get('next_page_token')
@@ -634,9 +663,6 @@ class RESTAdapter(Adapter):
 
     def list_tables(self) -> List[TableDef]:
         return self.tables
-
-    def supports_paging(self):
-        return (self.pageIndexArg or self.pageStartArg or self.page_cursor_arg)
 
     def _setup_request_auth(self, session):
         user = ''

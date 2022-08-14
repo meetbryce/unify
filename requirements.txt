@@ -52,6 +52,7 @@ jinja2-time==0.2.0
 jmespath==0.10.0
 json5==0.9.8
 jsonschema==4.6.1
+jsonpath_ng==1.5.3
 jupyter-client==7.3.4
 jupyter-console==6.4.4
 jupyter-core==4.10.0

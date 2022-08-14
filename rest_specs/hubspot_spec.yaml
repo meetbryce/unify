@@ -2,23 +2,21 @@ enabled: true
 name: hubspot
 base_url: https://api.hubapi.com
 dateParser: '%Y-%m-%dT%H:%M:%S.%fZ'
-pageMaxArg: limit
-page_cursor_arg: after
-maxPerPage: 100
-next_page_token: paging.next.after
+paging:
+  strategy: pagerToken
+  pager_token_path: paging.next.after
+  count_param: limit
+  token_param: after
+  page_size: 100
 auth:
-  type: PARAMS
-  params:
-    hapikey: HUBSPOT_API_KEY
+  type: HEADERS
+  headers:
+    Authorization: "Bearer {HUBSPOT_PRIVATE_APP_TOKEN}"
 tables:
   - name: contacts
     query_resource: GET /crm/v3/objects/contacts
-    create_resource: POST /crm/v3/objects/contacts
-    update_resource: PATCH /crm/v3/objects/contacts/{id}
-    delete_resource: DELETE /crm/v3/objects/contacts/{id}
     result_body_path: results
-    next_page_token: paging.next.after
-    body: '{}'
+    supports_paging: true
     columns:
       - name: id
         key: true
@@ -36,10 +34,10 @@ tables:
         type: TIMESTAMP
   - name: companies
     query_resource: GET /crm/v3/objects/companies
-    create_resource: POST /crm/v3/objects/companies
-    update_resource: PATCH /crm/v3/objects/companies/{id}
-    delete_resource: DELETE /crm/v3/objects/companies/{id}
     result_body_path: results
+    supports_paging: true
+    params:
+      properties: lead_media_buyer,backup_media_buyer,lead_source,tatari_business_relationship,city,ownername,owneremail,domain,name,hs_lastmodifieddate
     columns:
       - name: id
         key: true
@@ -68,6 +66,7 @@ tables:
   - name: company_properties
     query_resource: GET /crm/v3/properties/company
     result_body_path: results
+    supports_paging: true
     columns:
       - name: name
         key: True

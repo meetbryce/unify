@@ -6,6 +6,63 @@ The RESTAdapter supports a number of strategies for supplying an API key or toke
 
 We expect that some complex services (such as Amazon AWS) may require custom code to implement their authentication scheme. In this case the RESTAdapter can be configured to access a custom library for authentication. This custom library will have to be included a priori in the Unify source code.
 
+Example auth strategies:
+
+    auth:
+      type: BASIC
+      uservar: GHUSER
+      tokenvar: GHTOKEN
+
+    auth:
+      type: PARAMS
+      params:
+        hapikey: HUBSPOT_API_KEY
+
+    auth:
+      type: HEADERS
+      headers:
+        Authorization: "Bearer {HUBSPOT_API_KEY}"
+
+Authorization parameters can refer to values from the Connection settings either directly by
+name, or with a string and referencing values using `{key}` syntax.
+
+## Paging strategies
+
+The RESTAdapter supports different strategies for paging through multiple results:
+
+    pageAndCount - a page number and count parameters are supplied. Paging continues
+    until a result page smaller than the count (page size) is returned.
+
+    offsetAndCount - an offset number and count parameters are supplied. Paging continues
+    until a result page smaller than the count is returned.
+
+    pagerToken - Each page includes a "next page" token which should be supplied as a parameter
+    to subsquent fetches. The token is defined by a path (`pager_token_path`) into the result doc.
+    You should indicate the `token_param` and the `count_param` to use in requests.
+
+Paging options can be specified at the level of the adapter spec, or specified individually
+on a table spec. Example:
+
+    paging:
+      strategy: pageAndCount
+      page_param: page
+      count_param: per_page
+      page_size: 100
+
+    paging:
+      strategy: offsetAndCount
+      offset_param: offset
+      count_param: per_page
+      page_size: 100
+
+    paging:
+      strategy: pagerToken
+      pager_token_path: folder.folder.item
+      count_param: limit
+      token_param: after
+      page_size: 100
+
+
 ## The Adapter interface
 
 All adapters support this interface, defined in `Adapter`:

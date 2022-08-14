@@ -3,6 +3,7 @@ from inspect import isfunction
 import time
 from datetime import datetime, timedelta
 import io
+import inspect
 import json
 import os
 from threading import Thread
@@ -439,7 +440,7 @@ class TableLoader:
             self.tables: dict[str, TableMgr] = {}
 
             self.adapters: dict[str, Adapter] = dict(
-                [(conn.schema_name, conn.adapter) for conn in self.connections if conn.adapter.supports_commands()]
+                [(conn.schema_name, conn.adapter) for conn in self.connections]
             )
             # Connections defines the set of schemas we will create in the database.
             # For each connection/schema then we will define the tables as defined
@@ -762,7 +763,7 @@ class ParserVisitor(Visitor):
 
 class CommandInterpreter:
     """
-        The interpretr for Unify. You call `run_command` with the code you want to execute
+        The interpreter for Unify. You call `run_command` with the code you want to execute
         and this class will parse it and execute the command, returning the result as a
         tuple of (output_lines[], result_object) where result_object is usually a DataFrame
         but could be a dict containing an image result instead.
@@ -831,16 +832,15 @@ class CommandInterpreter:
             return re.sub(r"\$([\w_0-9]+)", lookup_var, code)
 
     def run_command(self, cmd, input_func=input) -> tuple[list, pd.DataFrame]:
-        """
-            Executes a command through our interpreter and returns the results
-            as a tuple of (output_lines, output_object) where output_line contains
-            a list of string to print and output_object is an object which should
-            be rendered to the user. 
+        # Executes a command through our interpreter and returns the results
+        # as a tuple of (output_lines, output_object) where output_line contains
+        # a list of string to print and output_object is an object which should
+        # be rendered to the user. 
 
-            Support object types are: 
-            - a DataFrame
-            - A dict containing keys: "mime_type" and "data" for images
-        """
+        # Support object types are: 
+        # - a DataFrame
+        # - A dict containing keys: "mime_type" and "data" for images
+        
         def clean_df(object):
             if isinstance(object, pd.DataFrame):
                 self._last_result = object
@@ -895,10 +895,26 @@ class CommandInterpreter:
     # retrieve input from the user interactively.
     ################
     def count_table(self, table_ref):
+        """ count <table> - returns count of rows in a table """
         return self._execute_duck(f"select count(*) from {table_ref}")
 
     def help(self, help_choice):
-        # FIXME: collect help from each function
+        """ help - show this message 
+        help schemas - overview of schemas
+        help charts - help on generating charts
+        help import - help on importing data
+        help export - help on exporting data
+        """
+        if help_choice is None:
+            for l in inspect.getdoc(self.help).splitlines():
+                self.print(l)
+            for f in sorted(inspect.getmembers(self.__class__, inspect.isfunction)):
+                if f[0] in ['help','__init__']:
+                    continue
+                doc = inspect.getdoc(f[1])
+                if doc:
+                    self.print(doc)
+            return
         helps = {
             "schemas": """Every connected system is represented in the Unify database as a schema.
             The resources for the system appear as tables within this schema. Initially all tables
@@ -911,30 +927,24 @@ class CommandInterpreter:
             """,
             "charts": """Help for charts"""
         }
-        if help_choice:
-            msg = helps[help_choice]
-        else:
-            msg = """
-help - show this message
-help schemas
-help charts
-help import
-help export
-        """
+        msg = helps[help_choice]
         for l in msg.splitlines():
             self.print(l.strip())
     
     def drop_table(self, table_ref):
+        """ drop <table> - removes the table from the database """
         val = self.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
         if val == "y":
             return self._execute_duck(self._cmd)
 
     def drop_schema(self, schema_ref):
+        """ drop <schema> [cascade] - removes the entire schema from the database """
         val = input(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)? ")
         if val == "y":
             return self._execute_duck(self._cmd)
 
     def export_table(self, adapter_ref, table_ref, file_ref, write_option=None):
+        """ export <table> <adapter> <file> [append|overwrite] - export a table to a file """
         if file_ref.startswith("(") and file_ref.endswith(")"):
             # Evaluate an expression for the file name
             result = self.duck.execute(f"select {file_ref}").fetchone()[0]
@@ -955,9 +965,11 @@ help export
             self.print(f"Error, uknown adapter '{adapter_ref}'")
 
     def refresh_table(self, table_ref):
+        """ refresh table <table> - updates the rows in a table from the source adapter """
         self.loader.refresh_table(table_ref)
 
     def set_variable(self, var_ref: str, var_expression: str):
+        """ $<var> = <expr> - sets a variable. Use all caps for var to set a global variable. """
         is_global = var_ref.upper() == var_ref
         if not var_expression.lower().startswith("select "):
             # Need to evaluate the scalar expression
@@ -985,9 +997,11 @@ help export
             self.session_vars[name] = value
 
     def show_schemas(self):
+        """ show schemas - list schemas in the datbase """
         return self._execute_duck(Queries.list_schemas)
 
     def show_tables(self, schema_ref=None):
+        """ show tables [from <schema> [like '<expr>']] - list all tables or those from a schema """
         if schema_ref:
             potential = []
             if schema_ref in self.adapters:
@@ -1007,6 +1021,7 @@ help export
                 self.print("{:20s} {}".format(r[0], r[1]))
 
     def show_columns(self, table_ref, column_filter=None):
+        """ show columns [from <table> [like '<expr>']] - list all columns or those from a table """
         if table_ref:
             if column_filter:
                 parts = table_ref.split(".")
@@ -1018,21 +1033,26 @@ help export
             return self._execute_duck("describe")
 
     def describe(self, table_ref):
+        """ describe [<table>] - list all columns or those from a table """
         if table_ref is None:
             return self._execute_duck("describe")
         else:
             return self._execute_duck(f"describe {table_ref}")
 
     def create_statement(self):
+        """ create table <table> ... """
         return self._execute_duck(self._cmd)
 
     def create_view_statement(self):
+        """ create view <view> ... """
         return self._execute_duck(self._cmd)
 
     def insert_statement(self):
+        """ insert into <table> ... """
         return self._execute_duck(self._cmd)
 
     def delete_statement(self):
+        """ delete from <table> [where ...] """
         return self._execute_duck(self._cmd)
 
     def load_adapter_data(self, schema_name, table_name):
@@ -1043,6 +1063,7 @@ help export
             return False
 
     def select_query(self, fail_if_missing=False):
+        """ select <columns> from <table> [where ...] [order by ...] [limit ...] [offset ...] """
         try:
             return self._execute_duck(self._cmd)
 
@@ -1086,6 +1107,7 @@ help export
             self.print(f"Error, unknown variable '{var_ref}'")
 
     def show_variables(self):
+        """ show variables - list all defined variables"""
         rows = [(k, "[query result]" if isinstance(v, pd.DataFrame) else v) for k, v in self.session_vars.items()]
         store: DuckdbStorageManager =DuckdbStorageManager(None, self.duck)
         vars = [k[0][0:-len(store.VAR_NAME_SENTINAL)].upper() for k in store.list_vars()]
@@ -1093,6 +1115,7 @@ help export
         return pd.DataFrame(rows, columns=["variable", "value"])
 
     def clear_table(self, table_schema_ref=None):
+        """ clear <table> - removes all rows from a table """
         self.loader.truncate_table(table_schema_ref)
         self.print("Table cleared: ", table_schema_ref)
 
@@ -1103,6 +1126,7 @@ help export
         chart_source=None, 
         chart_where=None,
         chart_params={}):
+        """ create chart from <$var or table> as <chart_type> where x = <col> and y = <col> [opts] - see 'help charts' for info """
         # FIXME: observe chart_source
         if "x" not in chart_params:
             raise RuntimeError("Missing 'x' column parameter for chart X axis")
