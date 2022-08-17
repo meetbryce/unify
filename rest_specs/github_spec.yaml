@@ -50,6 +50,9 @@ tables:
   - name: org_members
     resource_path: /orgs/{org}/members
     supports_paging: True
+# New syntax
+#   params:
+#      org: \%(select login from orgs)    
     args_query:
       table: orgs
       mapping:
@@ -128,6 +131,10 @@ tables:
       sort: created
       direction: desc
       state: all
+#     owner,repo: select owner_login, name from repos
+#
+#
+#      
     args_query:
       table: repos
       mapping:

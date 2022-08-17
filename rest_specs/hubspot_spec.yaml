@@ -38,6 +38,8 @@ tables:
     supports_paging: true
     params:
       properties: lead_media_buyer,backup_media_buyer,lead_source,tatari_business_relationship,city,ownername,owneremail,domain,name,hs_lastmodifieddate
+      # Set a parameter based on a subquery
+      props: \%(select string_agg(name,',') from company_properties)
     columns:
       - name: id
         key: true

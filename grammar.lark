@@ -20,6 +20,7 @@ command: show_tables
          | export_table
          | set_variable
          | show_variable
+         | email_command
          | help
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
@@ -69,6 +70,16 @@ drop_schema: "drop schema" WS schema_ref (WS "cascade")?
 clear_table: "clear table" WS table_schema_ref
 
 refresh_table: "refresh table" WS table_ref
+
+email_command: "email" WS email_object (WS chart_ref)? WS "to" recipients WS? ("subject" WS subject)?
+
+email_object: "notebook"|"chart"|table_ref
+
+chart_ref: SINGLE_QUOTED_STRING
+
+recipients: SINGLE_QUOTED_STRING
+
+subject: SINGLE_QUOTED_STRING
 
 help: "help" (WS HELP_CHOICE)?
 

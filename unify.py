@@ -32,6 +32,7 @@ from timeit import default_timer as timer
 # DuckDB
 import duckdb
 from setuptools import Command
+from email_helper import EmailHelper
 
 from rest_schema import (
     Adapter, 
@@ -699,6 +700,11 @@ class ParserVisitor(Visitor):
         self._the_command = "drop_schema"
         self._the_command_args["schema_ref"] = find_node_return_child("schema_ref", tree)
 
+    def email_command(self, tree):
+        self._the_command = "email_command"
+        self._the_command_args['email_object'] = collect_child_text("email_object", tree, self._full_code)
+        self._the_command_args['recipients'] = find_node_return_child("recipients", tree).strip("'")
+
     def export_table(self, tree):
         self._the_command = "export_table"
         self._the_command_args['table_ref'] = collect_child_text("table_ref", tree, full_code=self._full_code)
@@ -779,6 +785,7 @@ class CommandInterpreter:
         self.adapters: dict[str, Adapter] = self.loader.adapters
         self.logger: OutputLogger = None
         self.session_vars: dict[str, object] = {}
+        self.email_helper: EmailHelper = EmailHelper()
 
     def _list_schemas(self, match_prefix=None):
         with DuckContext() as duck:
@@ -831,7 +838,7 @@ class CommandInterpreter:
             # interpolate the whole command
             return re.sub(r"\$([\w_0-9]+)", lookup_var, code)
 
-    def run_command(self, cmd, input_func=input) -> tuple[list, pd.DataFrame]:
+    def run_command(self, cmd, input_func=input, get_notebook_func=None) -> tuple[list, pd.DataFrame]:
         # Executes a command through our interpreter and returns the results
         # as a tuple of (output_lines, output_object) where output_line contains
         # a list of string to print and output_object is an object which should
@@ -840,7 +847,10 @@ class CommandInterpreter:
         # Support object types are: 
         # - a DataFrame
         # - A dict containing keys: "mime_type" and "data" for images
-        
+        # 
+        # The Email function may need the notebook path. In this case the `get_notebook_func`
+        # should be supplied by the kernel to return the notebook path.
+
         def clean_df(object):
             if isinstance(object, pd.DataFrame):
                 self._last_result = object
@@ -865,6 +875,11 @@ class CommandInterpreter:
                 try:
                     parse_tree = self.parser.parse(self._cmd)
                     command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
+                    if command == 'email_command':
+                        # FIXME: Check command args to let any function use the notebook path
+                        nb_path = get_notebook_func() if get_notebook_func else None
+                        self.parser_visitor._the_command_args['notebook_path'] = nb_path
+
                     if command:
                         result = getattr(self, command)(**self.parser_visitor._the_command_args)
                 except lark.exceptions.LarkError:
@@ -942,6 +957,31 @@ class CommandInterpreter:
         val = input(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)? ")
         if val == "y":
             return self._execute_duck(self._cmd)
+
+    def email_command(self, email_object, recipients, subject=None, notebook_path: str=None):
+        """ email [notebook|<table>|chart <chart>| to '<recipients>' - email a chart or notebook to the recipients """
+
+        recipients = re.split("\s*,\s*", recipients)
+        if email_object == "notebook":
+            # Need to render and email the current notebook
+            self.print("Notebook path is: ", notebook_path)
+            if notebook_path:
+                notebook = os.path.basename(notebook_path)
+                if subject is None:
+                    subject = f"{notebook} notebook - Unify"
+                self.email_helper.send_notebook(notebook_path, recipients, subject)
+        else:
+            if subject is None:
+                subject = f"{email_object} contents - Unify"
+            # Email the contents of a table
+            df: pd.DataFrame = self._execute_duck(f"select * from {email_object}")
+            buffer = io.StringIO()
+            #csv_data = df.to_csv(buffer)
+            if subject is None:
+                subject = f"Unify - {email_object}"
+            self.print(f"Emailing {email_object} to {recipients}")
+            fname = email_object.replace(".", "_") + ".csv"
+            self.email_helper.send_table(df, fname, recipients, subject)
 
     def export_table(self, adapter_ref, table_ref, file_ref, write_option=None):
         """ export <table> <adapter> <file> [append|overwrite] - export a table to a file """

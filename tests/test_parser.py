@@ -81,7 +81,7 @@ def test_other_statements(visitor, parser):
     verify_parse(v, p, "drop_schema", query="drop schema myscheme1",
         args={"schema_ref": "myscheme1"})
     verify_parse(v, p, "clear_table", query="clear table github.orgs", args={'table_schema_ref':"github.orgs"})
-    verify_parse(v, p, "refresh_table", query="refresh table github.orgs", args={'table_schema_ref':"github.orgs"})
+    verify_parse(v, p, "refresh_table", query="refresh table github.orgs", args={'table_ref':"github.orgs"})
 
 def test_chart_commands(visitor, parser):
     v = visitor
@@ -152,3 +152,15 @@ def test_variables(visitor, parser):
     q = "select id, name, date from hubspot.orders limit 10"
     verify_parse(v, p, "set_variable", f"$orders = {q}",
         args={"var_ref": "orders", "var_expression": q})
+
+def test_email(visitor, parser):
+    v = visitor
+    p = parser
+
+    verify_parse(v, p, "email_command", "email notebook to 'joe@example.com'",
+        args={"email_object": "notebook", "recipients": "joe@example.com"})
+    verify_parse(v, p, "email_command", "email chart 'bugs' to 'joe@example.com'",
+        args={"email_object": "chart", "recipients": "joe@example.com"})
+
+    verify_parse(v, p, "email_command", "email github.users to 'joe@example.com'",
+        args={"email_object": "github.users", "recipients": "joe@example.com"})

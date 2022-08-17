@@ -8,7 +8,7 @@ from ipykernel.kernelbase import Kernel
 from unify import CommandInterpreter
 from lark.visitors import Visitor
 from parsing_utils import find_node_return_children
-
+import ipynbname
 
 class AutocompleteParser(Visitor):
     def __init__(self, parser):
@@ -68,12 +68,19 @@ class UnifyKernel(Kernel):
         stream_content = {'name': 'stdout', 'text': msg}
         self.send_response(self.iopub_socket, 'stream', stream_content)
 
+    def _find_notebook(self):
+        return ipynbname.path()
+
     def do_execute(self, code, silent, store_history=True, user_expressions=None,
                    allow_stdin=False):
 
         self._allow_stdin = allow_stdin
         try:
-            lines, object = self.unify_runner.run_command(code, input_func=self.raw_input)
+            lines, object = self.unify_runner.run_command(
+                code, 
+                input_func=self.raw_input, 
+                get_notebook_func=self._find_notebook
+            )
             if not silent:
                 if lines:
                     self.send_response(self.iopub_socket, 'stream', {'name': 'stdout', 'text': "\n".join(lines)})

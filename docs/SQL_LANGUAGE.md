@@ -68,3 +68,13 @@ The file name argument can also be any expression enclosed in parenthesis. This 
 the target file name dynamically:
 
     export hubspot.orders to gsheeets ('Hubspot Order as of ' || current_date)
+
+## Email
+
+You can request to render a particular chart or a whole notebook into an email:
+
+    email <"notebook"|chart name> to '<recipient list>' [every "day"|"week"|"month"] starting at <DD-MM-YYYY HH:MM>]
+       [subject <'' or expr>]
+
+Running `email notebook to` will send the email immediately. If you specify `every ...` then a schedule
+will be created to execute the full notebook and send the email according to the schedule.
