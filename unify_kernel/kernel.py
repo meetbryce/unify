@@ -3,6 +3,7 @@ import traceback
 import pandas as pd
 import urllib
 import base64
+import time
 
 from ipykernel.kernelbase import Kernel
 from unify import CommandInterpreter
@@ -73,7 +74,6 @@ class UnifyKernel(Kernel):
 
     def do_execute(self, code, silent, store_history=True, user_expressions=None,
                    allow_stdin=False):
-
         self._allow_stdin = allow_stdin
         try:
             lines, object = self.unify_runner.run_command(
@@ -114,7 +114,8 @@ class UnifyKernel(Kernel):
                     'user_expressions': {},
                 }
         except Exception as e:
-            stream_content = {'name': 'stderr', 'text': str(e)}
+            self.log.exception("Error runnning kernel command")
+            stream_content = {'name': 'stderr', 'text': (str(e) + "\n" + traceback.format_exc())}
             self.send_response(self.iopub_socket, 'stream', stream_content)
             return {'status': 'error',
                     'execution_count': self.execution_count,

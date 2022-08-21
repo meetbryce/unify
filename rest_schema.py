@@ -267,7 +267,8 @@ class TableDef:
         self._result_body_path = val
 
     def get_table_updater(self, updates_since: datetime) -> TableUpdater:
-        pass
+        # default is just to reload
+        return ReloadStrategy(self)
 
 class TableUpdater:
     def __init__(self, table_def: TableDef, updates_since: datetime=None) -> None:

@@ -8,7 +8,7 @@ import pandas as pd
 from redmail import EmailSender
 from nb2mail import MailExporter
 import nbformat
-from nbconvert.nbconvertapp import NbConvertApp
+from nbconvert.preprocessors import ExecutePreprocessor
 
 class EmailHelper:
     def __init__(self):
@@ -45,7 +45,18 @@ class EmailHelper:
     def send_notebook(self, notebook_path, recipients: list, subject: str=None):
         mail_exporter = MailExporter(template_name="mail")
         notebook = nbformat.reads(open(notebook_path).read(), as_version=4)
-        
+        # Now execute the notebook to generate up to date output results (run live queries, etc...)
+        ep = ExecutePreprocessor(timeout=600, kernel_name='unify_kernel')
+
+        # Before executing, strip any recursive calls to email the notebook
+        for cell in notebook['cells']:
+            if cell['cell_type'] == 'code':
+                src = cell['source']
+                if src and src.strip().startswith('email'):
+                    cell['cell_type'] = 'markdown'
+
+        ep.preprocess(notebook, {'metadata': {'path': os.path.dirname(notebook_path)}})
+
         (body, resources) = mail_exporter.from_notebook_node(notebook)
         nb_email = Parser().parse(io.StringIO(body))
 
@@ -58,7 +69,8 @@ class EmailHelper:
             image_tags.append(cid)
             return "{{ " + cid + " }}"
 
-        html = re.sub(r'<img src="cid:(.*)"', replace_tag, html)
+        html = re.sub(r'<img src="cid:(.*)"/>', replace_tag, html)
+        breakpoint()
 
         images = []
         # We are assuming the html references will match the payloads

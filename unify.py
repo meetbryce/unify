@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import io
 import inspect
 import json
+import logging
 import os
 from threading import Thread
 import pickle
@@ -29,6 +30,9 @@ import numpy as np
 
 from timeit import default_timer as timer
 
+logger = logging.getLogger(__name__)
+#logging.basicConfig(level=logging.DEBUG)
+
 # DuckDB
 import duckdb
 from setuptools import Command
@@ -42,6 +46,7 @@ from rest_schema import (
     TableUpdater,
     UnifyLogger
 )
+from db_wrapper import DuckDBWrapper, ClickhouseWrapper, DBWrapper, TableMissingException
 
 from storage_manager import StorageManager
 from schemata import LoadTableRequest, Queries
@@ -54,36 +59,12 @@ from parsing_utils import (
     collect_strings
 )
 
-DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
-os.makedirs(DATA_HOME, exist_ok=True)
+# Verify DB settings
+if 'DATABASE_BACKEND' not in os.environ or os.environ['DATABASE_BACKEND'] not in ['duckdb','clickhouse']:
+    raise RuntimeError("Must set DATABASE_BACKEND to 'duckdb' or 'clickhouse'")
 
-
-class DuckContext:
-    DUCK_CONN = None
-    REF_COUNTER = 0
-
-    """ A cheap hack around DuckDB only usable in a single process. We just open/close
-        each time to manage. Context manager for accessing the DuckDB database """
-    def __init__(self):
-        pass
-
-    def __enter__(self):
-        DuckContext.REF_COUNTER += 1
-        if self.__class__.DUCK_CONN is None:
-            self.__class__.DUCK_CONN = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=False)
-            self.__class__.DUCK_CONN.execute("PRAGMA log_query_path='/tmp/duckdb_log'")
-        return self.__class__.DUCK_CONN
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        DuckContext.REF_COUNTER -= 1
-        if DuckContext.REF_COUNTER == 0 and self.__class__.DUCK_CONN is not None:
-            try:
-                self.__class__.DUCK_CONN.execute("COMMIT")
-            except:
-                pass
-            self.__class__.DUCK_CONN.close()
-            self.__class__.DUCK_CONN = None
-        
+dbmgr: DBWrapper = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
+       
 
 class SimpleLogger(UnifyLogger):
     def __init__(self, adapter: Adapter):
@@ -159,7 +140,7 @@ class BaseTableScan(Thread):
         self.storage_mgr: DuckdbStorageManager = DuckdbStorageManager("_system_", duck)
 
     def run(self):
-        with DuckContext() as duck:
+        with dbmgr() as duck:
             self.storage_mgr: DuckdbStorageManager = DuckdbStorageManager("_system_", duck)
             self.perform_scan(duck)
 
@@ -178,31 +159,16 @@ class BaseTableScan(Thread):
     def clear_scan_record(self):
         self.storage_mgr.delete_log_objects("tablescans", self.tableMgr.name)
 
-    def create_table_with_first_page(self, duck, next_df, schema, table_root):
-        duck.register('df1', next_df)
+    def create_table_with_first_page(self, duck: DBWrapper, next_df, schema, table_root):
         table = schema + "." + table_root
-        # create the table AND flush current row_buffer values to the db
-        try:
-            duck.execute(f"describe {table}")
+        if duck.table_exists(table):
             # table already exists, so assume we are updating
-            duck.execute(f"set search_path='{schema}'")
-            duck.append(table_root, next_df)
-        except Exception as e:
-            if 'Catalog Error' in str(e):
-                duck.execute(f"create table {table} as select * from df1")
-            else:
-                raise
-        # FIXME: The following shouldn't be neccessary, but it seems like `Duck.append`
-        # does not work properly with qualified table names, so we hack around it
-        # by setting the search path
-        duck.execute(f"set search_path='{schema}'")
+            duck.append_dataframe_to_table(next_df, table)
+        else:
+            duck.write_dataframe_as_table(next_df, schema, table_root)
 
     def get_query_mgr(self):
         return self.tableMgr.table_spec
-
-    def get_table_columns(self, duck, table):
-        # Returns the column names for the table in their insert order
-        return duck.execute("describe " + table).df()["column_name"].values.tolist()
 
     def perform_scan(self, duck):
         print("Running table scan for: ", self.tableMgr.name)
@@ -254,14 +220,18 @@ class BaseTableScan(Thread):
         print("Finished table scan for: ", self.tableMgr.name)
 
 class InitialTableLoad(BaseTableScan):
-    def _flush_rows_to_db(self, duck, tableMgr, next_df, page, flush_count):
+    def _flush_rows_to_db(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
         ## Default version works when loading a new table
         print(f"Saving page {page} with {next_df.shape[1]} columns")
         if page <= flush_count:
             # First set of pages, so create the table
             self.create_table_with_first_page(duck, next_df, tableMgr.adapter.name, tableMgr.table_spec.name)
         else:
-            duck.append(tableMgr.table_spec.name, next_df)
+            duck.append_dataframe_to_table(
+                next_df, 
+                tableMgr.adapter.name, 
+                tableMgr.table_spec.name
+            )
 
 class TableUpdateScan(BaseTableScan):
     """
@@ -300,12 +270,7 @@ class TableUpdateScan(BaseTableScan):
             # Use parent class to download data from the target API (calling _flush_rows along the way)
             super().perform_scan(duck)
             # Now swap the new table into place
-            duck.execute(f"""
-            BEGIN;
-            DROP TABLE IF EXISTS {self.tableMgr.name};
-            ALTER TABLE {self._target_table} RENAME TO {self.tableMgr.table_spec.name};
-            COMMIT;
-            """)
+            duck.replace_table(self._target_table, self.tableMgr.name)
         else:
             self._target_table_root = self.tableMgr.table_spec.name
             self._target_table = self.tableMgr.adapter.name + "." + self._target_table_root
@@ -314,7 +279,7 @@ class TableUpdateScan(BaseTableScan):
     def get_query_mgr(self):
         return self._query_mgr
 
-    def _flush_rows_to_db(self, duck, tableMgr, next_df, page, flush_count):
+    def _flush_rows_to_db(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
         if self._query_mgr.should_replace():
             # Loading into a temp table so just do simple load
             if page <= flush_count:
@@ -326,27 +291,30 @@ class TableUpdateScan(BaseTableScan):
                     self._target_table_root
                 )
             else:
-                duck.append(self._target_table_root, next_df)
+                duck.append_dataframe_to_table(
+                    next_df, 
+                    self.tableMgr.adapter.name, 
+                    self._target_table_root
+                )
             return
 
         # To update a table we have to both remove existing copies of any rows
         # we downloaded and align our downloaded columns with the existing table.
-        cols = self.get_table_columns(duck, self._target_table)
+        cols = duck.get_table_columns(self._target_table)
         # filter and order to the right columns
         next_df = next_df[cols]
         print(f"Saving update page {page} with {next_df.shape[1]} columns")
-        if page <= flush_count:
-            duck.execute(f"set search_path='{tableMgr.adapter.name}'")
+
         # First delete any existing records
         keys = next_df[tableMgr.table_spec.key]  #.values.tolist()
-        duck.register("_keys", pd.DataFrame(keys))       
-        #print("Keys count: ", duck.execute("select count(*) from _keys").fetchall())
-        rows = duck.execute(
-f"DELETE FROM {self._target_table} WHERE {tableMgr.table_spec.key} IN (select * from _keys)"
-        ).fetchone()
-        duck.unregister("_keys")
+        keys_table = duck.create_memory_table("__keys", pd.DataFrame(keys))
+
+        duck.delete_rows(self._target_table, 
+            where_clause = f"{tableMgr.table_spec.key} IN (SELECT * FROM {keys_table})")
+        duck.drop_memory_table("__keys")
+
         # Now append the new records             
-        duck.append(self._target_table_root, next_df)
+        duck.append_dataframe_to_table(next_df, tableMgr.adapter.name, self._target_table_root)
 
 
 class TableExporter(Thread):
@@ -368,14 +336,14 @@ class TableExporter(Thread):
         # Runs the query against DuckDB in chunks, and sends those chunks to the adapter
         self.output_handle = self.adapter.create_output_table(self.target_file, output_logger, overwrite=self.overwrite)
 
-        with DuckContext() as duck:
+        with dbmgr() as duck:
             if self.query:
-                r = duck.execute(self.query)
+                r = duck.execute_df(self.query)
             else:
-                r = duck.execute(f"select * from {self.table}")
+                r = duck.execute_df(f"select * from {self.table}")
 
             # FIXME: Use DF chunking and multiple pages
-            self.adapter.write_page(self.output_handle, r.df(), output_logger, append=self.append)
+            self.adapter.write_page(self.output_handle, r, output_logger, append=self.append)
 
             self.adapter.close_output_table(self.output_handle)
 
@@ -423,7 +391,7 @@ class TableLoader:
        3. Table exists in the local db.
     """
     def __init__(self, silence_errors=False, given_connections: list[Connection]=None):
-        with DuckContext() as duck:       
+        with dbmgr() as duck:       
             try:
                 if given_connections:
                     self.connections = given_connections
@@ -447,13 +415,13 @@ class TableLoader:
             # For each connection/schema then we will define the tables as defined
             # in the REST spec for the target system.
             for conn in self.connections:
-                duck.execute(f"create schema if not exists {conn.schema_name}")
+                duck.create_schema(conn.schema_name)
                 for t in conn.adapter.list_tables():
                     tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                     self.tables[tmgr.name] = tmgr
 
     def materialize_table(self, schema, table):
-        with DuckContext() as duck:
+        with dbmgr() as duck:
             qual = schema + "." + table
             if qual in self.tables:
                 tmgr = self.tables[qual]
@@ -468,19 +436,14 @@ class TableLoader:
         self.tables[table_ref].refresh_table(tableLoader=self)
 
     def read_table_rows(self, table):
-        with DuckContext() as duck:
+        with dbmgr() as duck:
             if not self.table_exists_in_db(table):
                 tmgr = self.tables[table]
                 tmgr.load_table(tableLoader=self, waitForScan=True)
 
             if self.table_exists_in_db(table):
-                r = duck.execute(f"select * from {table}")
-                while True:
-                    df = r.fetch_df_chunk()
-                    if df.size == 0 or df.shape == (1,1):
-                        break
-                    else:
-                        yield df
+                # FIXME: Use chunking and multiple pages
+                yield duck.execute_df(f"select * from {table}")
             else:
                 raise RuntimeError(f"Could not get rows for table {table}")
 
@@ -488,13 +451,13 @@ class TableLoader:
         return next(c for c in self.connections if c.schema_name == name)
 
     def truncate_table(self, table):
-        with DuckContext() as duck:
+        with dbmgr() as duck:
             self.tables[table].truncate(duck)
 
     def table_exists_in_db(self, table):
         try:
             # FIXME: memoize the results here
-            with DuckContext() as duck:
+            with dbmgr() as duck:
                 duck.execute(f"select 1 from {table}")
             return True
         except Exception as e:
@@ -508,46 +471,37 @@ class DuckdbStorageManager(StorageManager):
         Stores adapter metadata in DuckDB. Creates a "meta" schema, and creates
         tables named <adapter schema>_<collection name>.
     """
-    TABLE_SCHEMA = "(id VARCHAR PRIMARY KEY, blob JSON)"
-    LOG_TABLE_SCHEMA = "(id VARCHAR, created DATETIME, blob JSON)"
+    DUCK_TABLE_SCHEMA = "(id VARCHAR PRIMARY KEY, blob JSON)"
+    TABLE_SCHEMA = {'*id': 'VARCHAR', 'blob': 'JSON'}
+    LOG_TABLE_SCHEMA = {'id': 'VARCHAR', 'created': 'DATETIME', 'blob': 'JSON', '__order': ['id','created']}
     VAR_NAME_SENTINAL = '__var__'
 
     def __init__(self, adapter_schema: str, duck):
         self.adapter_schema = adapter_schema
         self.duck = duck
-        self.duck.execute("create schema if not exists meta")
+        self.duck.create_schema("meta")
 
     def ensure_col_table(self, duck, name) -> dict:
         table = self.adapter_schema + "_" + name
-        duck.execute(
-            f"create table if not exists meta.{table} {self.TABLE_SCHEMA}"
-        )
+        duck.create_table("meta." + table, self.TABLE_SCHEMA)
         return table
 
     def ensure_log_table(self, duck, name) -> dict:
         table = self.adapter_schema + "_" + name
-        duck.execute(
-            f"create table if not exists meta.{table} {self.LOG_TABLE_SCHEMA}"
-        )
+        duck.create_table("meta." + table, self.LOG_TABLE_SCHEMA)
         return table
 
     def create_var_storage_table(self, duck):
         table = "system__vars"
-        SCHEMA = "(name VARCHAR PRIMARY KEY, value BLOB)"
-        duck.execute(
-            f"create table if not exists meta.{table} {SCHEMA}"
-        )
+        duck.create_table("meta." + table, {'*name': 'VARCHAR', 'value': 'BLOB'})
         return table
 
     def put_var(self, name, value):
         table = self.create_var_storage_table(self.duck)
-        self.duck.execute(f"delete from meta.{table} where name = '{name}'")
+        self.duck.delete_rows("meta." + table, {"name": name})
         if isinstance(value, pd.DataFrame):
-            self.duck.register('df1', value)
-            # create the table AND flush current row_buffer values to the db
             name = name.lower() + self.VAR_NAME_SENTINAL
-            self.duck.execute(f"create or replace table meta.{name} as select * from df1")
-            self.duck.unregister("df1")
+            self.duck.write_dataframe_as_table(value, "meta", name)
         else:
             self.duck.execute(
                 f"insert into meta.{table} (name, value) values (?, ?)",
@@ -571,18 +525,18 @@ class DuckdbStorageManager(StorageManager):
             return pickle.loads(rows[0][0])
         else:
             name = name.lower() + self.VAR_NAME_SENTINAL
-            return self.duck.execute(f"select * from meta.{name}").df()
+            return self.duck.execute_df(f"select * from meta.{name}")
             #raise RuntimeError(f"No value stored for global variable '{name}'")
 
     def put_object(self, collection: str, id: str, values: dict) -> None:
         table = self.ensure_col_table(self.duck, collection)
-        self.duck.execute(f"delete from meta.{table} where id = ?", [id])
-        self.duck.execute(f"insert into meta.{table} values (?, ?)", [id, json.dumps(values)])
+        self.duck.delete_rows("meta." + table, {"id": id})
+        self.duck.execute(f"insert into meta.{table} (id, blob) values (?, ?)", [id, json.dumps(values)])
 
     def log_object(self, collection: str, id: str, values: dict) -> None:
         table = self.ensure_log_table(self.duck, collection)
         created = datetime.utcnow()
-        self.duck.execute(f"insert into meta.{table} values (?, ?, ?)", [id, created, json.dumps(values)])
+        self.duck.execute(f"insert into meta.{table} (id,created,blob) values (?, ?, ?)", [id, created, json.dumps(values)])
 
     def get_object(self, collection: str, id: str) -> dict:
         table = self.ensure_col_table(self.duck, collection)
@@ -600,8 +554,8 @@ class DuckdbStorageManager(StorageManager):
         return [json.loads(row[1]) for row in rows]
 
     def delete_object(self, collection: str, id: str) -> bool:
-        table = self.ensure_col_table(self.duck, collection)
-        r = self.duck.execute(f"delete from meta.{table} where id = ?", [id]).fetchall()
+        table = "meta." + self.ensure_col_table(self.duck, collection)
+        r = self.duck.delete_rows(table, {'id': id})
         print("Delete resulted in: ", r)
 
     def delete_log_objects(self, collection: str, id: str):
@@ -788,7 +742,7 @@ class CommandInterpreter:
         self.email_helper: EmailHelper = EmailHelper()
 
     def _list_schemas(self, match_prefix=None):
-        with DuckContext() as duck:
+        with dbmgr() as duck:
             all = sorted(list(r[0] for r in duck.execute(Queries.list_schemas).fetchall()))
             if match_prefix:
                 all = [s[len(match_prefix):] for s in all if s.startswith(match_prefix)]
@@ -818,7 +772,8 @@ class CommandInterpreter:
             value = self._get_variable(var_name)
             if isinstance(value, pd.DataFrame):
                 ref_var =f"{var_name}__actualized"
-                self.duck.register(ref_var, value)
+                self.duck.create_memory_table(ref_var, value)
+                #self.duck.register(ref_var, value)
                 return ref_var
             elif value is not None:
                 # literal substitution
@@ -837,6 +792,9 @@ class CommandInterpreter:
         else:
             # interpolate the whole command
             return re.sub(r"\$([\w_0-9]+)", lookup_var, code)
+
+    def _command_needs_db_closed(self, command, parser_visitor: ParserVisitor) -> bool:
+        return command == 'email_command' and parser_visitor._the_command_args.get('email_object') == 'notebook'
 
     def run_command(self, cmd, input_func=input, get_notebook_func=None) -> tuple[list, pd.DataFrame]:
         # Executes a command through our interpreter and returns the results
@@ -857,8 +815,11 @@ class CommandInterpreter:
                 if 'count_star()' in object.columns:
                     object.rename(columns={'count_star()': 'count'}, inplace=True)
 
+        # This is a hack for the email command, which will execute a notebook which needs exclusive
+        # access to the database, so we defer to running the command until after we close the db.
+        run_command_after_closing_db = None
         try:
-            with DuckContext() as duck:
+            with dbmgr() as duck:
                 self.duck = duck
 
                 cmd = self.substitute_variables(cmd)
@@ -875,10 +836,12 @@ class CommandInterpreter:
                 try:
                     parse_tree = self.parser.parse(self._cmd)
                     command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
-                    if command == 'email_command':
+                    if self._command_needs_db_closed(command, self.parser_visitor):
                         # FIXME: Check command args to let any function use the notebook path
                         nb_path = get_notebook_func() if get_notebook_func else None
                         self.parser_visitor._the_command_args['notebook_path'] = nb_path
+                        run_command_after_closing_db = command
+                        command = None
 
                     if command:
                         result = getattr(self, command)(**self.parser_visitor._the_command_args)
@@ -888,12 +851,16 @@ class CommandInterpreter:
                 if isinstance(result, pd.DataFrame):
                     self.print("{} row{}".format(result.shape[0], "s" if result.shape[0] != 1 else ""))
                 clean_df(result)
-                return (self.logger.get_output(), result)
+                if run_command_after_closing_db is None:
+                    return (self.logger.get_output(), result)
         finally:
             self.duck = None
+            if run_command_after_closing_db:
+                result = getattr(self, run_command_after_closing_db)(**self.parser_visitor._the_command_args)
+                return (self.logger.get_output(), result)
 
     def _execute_duck(self, query, header=True):
-        return self.duck.execute(query).df()
+        return self.duck.execute_df(query)
 
     def print(self, *args):
         self.logger.print(*args)
@@ -964,19 +931,19 @@ class CommandInterpreter:
         recipients = re.split("\s*,\s*", recipients)
         if email_object == "notebook":
             # Need to render and email the current notebook
-            self.print("Notebook path is: ", notebook_path)
             if notebook_path:
                 notebook = os.path.basename(notebook_path)
+                self.print(f"Emailing {notebook} to {recipients}")
                 if subject is None:
                     subject = f"{notebook} notebook - Unify"
                 self.email_helper.send_notebook(notebook_path, recipients, subject)
+            else:
+                self.print("Error, could not determine notebook name")
         else:
             if subject is None:
                 subject = f"{email_object} contents - Unify"
             # Email the contents of a table
             df: pd.DataFrame = self._execute_duck(f"select * from {email_object}")
-            buffer = io.StringIO()
-            #csv_data = df.to_csv(buffer)
             if subject is None:
                 subject = f"Unify - {email_object}"
             self.print(f"Emailing {email_object} to {recipients}")
@@ -1017,7 +984,7 @@ class CommandInterpreter:
             self._save_variable(var_ref, val, is_global)
             self.print(val)
         else:
-            val = self.duck.execute(var_expression).df()
+            val = self.duck.execute_df(var_expression)
             self._save_variable(var_ref, val, is_global)
             return val
 
@@ -1107,22 +1074,13 @@ class CommandInterpreter:
         try:
             return self._execute_duck(self._cmd)
 
-        except RuntimeError as e:
+        except TableMissingException as e:
             if fail_if_missing:
                 self.print(e)
                 return
-            m = re.search(r"Table with name (\S+) does not exist", str(e))
-            if m:
-                table = m.group(1)
-                # Extract the schema from the original query
-                m = re.search(f"(\\w+)\\.{table}", self._cmd)
-                if m:
-                    if self.load_adapter_data(m.group(1), table):
-                        return self.select_query(fail_if_missing=True)
-                else:
-                    self.print(e)
-            else:
-                self.print(e)
+            schema, table_root = e.table.split(".")
+            if self.load_adapter_data(schema, table_root):
+                return self.select_query(fail_if_missing=True)
 
     def select_for_writing(self, select_query, adapter_ref, file_ref):
         if adapter_ref in self.adapters:
@@ -1207,6 +1165,8 @@ class UnifyRepl:
             while True:
                 try:
                     cmd = session.prompt("> ", auto_suggest=suggester)
+                    if cmd.strip() == "":
+                        continue
                     outputs, df = self.interpreter.run_command(cmd)
                     print("\n".join(outputs))
                     if df is not None:

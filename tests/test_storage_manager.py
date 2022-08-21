@@ -1,10 +1,14 @@
 import pytest
+import time
 
-from unify import DuckdbStorageManager, DuckContext
+from unify import DuckdbStorageManager
+from db_wrapper import ClickhouseWrapper, DuckDBWrapper
+
+dbmgr = ClickhouseWrapper
 
 @pytest.fixture
 def duck():
-    with DuckContext() as duck:
+    with dbmgr() as duck:
         yield duck
 
 @pytest.fixture
@@ -12,8 +16,8 @@ def store(duck):
     yield DuckdbStorageManager("github", duck)
 
 def test_storage_manager(store):   
-    d1 = {"foo":"bar", "key2":"val2"}
-    d2 = {"cat":"dog", "name":"house"}
+    d1 = {"joe":"machine", "nancy":"pelosi"}
+    d2 = {"mitch":"mcconnel", "kevin":"ryan"}
 
     store.put_object("col1", "key1", d1)
     assert store.get_object("col1", "key1") == d1
@@ -24,12 +28,17 @@ def test_storage_manager(store):
 
     store.put_object("col2", "key1", d1)
 
-    assert list(store.list_objects("col1")) == [("key1", d1), ("key2", d2)]
+    res = list(store.list_objects("col1"))
+    print(res)
+    assert sorted(res) == sorted([("key1", d1), ("key2", d2)])
+
     assert list(store.list_objects("col2")) == [("key1", d1)]
+
 
     store.delete_object("col1", "key1")
     assert store.get_object("col1", "key1") is None
     assert list(store.list_objects("col1")) == [("key2", d2)]
+
 
     # Ensure stores for different adapters don't clash
     store2 = DuckdbStorageManager("jira", store.duck)

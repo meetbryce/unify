@@ -29,6 +29,7 @@
             "name": "Juyper console: attach",
             "type": "python",
             "request": "attach",
+            "justMyCode": false,
             "connect": {
                 "port": "5678",
                 "host": "localhost"

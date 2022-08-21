@@ -1,4 +1,4 @@
-from unify import CommandInterpreter
+from unify import CommandInterpreter, dbmgr
 import pandas as pd
 
 def test_session_variables():
@@ -30,10 +30,13 @@ def test_var_expressions():
     lines: list[str]
     df: pd.DataFrame
 
-    lines, df = interp.run_command("select cast(current_date as string)")
+    with dbmgr() as db:
+        date_expr = db.current_date_expr()
+
+    lines, df = interp.run_command(f"select cast({date_expr} as VARCHAR)")
     date_str = df.to_records(index=False)[0][0]
 
-    lines, df = interp.run_command("$file_name = 'Date as of - ' || current_date")
+    lines, df = interp.run_command(f"$file_name = 'Date as of - ' || cast({date_expr} as varchar)")
     
     lines, df = interp.run_command("show variables")
     recs = df.to_records(index=False)

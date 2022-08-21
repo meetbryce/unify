@@ -104,10 +104,13 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 1. [done] Implement full `show` commands
 1. [done] Implement dollar variables
 1. Unobtrusive table loading status supporting interrupts
+1. Pluggable database, plus Clickhouse backend
+1. SQL expressions for rest specs
 1. Jupyter UI integration: 
     1. Schema browser tree panel
     1. [done] Custom charting command
-    1. Implement more autocompletions
+    1. Implement more autocompletions based on scanning help messages
+    1. Async responses for slow actions (like emailing)
 
 ## Developing
 

@@ -1,7 +1,8 @@
+import time
 import pytest
 import requests_mock
 
-from unify import TableLoader, Connection, TableMgr, BaseTableScan, DuckContext
+from unify import TableLoader, Connection, TableMgr, BaseTableScan, dbmgr
 from mocksvc.mocksvc import MockSvc
 
 @pytest.fixture
@@ -35,7 +36,7 @@ def test_tableloader(connections):
 
         tmgr: TableMgr = loader.tables["mocksvc.repos27"]
         scanner: BaseTableScan = tmgr._create_scanner(loader)
-        with DuckContext() as duck:
+        with dbmgr() as duck:
             scanner._set_duck(duck)
 
             recs = scanner.get_last_scan_records()
@@ -45,7 +46,7 @@ def test_tableloader(connections):
 
         loader.refresh_table("mocksvc.repos27")
 
-        with DuckContext() as duck:
+        with dbmgr() as duck:
             assert duck.execute("select count(*) from mocksvc.repos27").fetchone()[0] == 27
 
 def test_updates_strategy(connections):
@@ -63,18 +64,24 @@ def test_updates_strategy(connections):
 
             assert loader.table_exists_in_db(f"mocksvc.{table}")
 
-            with DuckContext() as duck:
+            with dbmgr() as duck:
                 count = duck.execute("select count(*) from mocksvc.{}".format(table)).fetchone()[0]
                 assert count == 1027
                 
             loader.refresh_table(f"mocksvc.{table}")
 
-            with DuckContext() as duck:
+            with dbmgr() as duck:
                 count = duck.execute("select count(*) from mocksvc.{}".format(table)).fetchone()[0]
+                # Clickhouse doesn't exactly reflect deletes/inserts immediately, so give a slight
+                # delay or else the count can come back show a few rows
+                if count < 1027:
+                    time.sleep(1)
+                    count = duck.execute("select count(*) from mocksvc.{}".format(table)).fetchone()[0]
                 assert count == 1027
     finally:
-        with DuckContext() as duck:
-            duck.execute(f"DROP TABLE mocksvc.{table}")
+        with dbmgr() as duck:
+            duck.execute(f"DROP TABLE IF EXISTS mocksvc.{table}")
+            pass
 
 def test_reload_strategy(connections):
     table = "repos100"
@@ -91,15 +98,15 @@ def test_reload_strategy(connections):
 
             assert loader.table_exists_in_db(f"mocksvc.{table}")
 
-            with DuckContext() as duck:
+            with dbmgr() as duck:
                 count = duck.execute("select count(*) from mocksvc.{}".format(table)).fetchone()[0]
                 assert count == 100
                 
             loader.refresh_table(f"mocksvc.{table}")
 
-            with DuckContext() as duck:
+            with dbmgr() as duck:
                 count = duck.execute("select count(*) from mocksvc.{}".format(table)).fetchone()[0]
                 assert count == 100
     finally:
-        with DuckContext() as duck:
-            duck.execute(f"DROP TABLE mocksvc.{table}")
+        with dbmgr() as duck:
+            duck.execute(f"DROP TABLE IF EXISTS mocksvc.{table}")
