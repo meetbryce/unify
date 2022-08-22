@@ -206,8 +206,20 @@ class ClickhouseWrapper(DBWrapper):
         self.client = None
 
     def __enter__(self):
+        if 'DATABASE_HOST' not in os.environ:
+            raise RuntimeError("DATABASE_HOST not set")
+        if 'DATABASE_USER' not in os.environ:
+            raise RuntimeError("DATABASE_USER not set")
+        if 'DATABASE_PASSWORD' not in os.environ:
+            raise RuntimeError("DATABASE_PASSWORD not set")
+
         settings = {'allow_experimental_object_type': 1, 'allow_experimental_lightweight_delete': 1}
-        self.client: Client = Client(host='localhost', settings=settings)
+        self.client: Client = Client(
+            host=os.environ['DATABASE_HOST'], 
+            user=os.environ['DATABASE_USER'],
+            password=os.environ['DATABASE_PASSWORD'],
+            settings=settings
+        )
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
