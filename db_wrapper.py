@@ -207,9 +207,9 @@ def patched_apply_timezones_before_write(self, items):
     else:
         timezone = self.timezone if self.timezone else self.local_timezone
         try:
-            ts = pd.to_datetime(items).tz_localize(timezone)
-        except TypeError:
-            ts = pd.to_datetime(items).tz_convert(timezone)
+            ts = pd.to_datetime(items, utc=True).tz_localize(timezone)
+        except (TypeError, ValueError):
+            ts = pd.to_datetime(items, utc=True).tz_convert(timezone)
 
     ts = ts.tz_convert('UTC')
     return ts.tz_localize(None).to_numpy(self.datetime_dtype)

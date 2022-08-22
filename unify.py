@@ -204,7 +204,7 @@ class BaseTableScan(Thread):
 
             # Flush rows
             if (page % page_flush_count) == 0:
-                self._flush_rows_to_db(duck, self.tableMgr, row_buffer_df, page, page_flush_count)
+                self._flush_rows_to_db_catch_error(duck, self.tableMgr, row_buffer_df, page, page_flush_count)
                 if page == page_flush_count:
                     table_cols = set(row_buffer_df.columns.tolist())
                 row_buffer_df = row_buffer_df[0:0] # clear flushed rows, but keep columns
@@ -212,12 +212,23 @@ class BaseTableScan(Thread):
             page += 1
 
         if row_buffer_df is not None and row_buffer_df.shape[0] > 0:
-            self._flush_rows_to_db(duck, self.tableMgr, row_buffer_df, page, page_flush_count)
+            self._flush_rows_to_db_catch_error(duck, self.tableMgr, row_buffer_df, page, page_flush_count)
 
         # We save at the end in case we encounter an error
         self.save_scan_record({"scan_complete": scan_start})
 
         print("Finished table scan for: ", self.tableMgr.name)
+
+    def _flush_rows_to_db_catch_error(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
+        try:
+            self._flush_rows_to_db(duck, tableMgr, next_df, page, flush_count)
+        except Exception as e:
+            # "Core dump" the bad page
+            core_file = f"/tmp/{self.tableMgr.name}_bad_page_{page}.csv"
+            logger.critical("Error saving page to db, dumping to file: " + core_file)
+            with open(core_file, "w") as f:
+                next_df.to_csv(f)
+            raise
 
 class InitialTableLoad(BaseTableScan):
     def _flush_rows_to_db(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
@@ -678,6 +689,11 @@ class ParserVisitor(Visitor):
         self._the_command_args['table_ref'] = \
             collect_child_text("table_ref", tree, full_code=self._full_code)
 
+    def reload_table(self, tree):
+        self._the_command = 'reload_table'
+        self._the_command_args['table_ref'] = \
+            collect_child_text("table_ref", tree, full_code=self._full_code)
+
     def select_query(self, tree):
         self._the_command = 'select_query'
     
@@ -974,6 +990,12 @@ class CommandInterpreter:
     def refresh_table(self, table_ref):
         """ refresh table <table> - updates the rows in a table from the source adapter """
         self.loader.refresh_table(table_ref)
+
+    def reload_table(self, table_ref):
+        """ reload table <table> - reloads the entire table from the source adapter """
+        self._execute_duck(f"drop table {table_ref}")
+        schema, table_root = table_ref.split(".")
+        self.load_adapter_data(schema, table_root)
 
     def set_variable(self, var_ref: str, var_expression: str):
         """ $<var> = <expr> - sets a variable. Use all caps for var to set a global variable. """

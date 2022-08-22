@@ -82,6 +82,7 @@ def test_other_statements(visitor, parser):
         args={"schema_ref": "myscheme1"})
     verify_parse(v, p, "clear_table", query="clear table github.orgs", args={'table_schema_ref':"github.orgs"})
     verify_parse(v, p, "refresh_table", query="refresh table github.orgs", args={'table_ref':"github.orgs"})
+    verify_parse(v, p, "reload_table", query="reload table github.orgs", args={'table_ref':"github.orgs"})
 
 def test_chart_commands(visitor, parser):
     v = visitor

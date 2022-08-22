@@ -28,7 +28,7 @@ tables:
 # This API: https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/#api-rest-api-3-search-get    
     supports_paging: True
     params:
-      jql: created > 2022-07-28 order by created DESC
+      jql: created > 2021-07-28 order by created DESC
     refresh:
       strategy: updates
       params: 
