@@ -199,6 +199,26 @@ class DBAPIResultFacade:
                 return rows
         return rows
 
+from clickhouse_driver.columns.numpy.datetimecolumn import NumpyDateTimeColumnBase
+
+def patched_apply_timezones_before_write(self, items):
+    if isinstance(items, pd.DatetimeIndex):
+        ts = items
+    else:
+        timezone = self.timezone if self.timezone else self.local_timezone
+        try:
+            ts = pd.to_datetime(items).tz_localize(timezone)
+        except TypeError:
+            ts = pd.to_datetime(items).tz_convert(timezone)
+
+    ts = ts.tz_convert('UTC')
+    return ts.tz_localize(None).to_numpy(self.datetime_dtype)
+
+def monkeypatch_clickhouse_driver():
+    NumpyDateTimeColumnBase.apply_timezones_before_write = patched_apply_timezones_before_write
+
+monkeypatch_clickhouse_driver()
+
 class ClickhouseWrapper(DBWrapper):
     SHARED_CLIENT = None
 
