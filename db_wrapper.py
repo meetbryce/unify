@@ -10,6 +10,8 @@ import duckdb
 from clickhouse_driver import Client
 import clickhouse_driver
 
+from schemata import Queries
+
 logger = logging.getLogger(__name__)
 class MyFilter:
     def filter(self, record):
@@ -20,7 +22,11 @@ logger.addFilter(MyFilter())
 
 class TableMissingException(RuntimeError):
     def __init__(self, table: str):
+        super().__init__("Table {} does not exist".format(table))
         self.table = table
+
+class QuerySyntaxException(RuntimeError):
+    pass
 
 class DBWrapper:
     def execute(self, query: str, args: list = []) -> pd.DataFrame:
@@ -297,11 +303,18 @@ class ClickhouseWrapper(DBWrapper):
         try:
             return self.client.query_dataframe(query)
         except clickhouse_driver.errors.ServerException as e:
-            m = re.search(r"Table (\S+) doesn't exist.", str(e))
+            if e.code == 60:
+                m = re.search(r"Table (\S+) doesn't exist.", str(e))
+                if m:
+                    raise TableMissingException(m.group(1))
+            elif e.code == 62:
+                m = re.search(r"Syntax error[^.]+.", e.message)
+                if m:
+                    raise QuerySyntaxException(m.group(0))
+            m = re.search(r"(^.*)Stack trace:", e.message)
             if m:
-                raise TableMissingException(m.group(1))
-            else:
-                raise
+                e.message = m.group(1)
+            raise e
 
     def get_table_columns(self, table):
         # Returns the column names for the table in their insert order
@@ -404,6 +417,24 @@ class ClickhouseWrapper(DBWrapper):
         )
 
     def append_dataframe_to_table(self, value: pd.DataFrame, schema: str, table_root: str):
+        # There is a problem where a REST API returns a boolean column, but the first page 
+        # of results is all nulls. In that case the type inference will have failed and we
+        # will have defaulted to type the column as a string. We need to detect this case
+        # and either coerce the bool column or fix the column type. For now we are doing
+        # the former.
+
+        # Use pyarrow for convenience, but type info probably already exists on the dataframe
+        df_schema = pa.Schema.from_pandas(value)
+        for col in df_schema.names:
+            f = df_schema.field(col)
+            if pa.types.is_boolean(f.type):
+                # See if the table column is a string
+                r = self.execute(Queries.list_columns.format(schema, table_root, col)).result
+                if len(r) > 0 and r[0][1].lower() == "string":
+                    # Corece bool values to string
+                    value[col] = value[col].astype(str)
+                    logger.critical("Coercing bool column {} to string".format(col))
+
         self.client.insert_dataframe(
             f"INSERT INTO {schema}.{table_root} VALUES", 
             value, 

@@ -11,6 +11,8 @@ from lark.visitors import Visitor
 from parsing_utils import find_node_return_children
 import ipynbname
 
+from db_wrapper import TableMissingException, QuerySyntaxException
+
 class AutocompleteParser(Visitor):
     def __init__(self, parser):
         super().__init__()
@@ -114,15 +116,24 @@ class UnifyKernel(Kernel):
                     'user_expressions': {},
                 }
         except Exception as e:
-            self.log.exception("Error runnning kernel command")
-            stream_content = {'name': 'stderr', 'text': (str(e) + "\n" + traceback.format_exc())}
-            self.send_response(self.iopub_socket, 'stream', stream_content)
-            return {'status': 'error',
-                    'execution_count': self.execution_count,
-                    'ename': type(e).__name__,
-                    'evalue': str(e),
-                    'traceback': traceback.format_exc().split("\n")
+            if isinstance(e, (TableMissingException, QuerySyntaxException)):
+                self._send_string(str(e))
+                return {'status': 'ok',
+                        # The base class increments the execution count
+                        'execution_count': self.execution_count,
+                        'payload': [],
+                        'user_expressions': {},
                     }
+            else:
+                self.log.exception("Error runnning kernel command")
+                stream_content = {'name': 'stderr', 'text': (str(e) + "\n" + traceback.format_exc())}
+                self.send_response(self.iopub_socket, 'stream', stream_content)
+                return {'status': 'error',
+                        'execution_count': self.execution_count,
+                        'ename': type(e).__name__,
+                        'evalue': str(e),
+                        'traceback': traceback.format_exc().split("\n")
+                        }
 
     def do_complete(self, code, cursor_pos):
         matches = []
