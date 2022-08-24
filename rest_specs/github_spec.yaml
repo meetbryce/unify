@@ -25,22 +25,6 @@ auth:
   tokenvar: GHTOKEN
 polling_interval_secs: 1800
 tables:
-  - name: help_
-    resource_path: <inline>
-    columns:
-      - name: msg
-    values:
-      - msg: |
-          The Github connector makes it easy to query data from Github
-          about your users, orgs, and repos.
-          Use: `myself` table to query current identity
-          Use: `users` table to query Github users
-          Use: `orgs` table to query Orgs accessible by the current identity
-          Use: `repos` table to query the repos in an org. You must supply the
-          Org slug in the where clause, like:
-            select * repos where org = 'github'
-          Use: 'pulls' table to query information about pull requests. You 
-          must supply an org and repo name in the query WHERE clause.
   - name: orgs
     resource_path: /user/orgs
     columns:

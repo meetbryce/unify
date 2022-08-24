@@ -765,9 +765,12 @@ class CommandInterpreter:
             return all
         
     def _list_tables_filtered(self, schema, table=None):
-        conn = self.loader.lookup_connection(schema)
-        table = table or ''
-        return sorted(list(t.name[len(table):] for t in conn.list_tables() if t.name.startswith(table)))
+        try:
+            conn = self.loader.lookup_connection(schema)
+            table = table or ''
+            return sorted(list(t.name[len(table):] for t in conn.list_tables() if t.name.startswith(table)))
+        except StopIteration:
+            return []
 
     def pre_handle_command(self, code):
         m = re.match(r"\s*([\w_0-9]+)\s+(.*$)", code)
@@ -1220,6 +1223,15 @@ if __name__ == '__main__':
         silent = True
     else:
         silent = False
+
     interpreter = CommandInterpreter(debug=True, silence_errors=silent)
+
+    for i in range(len(sys.argv)):
+        if sys.argv[i] == '-e':
+            command = sys.argv[i+1]
+            with pd.option_context('display.max_rows', None):
+                print(interpreter.run_command(command))
+            sys.exit(0)
+
     UnifyRepl(interpreter).loop()
 
