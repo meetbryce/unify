@@ -4,6 +4,7 @@ import sys
 from datetime import datetime
 
 from unify import CommandInterpreter
+from db_wrapper import TableMissingException
 
 if __name__ == '__main__':
     interpreter = CommandInterpreter(debug=True, silence_errors=True)
@@ -18,8 +19,12 @@ if __name__ == '__main__':
             for table_root in tables:
                 log("Reloading ", schema, ".", table_root)
                 table = schema + "." + table_root
+                try:
+                    interpreter.run_command(f"count {table}")
+                except TableMissingException:
+                    log("Table not loaded, skipping")
+                    continue
                 for sub_cmd in [
-                    f"python unify.py -e 'count {table}'",
                     f"python unify.py -e 'refresh table {table}'"
                 ]:
                     log(sub_cmd)

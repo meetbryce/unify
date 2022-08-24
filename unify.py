@@ -1230,7 +1230,10 @@ if __name__ == '__main__':
         if sys.argv[i] == '-e':
             command = sys.argv[i+1]
             with pd.option_context('display.max_rows', None):
-                print(interpreter.run_command(command))
+                lines, df = interpreter.run_command(command)
+                print("\n".join(lines))
+                if df is not None:
+                    print(df)
             sys.exit(0)
 
     UnifyRepl(interpreter).loop()
