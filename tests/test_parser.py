@@ -165,3 +165,29 @@ def test_email(visitor, parser):
 
     verify_parse(v, p, "email_command", "email github.users to 'joe@example.com'",
         args={"email_object": "github.users", "recipients": "joe@example.com"})
+
+def test_run_at_command(visitor, parser):
+    v = visitor
+    p = parser
+
+    verify_parse(v, p, "run_notebook_command", "run at 12:00",
+        args={"run_at_time": "12:00"})
+    verify_parse(v, p, "run_notebook_command", "run 'do the calcs' at 12:00",
+        args={"run_at_time": "12:00", "notebook_path": "do the calcs"})
+    verify_parse(v, p, "run_notebook_command", "run at 2022-10-23 14:23",
+        args={"run_at_time": "2022-10-23 14:23"})
+
+def test_run_every_command(visitor, parser):
+    v = visitor
+    p = parser
+
+    verify_parse(v, p, "run_notebook_command", "run every week starting at 12:00",
+        args={"run_at_time": "12:00", "repeater": "week"})
+    verify_parse(v, p, "run_notebook_command", "run every day starting at 2021-01-05 12:00",
+        args={"run_at_time": "2021-01-05 12:00", "repeater": "day"})
+
+    verify_parse(v, p, "run_schedule", "run schedule")
+
+    verify_parse(v, p, "delete_schedule", "run delete a12838",
+        args={"schedule_id": "a12838"})
+

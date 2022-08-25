@@ -72,7 +72,7 @@ class UnifyKernel(Kernel):
         self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def _find_notebook(self):
-        return ipynbname.path()
+        return str(ipynbname.path())
 
     def do_execute(self, code, silent, store_history=True, user_expressions=None,
                    allow_stdin=False):

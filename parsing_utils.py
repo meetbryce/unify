@@ -28,7 +28,9 @@ def find_node_return_children(rule, tree):
             found = node
     else:
         found = find_subtree(rule, tree)
-    if found:
+    if isinstance(found, list):
+        return found
+    elif found:
         return [(child if isinstance(child, Tree) else child.value) for child in found.children]
     else:
         return None
@@ -46,6 +48,8 @@ def collect_strings(node):
         for c in node.children:
             res.extend(collect_strings(c))
         return res
+    elif isinstance(node, list):
+        return node
     else:
         return [node.value]
 

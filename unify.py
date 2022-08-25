@@ -1,4 +1,5 @@
 from email.parser import Parser
+import inspect
 from inspect import isfunction
 import time
 from datetime import datetime, timedelta
@@ -14,6 +15,7 @@ import re
 import sys
 import traceback
 import typing
+import uuid
 import lark
 from lark import Lark, Visitor
 from lark.visitors import v_args
@@ -596,7 +598,11 @@ class ParserVisitor(Visitor):
         self._the_command = None
         self._the_command_args = {}
         self._full_code = full_code
-        self.visit(parse_tree)
+        try:
+            self.visit(parse_tree)
+        except Exception as e:
+            print(parse_tree.pretty)
+            raise
         return self._the_command
 
     def count_table(self, tree):
@@ -694,6 +700,23 @@ class ParserVisitor(Visitor):
         self._the_command_args['table_ref'] = \
             collect_child_text("table_ref", tree, full_code=self._full_code)
 
+    def run_notebook_command(self, tree):
+        self._the_command = 'run_notebook_command'
+        nb = find_node_return_child("notebook_ref", tree)
+        if nb:
+            self._the_command_args["notebook_path"] = nb.strip("'")
+        dt = collect_child_strings('datetime', tree)
+        self._the_command_args["run_at_time"] = dt
+        if find_subtree('run_every_command', tree):
+            self._the_command_args["repeater"] = collect_child_strings("repeater", tree)
+
+    def run_schedule(self, tree):
+        self._the_command = 'run_schedule'
+
+    def delete_schedule(self, tree):
+        self._the_command = 'delete_schedule'
+        self._the_command_args['schedule_id'] = find_node_return_child("schedule_ref", tree)
+
     def select_query(self, tree):
         self._the_command = 'select_query'
     
@@ -771,6 +794,17 @@ class CommandInterpreter:
             return sorted(list(t.name[len(table):] for t in conn.list_tables() if t.name.startswith(table)))
         except StopIteration:
             return []
+
+    def _list_schedules(self):
+        with dbmgr() as duck:
+            store: DuckdbStorageManager = DuckdbStorageManager("_system_", duck)
+            return [(id=id, schedule=blob) for id, blob in store.list_objects("schedules")]
+            
+    def _truncate_schedules(self):
+        with dbmgr() as duck:
+            store: DuckdbStorageManager = DuckdbStorageManager("_system_", duck)
+            for id, blob in store.list_objects("schedules"):
+                store.delete_object("schedules", id)
 
     def pre_handle_command(self, code):
         m = re.match(r"\s*([\w_0-9]+)\s+(.*$)", code)
@@ -855,10 +889,14 @@ class CommandInterpreter:
                 try:
                     parse_tree = self.parser.parse(self._cmd)
                     command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
+                    if command:
+                        method = getattr(self, command)
+                        if 'notebook_path' in inspect.signature(method).parameters:
+                            nb_path = get_notebook_func() if get_notebook_func else None
+                            if 'notebook_path' not in self.parser_visitor._the_command_args:
+                                self.parser_visitor._the_command_args['notebook_path'] = nb_path
+
                     if self._command_needs_db_closed(command, self.parser_visitor):
-                        # FIXME: Check command args to let any function use the notebook path
-                        nb_path = get_notebook_func() if get_notebook_func else None
-                        self.parser_visitor._the_command_args['notebook_path'] = nb_path
                         run_command_after_closing_db = command
                         command = None
 
@@ -876,6 +914,7 @@ class CommandInterpreter:
             self.duck = None
             if run_command_after_closing_db:
                 result = getattr(self, run_command_after_closing_db)(**self.parser_visitor._the_command_args)
+                # FIXME: use a namedtuple
                 return (self.logger.get_output(), result)
 
     def _execute_duck(self, query, header=True):
@@ -999,6 +1038,33 @@ class CommandInterpreter:
         self._execute_duck(f"drop table {table_ref}")
         schema, table_root = table_ref.split(".")
         self.load_adapter_data(schema, table_root)
+
+    def run_notebook_command(self, run_at_time: str, notebook_path: str=None, repeater: str=None):
+        contents = None
+        if notebook_path and os.path.exists(notebook_path):
+            # Jankily jam the whole notebook into the db so we can run it on the server
+            contents = open(notebook_path, "r").read()
+        schedule = {"notebook": notebook_path, "run_at": run_at_time, 
+                    "repeater": repeater, "contents": contents}
+        
+        store: DuckdbStorageManager = DuckdbStorageManager("_system_", self.duck)
+        # Generate a unique id
+        id = str(uuid.uuid4())[:8]
+        store.put_object("schedules", id, schedule)
+        notebook = os.path.basename(notebook_path) if notebook_path else ""
+        self.print(f"Scheduled to run notebook {notebook}")
+
+    def run_schedule(self):
+        store: DuckdbStorageManager = DuckdbStorageManager("_system_", self.duck)
+        items = store.list_objects("schedules")
+        return pd.DataFrame(items, columns=["schedule_id", "schedule"])
+
+    def delete_schedule(self, schedule_id):
+        store: DuckdbStorageManager = DuckdbStorageManager("_system_", self.duck)
+        schedule = store.get_object("schedules", schedule_id)
+        if schedule:
+            store.delete_object("schedules", schedule_id)
+            self.print(f"Deleted schedule {schedule_id} for notebook: ", schedule['notebook'])
 
     def set_variable(self, var_ref: str, var_expression: str):
         """ $<var> = <expr> - sets a variable. Use all caps for var to set a global variable. """

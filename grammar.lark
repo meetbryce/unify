@@ -22,6 +22,9 @@ command: show_tables
          | set_variable
          | show_variable
          | email_command
+         | run_notebook_command
+         | run_schedule
+         | delete_schedule
          | help
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
@@ -77,6 +80,29 @@ reload_table: "reload table" WS table_ref
 email_command: "email" WS email_object (WS chart_ref)? WS "to" recipients WS? ("subject" WS subject)?
 
 email_object: "notebook"|"chart"|table_ref
+
+run_notebook_command: run_at_command 
+             | run_every_command 
+
+run_at_command: "run" WS (notebook_ref WS)? "at" WS datetime
+run_every_command: "run" WS (notebook_ref WS)? "every" WS repeater WS "starting"? WS "at" WS datetime
+
+run_schedule: "run" WS "schedule"
+
+delete_schedule: "run" WS "delete" schedule_ref
+
+schedule_ref: MIXED_ALPHA
+
+notebook_ref: SINGLE_QUOTED_STRING
+repeater: DAY | WEEK | WEEKDAY | MONTH
+DAY: "day"
+WEEK: "week"
+WEEKDAY: "weekday"
+MONTH: "month"
+
+datetime: (DATE " ")? TIME
+DATE: DIGIT~4 "-" DIGIT~2 "-" DIGIT~2
+TIME: DIGIT~2 ":" DIGIT~2
 
 chart_ref: SINGLE_QUOTED_STRING
 
@@ -155,6 +181,7 @@ OPERATOR        : "=" | "!=" | "<" | ">" | "<>" | "is" | "not is"
 LITERAL         : SINGLE_QUOTED_STRING | NUMBER 
 ALPHA           : UCASE_LETTER | LCASE_LETTER | "_"
 ALPHANUM        : ALPHA [ ALPHA | DIGIT ]*
+MIXED_ALPHA     : (ALPHA | DIGIT)+
 SINGLE_QUOTED_STRING  : /'[^']*'/
 PAREN_EXPR      : "(" /[^)]+/ ")"
 

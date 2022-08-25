@@ -106,6 +106,8 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 1. Unobtrusive table loading status supporting interrupts
 1. [done] Pluggable database, plus Clickhouse backend
 1. SQL expressions for rest specs
+1. Implement "peek <table>" command which automatically selects interesting columns
+1. Implement "run [<notebook>] at <schedule>" command
 1. Jupyter UI integration: 
     1. Schema browser tree panel
     1. [done] Custom charting command

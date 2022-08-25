@@ -78,3 +78,55 @@ You can request to render a particular chart or a whole notebook into an email:
 
 Running `email notebook to` will send the email immediately. If you specify `every ...` then a schedule
 will be created to execute the full notebook and send the email according to the schedule.
+
+## Scheduled tasks
+
+You can use the `run` command to execute a notebook in the future:
+
+    run at '2022-10-01 08:00'
+
+Schedules to execute this notebook once at the indicated day and time.
+
+You can also run the notebook periodically:
+
+    run every ['day','week','weekday', 'month'] starting at <date time>
+
+This syntax creates a schedule to run the notebook periodically, starting at the
+indicated day and time. For convience you can use a shorthand for the
+starting time: `now` or `tomorrow`.
+
+The date-time value can either by a date, a time, or both:
+
+    2022-08-10
+    16:30
+    2022-08-10 14:30
+
+If the time is omitted then "current time" is assumed.
+
+Examples:
+
+    > run every day starting now
+
+Will immediately execute the notebook and schedule it to run at the same time each day.
+
+    > run every week starting 2022-10-05
+
+Will run the notebooke every week starting on Oct 5, at the current wall clock time.
+
+    > run every month starting 2022-11-01
+
+Run the notebook on the first day of every month starting November 1.
+
+To see the list of notebook schedules, use:
+
+    > run schedule
+    id           time              repeat        notebook
+    ------------ ----------------  ------------  --------------
+    05832        2022-10-02 08:00  daily         'Latest PR list'
+
+and to delete a schedule:
+
+    > run delete 05832
+
+
+
