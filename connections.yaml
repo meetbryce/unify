@@ -19,9 +19,5 @@
     options:
       JIRAUSER: $JIRAUSER
       JIRATOKEN: $JIRATOKEN
-- gsheets:
-    adapter: gsheets
-    options:
-      client_json_path: /Users/scottp/src/unify/gsheets/gauth_client_id.json
       
 
