@@ -675,6 +675,9 @@ class ParserVisitor(Visitor):
         self._the_command = "email_command"
         self._the_command_args['email_object'] = collect_child_text("email_object", tree, self._full_code)
         self._the_command_args['recipients'] = find_node_return_child("recipients", tree).strip("'")
+        subject = find_node_return_child("subject", tree)
+        if subject:
+            self._the_command_args['subject'] = subject.strip("'")
 
     def export_table(self, tree):
         self._the_command = "export_table"
@@ -798,7 +801,7 @@ class CommandInterpreter:
     def _list_schedules(self):
         with dbmgr() as duck:
             store: DuckdbStorageManager = DuckdbStorageManager("_system_", duck)
-            return [(id=id, schedule=blob) for id, blob in store.list_objects("schedules")]
+            return [{"id":id, "schedule":blob} for id, blob in store.list_objects("schedules")]
             
     def _truncate_schedules(self):
         with dbmgr() as duck:
@@ -1057,7 +1060,8 @@ class CommandInterpreter:
     def run_schedule(self):
         store: DuckdbStorageManager = DuckdbStorageManager("_system_", self.duck)
         items = store.list_objects("schedules")
-        return pd.DataFrame(items, columns=["schedule_id", "schedule"])
+        items = map(lambda row: [row[0], row[1]['notebook'], row[1]['run_at'], row[1]['repeater']], items)
+        return pd.DataFrame(items, columns=["schedule_id", "notebook", "run_at", "repeat"])
 
     def delete_schedule(self, schedule_id):
         store: DuckdbStorageManager = DuckdbStorageManager("_system_", self.duck)

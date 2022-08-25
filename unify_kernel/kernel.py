@@ -4,6 +4,7 @@ import pandas as pd
 import urllib
 import base64
 import time
+import logging
 
 from ipykernel.kernelbase import Kernel
 from unify import CommandInterpreter
@@ -12,6 +13,8 @@ from parsing_utils import find_node_return_children
 import ipynbname
 
 from db_wrapper import TableMissingException, QuerySyntaxException
+
+logger = logging.getLogger(__name__)
 
 class AutocompleteParser(Visitor):
     def __init__(self, parser):
@@ -72,7 +75,11 @@ class UnifyKernel(Kernel):
         self.send_response(self.iopub_socket, 'stream', stream_content)
 
     def _find_notebook(self):
-        return str(ipynbname.path())
+        try:
+            return str(ipynbname.path())
+        except Exception as e:
+            logger.error("Error finding notebook name: %s", e)
+            return None
 
     def do_execute(self, code, silent, store_history=True, user_expressions=None,
                    allow_stdin=False):

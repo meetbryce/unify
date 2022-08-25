@@ -163,8 +163,8 @@ def test_email(visitor, parser):
     verify_parse(v, p, "email_command", "email chart 'bugs' to 'joe@example.com'",
         args={"email_object": "chart", "recipients": "joe@example.com"})
 
-    verify_parse(v, p, "email_command", "email github.users to 'joe@example.com'",
-        args={"email_object": "github.users", "recipients": "joe@example.com"})
+    verify_parse(v, p, "email_command", "email github.users to 'joe@example.com' subject 'All gh users'",
+        args={"email_object": "github.users", "recipients": "joe@example.com", "subject": "All gh users"})
 
 def test_run_at_command(visitor, parser):
     v = visitor
