@@ -91,7 +91,7 @@ run_schedule: "run" WS "schedule"
 
 delete_schedule: "run" WS "delete" schedule_ref
 
-schedule_ref: MIXED_ALPHA
+schedule_ref: SINGLE_QUOTED_STRING
 
 notebook_ref: SINGLE_QUOTED_STRING
 repeater: DAY | WEEK | WEEKDAY | MONTH

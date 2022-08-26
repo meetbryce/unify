@@ -188,6 +188,6 @@ def test_run_every_command(visitor, parser):
 
     verify_parse(v, p, "run_schedule", "run schedule")
 
-    verify_parse(v, p, "delete_schedule", "run delete a12838",
+    verify_parse(v, p, "delete_schedule", "run delete 'a12838'",
         args={"schedule_id": "a12838"})
 

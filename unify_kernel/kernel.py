@@ -85,6 +85,9 @@ class UnifyKernel(Kernel):
                    allow_stdin=False):
         self._allow_stdin = allow_stdin
         try:
+            self.log.debug("%s", "This is a debug reply msg")
+            #self._publish_debug_event({"type": 'event', "event": "message", "body": "This is a debug msg"})
+
             lines, object = self.unify_runner.run_command(
                 code, 
                 input_func=self.raw_input, 

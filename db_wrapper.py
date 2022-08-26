@@ -100,9 +100,12 @@ class DuckDBWrapper(DBWrapper):
         rows = self.execute_df("describe " + table)
         return rows["column_name"].values.tolist()
 
-    def delete_rows(self, table, filter_values: dict, where_clause: str=None):
-        query = f"delete from {table} where " + ",".join([f"{key} = ?" for key in filter_values.keys()])
-        query = self._substitute_args(query, filter_values.values())
+    def delete_rows(self, table, filter_values: dict=None, where_clause: str=None):
+        if filter_values:
+            query = f"delete from {table} where " + ",".join([f"{key} = ?" for key in filter_values.keys()])
+            query = self._substitute_args(query, filter_values.values())
+        else:
+            query = f"delete from {table} where {where_clause}"
         self.execute(query)
 
     def create_schema(self, schema):

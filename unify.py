@@ -718,7 +718,7 @@ class ParserVisitor(Visitor):
 
     def delete_schedule(self, tree):
         self._the_command = 'delete_schedule'
-        self._the_command_args['schedule_id'] = find_node_return_child("schedule_ref", tree)
+        self._the_command_args['schedule_id'] = find_node_return_child("schedule_ref", tree).strip("'")
 
     def select_query(self, tree):
         self._the_command = 'select_query'
@@ -772,8 +772,7 @@ class CommandInterpreter:
     """
     _last_result: pd.DataFrame = None
 
-    def __init__(self, debug=False, silence_errors=False):
-        self.debug = debug
+    def __init__(self, silence_errors=False):
         path = os.path.join(os.path.dirname(__file__), "grammar.lark")
         self.parser = Lark(open(path).read(), propagate_positions=True)
         self.parser_visitor = ParserVisitor()
@@ -909,6 +908,7 @@ class CommandInterpreter:
                     # Let any parsing exceptions send the command down to the db
                     result = self._execute_duck(self._cmd)
                 if isinstance(result, pd.DataFrame):
+                    # print the row count
                     self.print("{} row{}".format(result.shape[0], "s" if result.shape[0] != 1 else ""))
                 clean_df(result)
                 if run_command_after_closing_db is None:
@@ -1042,19 +1042,29 @@ class CommandInterpreter:
         schema, table_root = table_ref.split(".")
         self.load_adapter_data(schema, table_root)
 
-    def run_notebook_command(self, run_at_time: str, notebook_path: str=None, repeater: str=None):
+    def run_notebook_command(self, run_at_time: str, notebook_path: str, repeater: str=None):
+        if notebook_path is None:
+            self.print("Error, must supply a notebook name or full path")
         contents = None
-        if notebook_path and os.path.exists(notebook_path):
+        if not os.path.exists(notebook_path):
+            # Try to find the notebook in the Unify notebooks directory
+            notebook_path = os.path.join(os.path.dirname(__file__), "notebooks", notebook_path)
+
+        if os.path.exists(notebook_path):
             # Jankily jam the whole notebook into the db so we can run it on the server
             contents = open(notebook_path, "r").read()
+        else:
+            raise RuntimeError(f"Cannot find notebook '{notebook_path}'")
+
         schedule = {"notebook": notebook_path, "run_at": run_at_time, 
                     "repeater": repeater, "contents": contents}
         
         store: DuckdbStorageManager = DuckdbStorageManager("_system_", self.duck)
-        # Generate a unique id
-        id = str(uuid.uuid4())[:8]
+        # For now we are using the notebook name as the unique key. This means that a notebook
+        # can have only one schedule. In the future we may allow to create multiple schedules.
+        id = os.path.basename(notebook_path)
         store.put_object("schedules", id, schedule)
-        notebook = os.path.basename(notebook_path) if notebook_path else ""
+        notebook = os.path.basename(notebook_path)
         self.print(f"Scheduled to run notebook {notebook}")
 
     def run_schedule(self):
@@ -1294,7 +1304,7 @@ if __name__ == '__main__':
     else:
         silent = False
 
-    interpreter = CommandInterpreter(debug=True, silence_errors=silent)
+    interpreter = CommandInterpreter(silence_errors=silent)
 
     for i in range(len(sys.argv)):
         if sys.argv[i] == '-e':
