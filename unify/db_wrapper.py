@@ -10,7 +10,7 @@ import duckdb
 from clickhouse_driver import Client
 import clickhouse_driver
 
-from schemata import Queries
+from .schemata import Queries
 
 logger = logging.getLogger(__name__)
 class MyFilter:
@@ -68,6 +68,12 @@ class DBWrapper:
 
     def delete_rows(self, table, filter_values: dict, where_clause: str=None):
         pass
+
+    def get_table_root(self, table):
+        if "." in table:
+            return table.split(".")[-1]
+        else:
+            return table
 
 DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_HOME, exist_ok=True)
@@ -158,10 +164,13 @@ class DuckDBWrapper(DBWrapper):
                 raise
 
     def replace_table(self, source_table: str, dest_table: str):
+        # Duck doesn't like the target name to be qualified
+        dest_table_root = self.get_table_root(dest_table)
+
         self.execute(f"""
         BEGIN;
         DROP TABLE IF EXISTS {dest_table};
-        ALTER TABLE {source_table} RENAME TO {dest_table};
+        ALTER TABLE {source_table} RENAME TO {dest_table_root};
         COMMIT;
         """)
 

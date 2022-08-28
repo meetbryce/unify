@@ -2,7 +2,7 @@ import io
 import os
 import yaml
 
-from rest_schema import Adapter, RESTAdapter, RESTTable, Connection
+from unify.rest_schema import Adapter, RESTAdapter, RESTTable, Connection
 from unify import OutputLogger
 
 def test_apispec_class():

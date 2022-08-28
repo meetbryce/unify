@@ -1,6 +1,7 @@
 import os
 import lark
 import pytest
+import unify
 from unify import ParserVisitor
 
 @pytest.fixture
@@ -10,7 +11,7 @@ def visitor():
 @pytest.fixture
 def parser():
     return lark.Lark(
-        open(os.path.join(os.path.dirname(__file__), "../grammar.lark")).read(),
+        open(os.path.join(os.path.dirname(unify.__file__), "grammar.lark")).read(),
         propagate_positions=True
     )
 

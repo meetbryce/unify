@@ -9,9 +9,10 @@ import typing
 from datetime import datetime
 
 import requests
-from storage_manager import StorageManager
 import pandas as pd
 from jsonpath_ng import parse
+
+from .storage_manager import StorageManager
 
 Adapter = typing.NewType("Adapter", None)
 TableUpdater = typing.NewType("TableUpdater", None)
@@ -26,13 +27,13 @@ class Connection:
     @classmethod
     def setup_connections(cls, path=None, conn_list=None, storage_mgr_maker=None):
         adapter_table = {}
-        for f in glob.glob(os.path.join(os.path.dirname(__file__), "rest_specs/*spec.yaml")):
+        for f in glob.glob(os.path.join(os.path.dirname(__file__), "../rest_specs/*spec.yaml")):
             spec = yaml.load(open(f), Loader=yaml.FullLoader)
             if spec.get('enabled') == False:
                 continue
             klass = RESTAdapter
             if 'class' in spec and spec['class'].lower() == 'gsheetsadapter':
-                from gsheets.gsheets_adapter import GSheetsAdapter
+                from .gsheets.gsheets_adapter import GSheetsAdapter
                 klass = GSheetsAdapter
             adapter_table[spec['name']] = (klass, spec)
         

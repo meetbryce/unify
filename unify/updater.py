@@ -3,11 +3,11 @@ import subprocess
 import sys
 from datetime import datetime
 
-from unify import CommandInterpreter
-from db_wrapper import TableMissingException
+from .unify import CommandInterpreter
+from .db_wrapper import TableMissingException
 
 if __name__ == '__main__':
-    interpreter = CommandInterpreter(debug=True, silence_errors=True)
+    interpreter = CommandInterpreter(silence_errors=True)
 
     with open("/tmp/unify-updater.log", "a") as log_file:
         def log(msg, *args):

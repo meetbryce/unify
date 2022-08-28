@@ -9,10 +9,10 @@ import logging
 from ipykernel.kernelbase import Kernel
 from unify import CommandInterpreter
 from lark.visitors import Visitor
-from parsing_utils import find_node_return_children
+from unify.parsing_utils import find_node_return_children
 import ipynbname
 
-from db_wrapper import TableMissingException, QuerySyntaxException
+from unify.db_wrapper import TableMissingException, QuerySyntaxException
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,8 @@ class UnifyKernel(Kernel):
                 input_func=self.raw_input, 
                 get_notebook_func=self._find_notebook
             )
+
+            
             if not silent:
                 if lines:
                     self.send_response(self.iopub_socket, 'stream', {'name': 'stdout', 'text': "\n".join(lines)})

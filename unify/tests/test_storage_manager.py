@@ -1,10 +1,9 @@
+import os
 import pytest
 import time
 
-from unify import DuckdbStorageManager
-from db_wrapper import ClickhouseWrapper, DuckDBWrapper
-
-dbmgr = ClickhouseWrapper
+from unify import UnifyDBStorageManager, dbmgr
+from unify.db_wrapper import ClickhouseWrapper, DuckDBWrapper
 
 @pytest.fixture
 def duck():
@@ -13,7 +12,7 @@ def duck():
 
 @pytest.fixture
 def store(duck):
-    yield DuckdbStorageManager("github", duck)
+    yield UnifyDBStorageManager("github", duck)
 
 def test_storage_manager(store):   
     d1 = {"joe":"machine", "nancy":"pelosi"}
@@ -41,7 +40,7 @@ def test_storage_manager(store):
 
 
     # Ensure stores for different adapters don't clash
-    store2 = DuckdbStorageManager("jira", store.duck)
+    store2 = UnifyDBStorageManager("jira", store.duck)
     store.put_object("col1", "key1", d1)
     store2.put_object("col1", "key1", d2)
 

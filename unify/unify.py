@@ -38,9 +38,9 @@ logger = logging.getLogger(__name__)
 # DuckDB
 import duckdb
 from setuptools import Command
-from email_helper import EmailHelper
+from .email_helper import EmailHelper
 
-from rest_schema import (
+from .rest_schema import (
     Adapter, 
     Connection, 
     OutputLogger, 
@@ -48,11 +48,11 @@ from rest_schema import (
     TableUpdater,
     UnifyLogger
 )
-from db_wrapper import DuckDBWrapper, ClickhouseWrapper, DBWrapper, TableMissingException
+from .db_wrapper import DuckDBWrapper, ClickhouseWrapper, DBWrapper, TableMissingException
 
-from storage_manager import StorageManager
-from schemata import LoadTableRequest, Queries
-from parsing_utils import (
+from .storage_manager import StorageManager
+from .schemata import LoadTableRequest, Queries
+from .parsing_utils import (
     find_subtree, 
     find_node_return_child, 
     find_node_return_children,
@@ -86,7 +86,7 @@ class BaseTableScan(Thread):
         self.tableMgr: TableMgr = tableMgr
         self.tableLoader = tableLoader
         self.select = select
-        self.storage_mgr: DuckdbStorageManager = None
+        self.storage_mgr: UnifyDBStorageManager = None
 
     def cleanup_df_page(self, df, cols_to_drop=[]):
         # Pandas json_normalize does not have a clever way to normalize embedded lists
@@ -139,11 +139,11 @@ class BaseTableScan(Thread):
 
 
     def _set_duck(self, duck):
-        self.storage_mgr: DuckdbStorageManager = DuckdbStorageManager("_system_", duck)
+        self.storage_mgr: UnifyDBStorageManager = UnifyDBStorageManager("_system_", duck)
 
     def run(self):
         with dbmgr() as duck:
-            self.storage_mgr: DuckdbStorageManager = DuckdbStorageManager("_system_", duck)
+            self.storage_mgr: UnifyDBStorageManager = UnifyDBStorageManager("_system_", duck)
             self.perform_scan(duck)
 
     def save_scan_record(self, values: dict):
@@ -316,7 +316,7 @@ class TableUpdateScan(BaseTableScan):
         cols = duck.get_table_columns(self._target_table)
         # filter and order to the right columns
         next_df = next_df[cols]
-        print(f"Saving update page {page} with {next_df.shape[1]} columns")
+        print(f"Saving update page {page} with {next_df.shape[0]} rows and {next_df.shape[1]} columns")
 
         # First delete any existing records
         keys = next_df[tableMgr.table_spec.key]  #.values.tolist()
@@ -412,7 +412,7 @@ class TableLoader:
                     self.connections: list[Connection] = Connection.setup_connections(
                         os.path.join(os.path.dirname(__file__), "connections.yaml"), 
                         # FIXME: provide Duckdb here
-                        storage_mgr_maker=lambda schema: DuckdbStorageManager(schema, duck)
+                        storage_mgr_maker=lambda schema: UnifyDBStorageManager(schema, duck)
                     )
             except:
                 if not silence_errors:
@@ -479,7 +479,7 @@ class TableLoader:
             else:
                 raise
 
-class DuckdbStorageManager(StorageManager):
+class UnifyDBStorageManager(StorageManager):
     """
         Stores adapter metadata in DuckDB. Creates a "meta" schema, and creates
         tables named <adapter schema>_<collection name>.
@@ -799,12 +799,12 @@ class CommandInterpreter:
 
     def _list_schedules(self):
         with dbmgr() as duck:
-            store: DuckdbStorageManager = DuckdbStorageManager("_system_", duck)
+            store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", duck)
             return [{"id":id, "schedule":blob} for id, blob in store.list_objects("schedules")]
             
     def _truncate_schedules(self):
         with dbmgr() as duck:
-            store: DuckdbStorageManager = DuckdbStorageManager("_system_", duck)
+            store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", duck)
             for id, blob in store.list_objects("schedules"):
                 store.delete_object("schedules", id)
 
@@ -1048,7 +1048,7 @@ class CommandInterpreter:
         contents = None
         if not os.path.exists(notebook_path):
             # Try to find the notebook in the Unify notebooks directory
-            notebook_path = os.path.join(os.path.dirname(__file__), "notebooks", notebook_path)
+            notebook_path = os.path.join(os.path.dirname(__file__), "..", "notebooks", notebook_path)
 
         if os.path.exists(notebook_path):
             # Jankily jam the whole notebook into the db so we can run it on the server
@@ -1059,7 +1059,7 @@ class CommandInterpreter:
         schedule = {"notebook": notebook_path, "run_at": run_at_time, 
                     "repeater": repeater, "contents": contents}
         
-        store: DuckdbStorageManager = DuckdbStorageManager("_system_", self.duck)
+        store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
         # For now we are using the notebook name as the unique key. This means that a notebook
         # can have only one schedule. In the future we may allow to create multiple schedules.
         id = os.path.basename(notebook_path)
@@ -1068,13 +1068,13 @@ class CommandInterpreter:
         self.print(f"Scheduled to run notebook {notebook}")
 
     def run_schedule(self):
-        store: DuckdbStorageManager = DuckdbStorageManager("_system_", self.duck)
+        store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
         items = store.list_objects("schedules")
         items = map(lambda row: [row[0], row[1]['notebook'], row[1]['run_at'], row[1]['repeater']], items)
         return pd.DataFrame(items, columns=["schedule_id", "notebook", "run_at", "repeat"])
 
     def delete_schedule(self, schedule_id):
-        store: DuckdbStorageManager = DuckdbStorageManager("_system_", self.duck)
+        store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
         schedule = store.get_object("schedules", schedule_id)
         if schedule:
             store.delete_object("schedules", schedule_id)
@@ -1095,7 +1095,7 @@ class CommandInterpreter:
 
     def _get_variable(self, name: str):
         if name.upper() == name:
-            store: DuckdbStorageManager =DuckdbStorageManager(None, self.duck)
+            store: UnifyDBStorageManager =UnifyDBStorageManager(None, self.duck)
             return store.get_var(name)
         else:
             return self.session_vars[name]
@@ -1103,7 +1103,7 @@ class CommandInterpreter:
     def _save_variable(self, name: str, value, is_global: bool):
         if is_global:
             # Save a scalar to our system table in meta
-            store: DuckdbStorageManager =DuckdbStorageManager(None, self.duck)
+            store: UnifyDBStorageManager =UnifyDBStorageManager(None, self.duck)
             store.put_var(name, value)
         else:
             self.session_vars[name] = value
@@ -1200,7 +1200,7 @@ class CommandInterpreter:
         if var_ref in self.session_vars:
             self.print(self.session_vars[var_ref])
         elif var_ref.upper() == var_ref:
-            store: DuckdbStorageManager =DuckdbStorageManager(None, self.duck)
+            store: UnifyDBStorageManager =UnifyDBStorageManager(None, self.duck)
             value = store.get_var(var_ref)
             if isinstance(value, pd.DataFrame):
                 return value
@@ -1212,7 +1212,7 @@ class CommandInterpreter:
     def show_variables(self):
         """ show variables - list all defined variables"""
         rows = [(k, "[query result]" if isinstance(v, pd.DataFrame) else v) for k, v in self.session_vars.items()]
-        store: DuckdbStorageManager =DuckdbStorageManager(None, self.duck)
+        store: UnifyDBStorageManager =UnifyDBStorageManager(None, self.duck)
         vars = [k[0][0:-len(store.VAR_NAME_SENTINAL)].upper() for k in store.list_vars()]
         rows.extend([(k, "[query result]") for k in vars])
         return pd.DataFrame(rows, columns=["variable", "value"])

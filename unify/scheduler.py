@@ -5,7 +5,7 @@ import os
 import nbformat
 from nbconvert.preprocessors import ExecutePreprocessor
 
-from unify import CommandInterpreter
+from .unify import CommandInterpreter
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -32,7 +32,7 @@ def run_notebook(nb_contents: str, nb_path: str):
         logger.error(e)
 
 def run_schedules():
-    interpreter = CommandInterpreter(debug=True, silence_errors=True)
+    interpreter = CommandInterpreter(silence_errors=True)
     for row in interpreter._list_schedules():
         logger.info("Executing notebook schedule id: {}".format(row["id"]))
         if 'contents' not in row['schedule']:
