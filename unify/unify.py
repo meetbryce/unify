@@ -898,7 +898,12 @@ class CommandInterpreter:
     def _command_needs_db_closed(self, command, parser_visitor: ParserVisitor) -> bool:
         return command == 'email_command' and parser_visitor._the_command_args.get('email_object') == 'notebook'
 
-    def run_command(self, cmd, input_func=input, get_notebook_func=None) -> tuple[list, pd.DataFrame]:
+    def run_command(
+        self, 
+        cmd, 
+        input_func=input, 
+        get_notebook_func=None, 
+        interactive: bool=True) -> tuple[list, pd.DataFrame]:
         # Executes a command through our interpreter and returns the results
         # as a tuple of (output_lines, output_object) where output_line contains
         # a list of string to print and output_object is an object which should
@@ -920,6 +925,7 @@ class CommandInterpreter:
         # This is a hack for the email command, which will execute a notebook which needs exclusive
         # access to the database, so we defer to running the command until after we close the db.
         run_command_after_closing_db = None
+        self.interactive = interactive
         try:
             with dbmgr() as duck:
                 self.duck = duck
@@ -1151,8 +1157,11 @@ class CommandInterpreter:
         self.load_adapter_data(schema, table_root)
 
     def run_notebook_command(self, run_at_time: str, notebook_path: str, repeater: str=None):
+        if not self.interactive:
+            return
         if notebook_path is None:
             self.print("Error, must supply a notebook name or full path")
+            return
         contents = None
         if not os.path.exists(notebook_path):
             # Try to find the notebook in the Unify notebooks directory
@@ -1164,7 +1173,8 @@ class CommandInterpreter:
         else:
             raise RuntimeError(f"Cannot find notebook '{notebook_path}'")
 
-        schedule = {"notebook": notebook_path, "run_at": run_at_time, 
+        run_at_time = pd.to_datetime(run_at_time) # will assign the current date if no date
+        schedule = {"notebook": notebook_path, "run_at": str(run_at_time), 
                     "repeater": repeater, "contents": contents}
         
         store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
