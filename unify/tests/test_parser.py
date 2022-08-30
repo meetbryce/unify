@@ -192,3 +192,16 @@ def test_run_every_command(visitor, parser):
     verify_parse(v, p, "delete_schedule", "run delete 'a12838'",
         args={"schedule_id": "a12838"})
 
+def test_peek_command(visitor, parser):
+    v = visitor
+    p = parser
+
+    verify_parse(v, p, "peek_table", "peek github.pulls",
+        args={"table_ref": "github.pulls"})
+    verify_parse(v, p, "peek_table", "peek at jira.issues",
+        args={"table_ref": "jira.issues"})
+    verify_parse(v, p, "peek_table", "peek pulls",
+        args={"table_ref": "pulls"})
+
+    verify_parse(v, p, "peek_table", "peek github.my_pulls 10",
+        args={"table_ref": "github.my_pulls", "line_count":10})

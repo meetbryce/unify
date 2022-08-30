@@ -102,7 +102,7 @@ class UnifyKernel(Kernel):
                     content = {
                         'source': 'kernel',
                         'data': { 
-                            'text/html': object.to_html(index=False),
+                            'text/html': object.to_html(index=False, render_links=True, escape=False),
                             'text/plain': object.to_string(index=False)
                         },
                         'metadata' : {}

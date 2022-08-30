@@ -41,7 +41,7 @@ def test_apispec_class():
 
 
 def test_connector():
-    fpath = os.path.join(os.path.dirname(__file__), "../connections.yaml")
+    fpath = os.path.join(os.path.dirname(__file__), "connections.yaml")
     connections = Connection.setup_connections(fpath, storage_mgr_maker=lambda x: x)
     assert len(connections) > 0
 

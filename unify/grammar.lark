@@ -16,6 +16,7 @@ command: show_tables
          | clear_table
          | refresh_table
          | reload_table
+         | peek_table
          | create_chart
          | count_table
          | export_table
@@ -76,6 +77,10 @@ clear_table: "clear table" WS table_schema_ref
 refresh_table: "refresh table" WS table_ref
 
 reload_table: "reload table" WS table_ref
+
+peek_table: "peek" WS ("at" WS)? table_ref line_count?
+
+line_count: NUMBER
 
 email_command: "email" WS email_object (WS chart_ref)? WS "to" recipients WS? ("subject" WS subject)?
 

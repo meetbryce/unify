@@ -1,0 +1,11 @@
+---
+- github:
+    adapter: github
+    options:
+      GHUSER: $GHUSER
+      GHTOKEN: $GHTOKEN
+- mocksvc:
+    adapter: mocksvc
+    options:
+      MOCKSVC_USER: scott@example.com
+      MOCKSVC_PASS: abc123

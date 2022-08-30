@@ -1,0 +1,34 @@
+# Defines the set of Connections to cloud systems to expose as database
+# schemas in Unify. Each connection item should indicate the system
+# adapter, plus `options` which generally will specifify authentcation
+# values. The option keys are specific to each adapter.
+#
+# The connection name is used as the database schema name, and it is typical
+# to just use the system adapter name. But the connection names are distinct
+# to that you can have multiple connections to the same type of system that
+# are mapped as separate schemas (like `jira1` and `jira2`).
+#
+# You can embed authentication values here in this file, or for better 
+# security you can read them from the environment by referencing
+# environment variables using `$variable` syntax.
+---
+- hubspot:
+    adapter: hubspot
+    options:
+      HUBSPOT_PRIVATE_APP_TOKEN: $HUBSPOT_PRIVATE_APP_TOKEN
+- papertrail:
+    adapter: papertrail
+    options:
+      PAPERTRAIL_TOKEN: $PAPERTRAIL_TOKEN
+- github:
+    adapter: github
+    options:
+      GHUSER: $GHUSER
+      GHTOKEN: $GHTOKEN
+- jira:
+    adapter: jira
+    options:
+      JIRAUSER: $JIRAUSER
+      JIRATOKEN: $JIRATOKEN
+      
+

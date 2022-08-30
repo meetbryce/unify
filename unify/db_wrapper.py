@@ -13,6 +13,7 @@ import clickhouse_driver
 from .schemata import Queries
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 class MyFilter:
     def filter(self, record):
         record.msg = "[clickhouse] " + record.msg
@@ -75,6 +76,9 @@ class DBWrapper:
         else:
             return table
 
+    def get_short_date_cast(self, column):
+        return f"strftime(CAST(\"{column}\" AS TIMESTAMP), '%m/%d/%y %H:%M')"
+
 DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_HOME, exist_ok=True)
 
@@ -94,7 +98,11 @@ class DuckDBWrapper(DBWrapper):
         except RuntimeError as e:
             m = re.search(r"Table with name (\S+) does not exist", str(e))
             if m:
-                raise TableMissingException(m.group(1))
+                table_root = m.group(1)
+                m = re.search("(\w+)\."+table_root, str(e))
+                if m:
+                    schema = m.group(1)
+                raise TableMissingException(schema + "." + table_root)
             else:
                 raise
 
@@ -276,6 +284,7 @@ class ClickhouseWrapper(DBWrapper):
         if args:
             query = self._substitute_args(query, args)
 
+        logger.debug(query)
         try:
             return DBAPIResultFacade(self.client.execute(query))
         except clickhouse_driver.errors.ServerException as e:
@@ -283,6 +292,7 @@ class ClickhouseWrapper(DBWrapper):
             if m:
                 raise TableMissingException(m.group(1))
             else:
+                logger.critical(str(e) + "\n" + f"While executing: {query}")
                 raise
 
 
@@ -299,6 +309,7 @@ class ClickhouseWrapper(DBWrapper):
             query += " VALUES"
             args = [dict(zip(col_names, args))]
 
+            logger.debug(query)
             return self.client.execute(query, args)
         else:
             raise RuntimeError("Cannot parse insert query, did you specify the column list?: " + query)
@@ -333,9 +344,12 @@ class ClickhouseWrapper(DBWrapper):
         rows = self.execute_df("describe " + table)
         return rows["name"].values.tolist()
 
+    def get_short_date_cast(self, column):
+        return f"formatDateTime(CAST(\"{column}\" AS TIMESTAMP), '%m/%d/%y %H:%M')"
+
     def delete_rows(self, table, filter_values: dict=None, where_clause: str=None):
         if filter_values:
-            query = f"alter table {table} delete where " + ",".join([f"{key} = ?" for key in filter_values.keys()])
+            query = f"alter table {table} delete where " + " and ".join([f"{key} = ?" for key in filter_values.keys()])
             query = self._substitute_args(query, filter_values.values())
         elif where_clause:
             query = f"alter table {table} delete where {where_clause}"

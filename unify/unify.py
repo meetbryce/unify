@@ -7,6 +7,7 @@ import io
 import inspect
 import json
 import logging
+import math
 import os
 from threading import Thread
 import pickle
@@ -15,7 +16,8 @@ import re
 import sys
 import traceback
 import typing
-import uuid
+from functools import lru_cache
+
 import lark
 from lark import Lark, Visitor
 from lark.visitors import v_args
@@ -68,12 +70,67 @@ if 'DATABASE_BACKEND' not in os.environ or os.environ['DATABASE_BACKEND'] not in
 dbmgr: DBWrapper = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
        
 
+def find_connections_file():
+    trylist = [
+        os.path.expanduser("~/unify_connections.yaml"),
+        os.path.realpath("./unify_connections.yaml")
+    ]
+    if 'UNIFY_CONNECTIONS' in os.environ:
+        trylist.insert(0, os.environ['UNIFY_CONNECTIONS'])
+    for p in trylist:
+        if os.path.exists(p):
+            return p
+    raise RuntimeError("Could not find unify_connections.yaml in HOME or current directory.")
+
 class SimpleLogger(UnifyLogger):
     def __init__(self, adapter: Adapter):
         self.adapter = adapter
 
     def log_table(self, table: str, level: int, *args):
         print(f"[{str(self.adapter)}: {table}] ", *args, file=sys.stderr)
+
+class ColumnIntel:
+    def __init__(self, name:str, attrs: dict) -> None:
+        self.name: str = name
+        self.attrs: dict = attrs
+
+    @property
+    def column_weight(self):
+        # Heuristic to assign greater weight to likely more "interesting" columns
+        weight = 0
+        type = self.attrs["type_str"]
+
+        # Preference shorter columns
+        width = int(self.attrs["col_width"] / 5)
+        if width <= 6:
+            weight += 6 - width
+
+        if self.attrs["key"] and width < 20:
+            weight += 10
+        if "time" in type or "date" in type:
+            weight += 5
+        elif type == "string":
+            weight += 5
+        elif type == "boolean":
+            weight -= 20
+        elif type == "integer" and width < 3:
+            weight -= 10 # short ints aren't very useful. Often are flags
+        weight += 15 - self.attrs["name_width"]
+        # Push down very long columns
+        weight -= int(width/25)
+
+        # Push down columns with very low entropy
+        if self.attrs["entropy"] < 0.1:
+            weight -= 15
+
+        if self.attrs["url"]:
+            weight -= 5
+
+        return weight
+        
+    @property
+    def width(self):
+        return self.attrs["col_width"]
 
 class BaseTableScan(Thread):
     """
@@ -85,8 +142,53 @@ class BaseTableScan(Thread):
         Thread.__init__(self)
         self.tableMgr: TableMgr = tableMgr
         self.tableLoader = tableLoader
+        self.table_ref = tableMgr.adapter.name + "." + tableMgr.table_spec.name
         self.select = select
         self.storage_mgr: UnifyDBStorageManager = None
+        self.analyzed_columns = []
+
+    def analyze_columns(self, df: pd.DataFrame):
+        # Analyze a page of rows and extract useful column intelligence information for 
+        # potential use later, such as by the `peek` command.
+        for order, column in enumerate(df.columns):
+            lowercol = column.lower()
+            attrs = {
+                "name": column,
+                "type_str": pd.api.types.infer_dtype(df[column]),
+                "url": False,
+                "key": False,
+                "order": order
+            }
+            if re.search("key|id", lowercol) and len(lowercol) <= 6:
+                attrs["key"] = True
+            elif re.search("key[_ -]|[_ -]key|id[_ -]|[_ -]id", lowercol) and len(lowercol) < 12:
+                attrs["key"] = True
+            width = math.ceil(sum([len(str(v)) for v in df[column].values]) / df.shape[0])
+            attrs["col_width"] = width
+            rows = df[column].sample(max(25, df.shape[0])).values
+            for row in rows:
+                if isinstance(row, str) and re.match("^http[s]*:/", row, re.IGNORECASE):
+                    attrs["url"] = True
+            name_width = len(column) + column.count("_")
+            attrs["name_width"] = name_width
+            entropy = df[column].value_counts().size / (float)(df.shape[0])
+            attrs["entropy"] = entropy
+
+            self.analyzed_columns.append(ColumnIntel(column, attrs))
+
+    def save_analyzed_columns(self):
+        cols: list[ColumnIntel] = sorted(self.analyzed_columns, key=lambda ci: ci.attrs['order'])
+        for col in cols:
+            self.storage_mgr.insert_column_intel(
+                schema=self.tableMgr.adapter.name,
+                table_root=self.tableMgr.table_spec.name,
+                column=col.name,
+                attrs=col.attrs
+        )
+
+    def clear_analyzed_columns(self, table_ref):
+        schema, table = table_ref.split(".")
+        self.storage_mgr.delete_all_column_intel(schema=schema, subject_table=table)
 
     def cleanup_df_page(self, df, cols_to_drop=[]):
         # Pandas json_normalize does not have a clever way to normalize embedded lists
@@ -147,8 +249,7 @@ class BaseTableScan(Thread):
             self.perform_scan(duck)
 
     def save_scan_record(self, values: dict):
-        print("*SAVING SCAN RECORD: ", values)
-
+        logger.debug("*SAVING SCAN RECORD: {}".format(values))
         self.storage_mgr.log_object(
             "tablescans", 
             self.tableMgr.name,
@@ -172,7 +273,11 @@ class BaseTableScan(Thread):
     def get_query_mgr(self):
         return self.tableMgr.table_spec
 
+    def scan_start_handler(self):
+        pass
+
     def perform_scan(self, duck):
+        self.scan_start_handler()
         print("Running table scan for: ", self.tableMgr.name)
         scan_start = time.time()
         self.save_scan_record({"scan_start": scan_start})
@@ -224,6 +329,11 @@ class BaseTableScan(Thread):
     def _flush_rows_to_db_catch_error(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
         try:
             self._flush_rows_to_db(duck, tableMgr, next_df, page, flush_count)
+            if len(self.analyzed_columns) == 0:
+                self.analyze_columns(next_df)
+                if len(self.analyzed_columns) > 0:
+                    self.save_analyzed_columns()
+            
         except Exception as e:
             # "Core dump" the bad page
             core_file = f"/tmp/{self.tableMgr.name}_bad_page_{page}.csv"
@@ -233,6 +343,9 @@ class BaseTableScan(Thread):
             raise
 
 class InitialTableLoad(BaseTableScan):
+    def scan_start_handler(self):
+        self.clear_analyzed_columns(self.table_ref)
+
     def _flush_rows_to_db(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
         ## Default version works when loading a new table
         print(f"Saving page {page} with {next_df.shape[1]} columns")
@@ -410,7 +523,7 @@ class TableLoader:
                     self.connections = given_connections
                 else:
                     self.connections: list[Connection] = Connection.setup_connections(
-                        os.path.join(os.path.dirname(__file__), "connections.yaml"), 
+                        find_connections_file(),
                         # FIXME: provide Duckdb here
                         storage_mgr_maker=lambda schema: UnifyDBStorageManager(schema, duck)
                     )
@@ -433,22 +546,39 @@ class TableLoader:
                     tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                     self.tables[tmgr.name] = tmgr
 
+    def _get_table_mgr(self, table):
+        if table in self.tables:
+            return self.tables[table]
+        else:
+            schema, table_root = table.split(".")
+            table_spec = self.adapters[schema].lookupTable(table_root)
+            tmgr = TableMgr(schema, self.adapters[schema], table_spec)
+            self.tables[tmgr.name] = tmgr
+            return tmgr
+
     def materialize_table(self, schema, table):
         with dbmgr() as duck:
             qual = schema + "." + table
-            if qual in self.tables:
-                tmgr = self.tables[qual]
-            else:
-                table_spec = self.adapters[schema].lookupTable(table)
-                tmgr = TableMgr(schema, self.adapters[schema], table_spec)
-                self.tables[tmgr.name] = tmgr           
+            tmgr = self._get_table_mgr(qual)
             tmgr.load_table(tableLoader=self)
             return tmgr.has_data()
+
+    def analyze_columns(self, table_ref):
+        with dbmgr() as duck:
+            tmgr = self._get_table_mgr(table_ref)
+            scanner = InitialTableLoad(tableLoader=self, tableMgr=tmgr)
+            scanner._set_duck(duck)
+            # Load a df page from the table
+            for df in self.read_table_rows(table_ref, limit=25):
+                scanner.clear_analyzed_columns(table_ref)
+                scanner.analyze_columns(df)
+                scanner.save_analyzed_columns()
+                break
 
     def refresh_table(self, table_ref):
         self.tables[table_ref].refresh_table(tableLoader=self)
 
-    def read_table_rows(self, table):
+    def read_table_rows(self, table, limit=None):
         with dbmgr() as duck:
             if not self.table_exists_in_db(table):
                 tmgr = self.tables[table]
@@ -456,7 +586,11 @@ class TableLoader:
 
             if self.table_exists_in_db(table):
                 # FIXME: Use chunking and multiple pages
-                yield duck.execute_df(f"select * from {table}")
+                if limit is not None:
+                    limit = f" limit {limit}"
+                else:
+                    limit = ""
+                yield duck.execute_df(f"select * from {table} {limit}")
             else:
                 raise RuntimeError(f"Could not get rows for table {table}")
 
@@ -488,6 +622,8 @@ class UnifyDBStorageManager(StorageManager):
     TABLE_SCHEMA = {'*id': 'VARCHAR', 'blob': 'JSON'}
     LOG_TABLE_SCHEMA = {'id': 'VARCHAR', 'created': 'DATETIME', 'blob': 'JSON', '__order': ['id','created']}
     VAR_NAME_SENTINAL = '__var__'
+    COLUMN_INTEL_TABLE_SCHEMA = {'schema_':'VARCHAR','table_':'VARCHAR','column_':'VARCHAR', 'attrs':'JSON',
+                                '__order': ['schema_', 'table_', 'column_']}
 
     def __init__(self, adapter_schema: str, duck):
         self.adapter_schema = adapter_schema
@@ -566,6 +702,31 @@ class UnifyDBStorageManager(StorageManager):
         ).fetchall()
         return [json.loads(row[1]) for row in rows]
 
+    @lru_cache(maxsize=500)
+    def ensure_column_intel_table(self):
+        table = "meta.column_intels"
+        self.duck.create_table(table, self.COLUMN_INTEL_TABLE_SCHEMA)
+        return table
+
+    def insert_column_intel(self, schema: str, table_root: str, column: str, attrs: dict):
+        meta_table = self.ensure_column_intel_table()
+        self.duck.execute(f"insert into {meta_table} (schema_,table_,column_,attrs) values (?, ?, ?, ?)", 
+            [schema, table_root, column, json.dumps(attrs)])
+
+    def get_column_intels(self, schema: str, table_root: str):
+        meta_table = self.ensure_column_intel_table()
+        return [
+            (col, json.loads(val)) for col, val in \
+                self.duck.execute(
+                    f"select column_, attrs from {meta_table} where schema_ = ? and table_ = ?",
+                    [schema, table_root]
+                ).fetchall()
+        ]
+
+    def delete_all_column_intel(self, schema, subject_table):
+        meta_table = self.ensure_column_intel_table()
+        self.duck.delete_rows(meta_table, {'schema_':schema, 'table_':subject_table})
+
     def delete_object(self, collection: str, id: str) -> bool:
         table = "meta." + self.ensure_col_table(self.duck, collection)
         r = self.duck.delete_rows(table, {'id': id})
@@ -605,6 +766,13 @@ class ParserVisitor(Visitor):
             raise
         return self._the_command
 
+    def clear_table(self, tree):
+        self._the_command = 'clear_table'
+        self._the_command_args['table_schema_ref'] = find_node_return_children("table_schema_ref", tree)
+        if self._the_command_args['table_schema_ref']:
+            self._the_command_args['table_schema_ref'] = ".".join(self._the_command_args['table_schema_ref'])
+        return tree
+
     def count_table(self, tree):
         self._the_command = "count_table"
         self._the_command_args['table_ref'] = collect_child_text(
@@ -613,19 +781,6 @@ class ParserVisitor(Visitor):
             full_code=self._full_code
         )
         return tree
-
-    def clear_table(self, tree):
-        self._the_command = 'clear_table'
-        self._the_command_args['table_schema_ref'] = find_node_return_children("table_schema_ref", tree)
-        if self._the_command_args['table_schema_ref']:
-            self._the_command_args['table_schema_ref'] = ".".join(self._the_command_args['table_schema_ref'])
-        return tree
-
-    def create_statement(self, tree):
-        self._the_command = 'create_statement'
-
-    def create_view_statement(self, tree):
-        self._the_command = 'create_view_statement'
 
     def create_chart(self, tree):
         self._the_command = 'create_chart'
@@ -646,6 +801,16 @@ class ParserVisitor(Visitor):
                 params[key] = value
                 key = value = None
         self._the_command_args['chart_params'] = params
+
+    def create_statement(self, tree):
+        self._the_command = 'create_statement'
+
+    def create_view_statement(self, tree):
+        self._the_command = 'create_view_statement'
+
+    def delete_schedule(self, tree):
+        self._the_command = 'delete_schedule'
+        self._the_command_args['schedule_id'] = find_node_return_child("schedule_ref", tree).strip("'")
 
     def delete_statement(self, tree):
         self._the_command = 'delete_statement'
@@ -693,6 +858,14 @@ class ParserVisitor(Visitor):
     def insert_statement(self, tree):
         self._the_command = 'insert_statement'
 
+    def peek_table(self, tree):
+        self._the_command = 'peek_table'
+        self._the_command_args['table_ref'] = \
+            collect_child_text("table_ref", tree, full_code=self._full_code)
+        count = find_node_return_child("line_count", tree)
+        if count:
+            self._the_command_args['line_count'] = int(count)
+
     def refresh_table(self, tree):
         self._the_command = 'refresh_table'
         self._the_command_args['table_ref'] = \
@@ -715,10 +888,6 @@ class ParserVisitor(Visitor):
 
     def run_schedule(self, tree):
         self._the_command = 'run_schedule'
-
-    def delete_schedule(self, tree):
-        self._the_command = 'delete_schedule'
-        self._the_command_args['schedule_id'] = find_node_return_child("schedule_ref", tree).strip("'")
 
     def select_query(self, tree):
         self._the_command = 'select_query'
@@ -781,6 +950,7 @@ class CommandInterpreter:
         self.logger: OutputLogger = None
         self.session_vars: dict[str, object] = {}
         self.email_helper: EmailHelper = EmailHelper()
+        self.duck: DBWrapper = None
 
     def _list_schemas(self, match_prefix=None):
         with dbmgr() as duck:
@@ -807,6 +977,9 @@ class CommandInterpreter:
             store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", duck)
             for id, blob in store.list_objects("schedules"):
                 store.delete_object("schedules", id)
+
+    def _analyze_columns(self, table_ref: str):
+        self.loader.analyze_columns(table_ref)
 
     def pre_handle_command(self, code):
         m = re.match(r"\s*([\w_0-9]+)\s+(.*$)", code)
@@ -1031,6 +1204,67 @@ class CommandInterpreter:
             self.print(f"Exported query result to '{file_ref}'")
         else:
             self.print(f"Error, uknown adapter '{adapter_ref}'")
+
+    def peek_table(self, table_ref, line_count=20, build_stats=True, debug=False):
+        # Get column weights and widths.
+        schema, table_root = table_ref.split(".")
+        store: UnifyDBStorageManager = UnifyDBStorageManager("meta", self.duck)
+        cols = [ColumnIntel(name, attrs) for name, attrs in store.get_column_intels(schema, table_root)]
+        if len(cols) == 0:
+            if build_stats:
+                self._analyze_columns(table_ref)
+                return self.peek_table(table_ref, line_count=line_count, build_stats=False)
+            else:
+                self.print(f"Can't peek at {table_ref} because no column stats are available.")
+                return
+
+        cols = sorted(cols, key=lambda col: col.column_weight, reverse=True)
+        # Take columns until our max width
+
+        if debug:
+            for c in cols:
+                print(f"{c.name} - {c.column_weight} - {c.attrs}")
+
+        use_cols = []
+        total_width = 0
+        date_used = False 
+
+        def is_date(types):
+            return "date" in types or "time" in types
+
+        for col in cols:
+            typest = col.attrs["type_str"]
+            column_name = col.name
+            display_name = col.name
+            column_width = col.width
+            if is_date(typest):
+                if not date_used:
+                    date_used = True
+                    column_name = self.duck.get_short_date_cast(col.name)
+                    display_name = col.name
+                    column_width = 14
+                else:
+                    continue
+            if typest == "string" and column_width > 50:
+                column_name = f"substring({column_name}, 1, 50)"
+
+            if typest == 'boolean':
+                continue
+
+            if column_width < len(display_name) and len(display_name) > 15:
+                # column name will be longer than the values, so let's shorten it
+                display_name = display_name[0:7] + "..." + display_name[-7:]
+
+            if (total_width + max(column_width, len(display_name))) > 100:
+                continue # keep adding smaller cols
+
+            use_cols.append((column_name, display_name))
+            total_width += max(column_width, len(display_name))
+
+        col_list = ", ".join([f"{pair[0]} as \"{pair[1]}\"" for pair in use_cols])
+        sql = f"select {col_list} from {table_ref} limit {line_count}"
+        print(sql)
+        return self._execute_duck(sql)
 
     def refresh_table(self, table_ref):
         """ refresh table <table> - updates the rows in a table from the source adapter """

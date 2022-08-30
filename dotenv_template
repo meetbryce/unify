@@ -1,0 +1,17 @@
+# Database
+# set to 'duckdb' or 'clickhouse'. Clickhouse needs the connection parameters
+DATABASE_BACKEND=duckdb
+DATABASE_HOST=
+DATABASE_USER=
+DATABASE_PASSWORD=
+
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=465
+EMAIL_USERNAME=
+EMAIL_PASSWORD=
+EMAIL_SENDER=joe@example.com
+
+# Define auth values for any connections specified in connections.yaml
+GHTOKEN=
+GHUSER=
+

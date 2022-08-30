@@ -22,6 +22,20 @@ Querying the list of repositories you have access to on Github:
     63492894                        philo-fe   tatari-tv                 30
     67756418                     grey-matter   tatari-tv                 34
 
+## Getting started
+
+Copy [dotenv_template](dotenv_template) to `.env` and edit values to match your environment.
+
+The easiest way to start is by using DuckDB which provides an embedded database. Just
+set the `DATABASE_BACKEND=duckdb`.
+
+Now run the command interpreter:
+
+    python -m unify
+
+To add connections to external systems, edit the `unify_connections.yaml` file in your
+home or current directory. See [connections_example.yaml](connections_example.yaml) for the format.
+
 ## Configuration
 
 REST API configurations are defined in YAML and stored in the `rest_specs` folder.
@@ -100,6 +114,9 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 1. Implement scheduled automatic table refresh
 1. [done] Implement GSheets adapter
 1. Implement AWS Cost Reporting adapter
+   - Need to support AWS authentication
+   - Support POSTing for REST API calls
+   - Support pulling the right values out of the result
 1. [done] Implement Lark parser for more complex syntax support
 1. [done] Implement full `show` commands
 1. [done] Implement dollar variables
@@ -108,6 +125,8 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 1. SQL expressions for rest specs
 1. Implement "peek <table>" command which automatically selects interesting columns
 1. Implement "run [<notebook>] at <schedule>" command
+1. Have "show tables" indicate table comment and if data has been loaded from the table yet
+1. Automagically show hyperlinks for URL content from tables
 1. Jupyter UI integration: 
     1. Schema browser tree panel
     1. [done] Custom charting command

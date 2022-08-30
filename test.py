@@ -5,6 +5,8 @@ import pandas as pd
 import os
 import base64
 import pyarrow as pa
+import requests
+import time
 
 if False:
 	print(__file__)
@@ -170,6 +172,35 @@ def test_clickhouse_blobs():
 	client.insert_dataframe('INSERT INTO test6 VALUES', df, settings={'use_numpy': True})
 
 
-test_clickhouse_blobs()
+def test_school():
+	from bs4 import BeautifulSoup
+
+	UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36"
+	headers = {"user-agent": UA}
+	login = "https://login.jupitered.com/login/index.php"
+	params = {"studid1": "Drew Persinger", "text_password":"XpsPezBm78V5",
+			"access1":"1", "school1":"11907","city1":"Berkeley", "doit":"checkparent",
+			"from":"login","loginpage":"parent", "username1":""}
+
+	s = requests.Session()
+	r = s.post(login, data=params, headers=headers)
+	print(r.status_code)
+	print(r.url)
+	time.sleep(0.5)
+
+	soup = BeautifulSoup(r.text, 'html.parser')
+	if soup.find(id='mainpage') is not None or True:
+		print('Successfully logged in')
+		todo = "https://login.jupitered.com/0/student.php"
+		data = {"from":"inbox", "to":"todo", "stud":"5321673","school":"11907","year":"20222023"}
+		r2 = s.post(todo, data=data, headers=headers)
+		print(r.status_code)
+		print(r.text)
+
+	else:
+		print('Authentication Error')
+
+test_school()
+
 
 

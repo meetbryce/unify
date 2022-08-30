@@ -15,6 +15,7 @@ systems, adapters, and other features.
     show columns from <schema>.<table> like 'pattern'
     describe 
     describe <schema>.<table>
+    peek <schema>.<table>
     
 ## Standard language
 
@@ -27,6 +28,35 @@ systems, adapters, and other features.
 
     drop table <schema>.<table>
     drop schema <schema> ["cascade"]
+
+## Peeking at tables
+
+The special `peek` command makes it easy to see "interesting" data from a table without having
+to know columns names ahead of time. It is similar to using "select * from..." except that
+it applies some heurists to determine which columns to show:
+
+    > peek github.pulls
+    id     number       title             user_login
+    ------ ------------ ---------------   --------------
+    a234   7002         Update the Readme scooter
+
+When data is first loaded into a table, the columns of the table are analyzed to determine
+the "peek" columns using these heuristics:
+
+- shorter named columns 
+- shorter width text columns
+- preference dates
+- preference enums
+- don't show URLs
+- don't show floating point values
+
+Peek assigns weights and expected widths to each column. When you peek at the table it
+picks the highest weighted columns and attemps to fill (but not overfill) the page width.
+
+You can also use `peek*` as a special syntax in select statements to include the peek
+columns plus additional ones:
+
+    > select peek*, base_repo_url from github.pulls
 
 ## Charting
 
