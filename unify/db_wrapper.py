@@ -1,5 +1,9 @@
+from datetime import datetime, timedelta
+from functools import lru_cache
 import logging
+import json
 import os
+import pickle
 import re
 import time
 
@@ -11,6 +15,7 @@ from clickhouse_driver import Client
 import clickhouse_driver
 
 from .schemata import Queries
+from .storage_manager import StorageManager
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -466,3 +471,133 @@ class ClickhouseWrapper(DBWrapper):
             value, 
             settings={'use_numpy': True}
         )
+
+class UnifyDBStorageManager(StorageManager):
+    """
+        Stores adapter metadata in DuckDB. Creates a "meta" schema, and creates
+        tables named <adapter schema>_<collection name>.
+    """
+    DUCK_TABLE_SCHEMA = "(id VARCHAR PRIMARY KEY, blob JSON)"
+    TABLE_SCHEMA = {'*id': 'VARCHAR', 'blob': 'JSON'}
+    LOG_TABLE_SCHEMA = {'id': 'VARCHAR', 'created': 'DATETIME', 'blob': 'JSON', '__order': ['id','created']}
+    VAR_NAME_SENTINAL = '__var__'
+    COLUMN_INTEL_TABLE_SCHEMA = {'schema_':'VARCHAR','table_':'VARCHAR','column_':'VARCHAR', 'attrs':'JSON',
+                                '__order': ['schema_', 'table_', 'column_']}
+
+    def __init__(self, adapter_schema: str, duck):
+        self.adapter_schema = adapter_schema
+        self.duck = duck
+        self.duck.create_schema("meta")
+
+    def ensure_col_table(self, duck, name) -> dict:
+        table = self.adapter_schema + "_" + name
+        duck.create_table("meta." + table, self.TABLE_SCHEMA)
+        return table
+
+    def ensure_log_table(self, duck, name) -> dict:
+        table = self.adapter_schema + "_" + name
+        duck.create_table("meta." + table, self.LOG_TABLE_SCHEMA)
+        return table
+
+    def create_var_storage_table(self, duck):
+        table = "system__vars"
+        duck.create_table("meta." + table, {'*name': 'VARCHAR', 'value': 'BLOB'})
+        return table
+
+    def put_var(self, name, value):
+        table = self.create_var_storage_table(self.duck)
+        self.duck.delete_rows("meta." + table, {"name": name})
+        if isinstance(value, pd.DataFrame):
+            name = name.lower() + self.VAR_NAME_SENTINAL
+            self.duck.write_dataframe_as_table(value, "meta", name)
+        else:
+            self.duck.execute(
+                f"insert into meta.{table} (name, value) values (?, ?)",
+                (name, pickle.dumps(value))
+            )
+
+    def list_vars(self):
+        table = self.create_var_storage_table(self.duck)
+        scalars = self.duck.execute(f"select name from meta.{table}").fetchall()
+        scalars.extend(list(
+            self.duck.execute(
+                Queries.saved_var_tables.format(self.VAR_NAME_SENTINAL)
+            ).fetchall()
+        ))
+        return scalars
+
+    def get_var(self, name):
+        table = self.create_var_storage_table(self.duck)
+        rows = self.duck.execute(f"select value from meta.{table} where name = ?", [name]).fetchall()
+        if len(rows) > 0:
+            return pickle.loads(rows[0][0])
+        else:
+            name = name.lower() + self.VAR_NAME_SENTINAL
+            return self.duck.execute_df(f"select * from meta.{name}")
+            #raise RuntimeError(f"No value stored for global variable '{name}'")
+
+    def put_object(self, collection: str, id: str, values: dict) -> None:
+        table = self.ensure_col_table(self.duck, collection)
+        self.duck.delete_rows("meta." + table, {"id": id})
+        self.duck.execute(f"insert into meta.{table} (id, blob) values (?, ?)", [id, json.dumps(values)])
+
+    def log_object(self, collection: str, id: str, values: dict) -> None:
+        table = self.ensure_log_table(self.duck, collection)
+        created = datetime.utcnow()
+        self.duck.execute(f"insert into meta.{table} (id,created,blob) values (?, ?, ?)", [id, created, json.dumps(values)])
+
+    def get_object(self, collection: str, id: str) -> dict:
+        table = self.ensure_col_table(self.duck, collection)
+        rows = self.duck.execute(f"select id, blob from meta.{table} where id = ?", [id]).fetchall()
+        if len(rows) > 0:
+            return json.loads(rows[0][1])
+        return None
+
+    def get_log_objects(self, collection: str, id: str, limit=1) -> dict:
+        table = self.ensure_col_table(self.duck, collection)
+        rows = self.duck.execute(
+            f"select id, blob from meta.{table} where id = ? order by created desc limit {limit}", 
+            [id]
+        ).fetchall()
+        return [json.loads(row[1]) for row in rows]
+
+    @lru_cache(maxsize=500)
+    def ensure_column_intel_table(self):
+        table = "meta.column_intels"
+        self.duck.create_table(table, self.COLUMN_INTEL_TABLE_SCHEMA)
+        return table
+
+    def insert_column_intel(self, schema: str, table_root: str, column: str, attrs: dict):
+        meta_table = self.ensure_column_intel_table()
+        self.duck.execute(f"insert into {meta_table} (schema_,table_,column_,attrs) values (?, ?, ?, ?)", 
+            [schema, table_root, column, json.dumps(attrs)])
+
+    def get_column_intels(self, schema: str, table_root: str):
+        meta_table = self.ensure_column_intel_table()
+        return [
+            (col, json.loads(val)) for col, val in \
+                self.duck.execute(
+                    f"select column_, attrs from {meta_table} where schema_ = ? and table_ = ?",
+                    [schema, table_root]
+                ).fetchall()
+        ]
+
+    def delete_all_column_intel(self, schema, subject_table):
+        meta_table = self.ensure_column_intel_table()
+        self.duck.delete_rows(meta_table, {'schema_':schema, 'table_':subject_table})
+
+    def delete_object(self, collection: str, id: str) -> bool:
+        table = "meta." + self.ensure_col_table(self.duck, collection)
+        r = self.duck.delete_rows(table, {'id': id})
+        print("Delete resulted in: ", r)
+
+    def delete_log_objects(self, collection: str, id: str):
+        self.delete_object(collection, id)
+
+    def list_objects(self, collection: str) -> list[tuple]:
+        table = self.ensure_col_table(self.duck, collection)
+        return [
+            (key, json.loads(val)) for key, val in \
+                self.duck.execute(f"select id, blob from meta.{table}").fetchall()
+        ]
+
