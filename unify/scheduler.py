@@ -92,4 +92,4 @@ def run_schedules(notebook_list = []):
         time.sleep(30)
 
 if __name__ == '__main__':
-    run_schedules(sys.argv)
+    run_schedules(sys.argv[1:])
