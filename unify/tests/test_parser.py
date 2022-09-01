@@ -205,3 +205,28 @@ def test_peek_command(visitor, parser):
 
     verify_parse(v, p, "peek_table", "peek github.my_pulls 10",
         args={"table_ref": "github.my_pulls", "line_count":10})
+
+def test_select_parsing(visitor, parser):
+    # Mostly we just pass select queries through to the underlying database, but the RESTAdapter allows populating
+    # API parameters calls by issuing queries against parent tables. We want to be strict on query parsing in this
+    # case so we rely on the command parser to parse the query
+    v = visitor
+    p = parser
+
+    col_list = "id, name, created_at"
+    table_list = "table1, new_table2"
+    where_clause = "where name <> 'scooter' and id < 5"
+    order_clause = "order by id desc"
+    limit_clause = "50"
+
+    verify_parse(v, p, 
+        "select_query", 
+        f"select {col_list} from {table_list} {where_clause} {order_clause} limit {limit_clause}",
+        args={
+            "col_list": ["id","name","created_at"],
+            "table_list": ["table1", "new_table2"],
+            "where_clause": where_clause,
+            "order_clause": order_clause,
+            "limit_clause": limit_clause
+        }
+    )

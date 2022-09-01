@@ -1,12 +1,13 @@
 from .unify import (
     CommandInterpreter, 
-    UnifyRepl, 
-    ParserVisitor, 
-    UnifyDBStorageManager, 
     dbmgr, 
+    load_connections_config,
+    ParserVisitor, 
     OutputLogger, 
     TableLoader,
-    TableMgr
+    TableMgr,
+    UnifyDBStorageManager, 
+    UnifyRepl, 
 )
 
 

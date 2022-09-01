@@ -53,6 +53,13 @@ def collect_strings(node):
     else:
         return [node.value]
 
+def collect_child_string_list(rule, tree):
+    st = find_subtree(rule, tree)
+    if st:
+        return collect_strings(st)
+    else:
+        return []
+
 def collect_child_strings(rule, tree):
     st = find_subtree(rule, tree)
     if st:

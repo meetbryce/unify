@@ -2,6 +2,7 @@
 import io
 import os
 import json
+import logging
 import sys
 import traceback
 
@@ -21,6 +22,8 @@ from unify.rest_schema import Adapter, OutputLogger, UnifyLogger, StorageManager
 from unify.parsing_utils import collect_child_strings, find_node_return_child
 from unify.schemata import LoadTableRequest
 
+logger = logging.getLogger(__file__)
+
 class GSheetsClient:
     DEFAULT_SCHEMA = "default"
     ALL_SPREADSHEETS_TABLE = "all_spreadsheets"
@@ -31,11 +34,12 @@ class GSheetsClient:
     def __init__(self, spec):
         self.creds: Credentials = None
 
-    def validate(self, adapter):
+    def validate(self, adapter, silent=False):
         # FIXME: Implement a metadata store for user creds rathen than the
         # filesystem. Store creds per Connection so we can have multiple connections.
         needs_auth = True
-        creds_path = os.path.join(os.path.dirname(__file__), 'user_creds.json')
+        creds_path = os.path.expanduser(adapter.auth['client_creds_path'])
+        logger.info(f"Loading google creds from path: {creds_path}")
         if os.path.exists(creds_path):
             cred_data = json.loads(open(creds_path).read())
             self.creds = Credentials(**cred_data)
@@ -47,13 +51,12 @@ class GSheetsClient:
                 pass #fall through to re-auth
 
         if needs_auth:
-            if not self.stdin_available():
-                print("Warning, no TTY to request gsheets validation")
-                return False
+            if not self.stdin_available() or silent:
+                raise RuntimeError("Warning, silent mode but Gsheets auth has lapsed")
             print("Press <enter> to re-authorize the GSheets connection")
             input()
             flow = InstalledAppFlow.from_client_secrets_file(
-                adapter.auth['client_json_path'],
+                os.path.expanduser(adapter.auth['client_json_path']),
                 self.SCOPES
             )
             flow.run_local_server()
@@ -355,8 +358,8 @@ is a good option if the sheet data is changing frequenly.
         self.client: GSheetsClient = GSheetsClient(spec)
         self.tables = None
 
-    def validate(self):
-        return self.client.validate(self)
+    def validate(self, silent=False):
+        return self.client.validate(self, silent)
 
     def list_tables(self):
         if not self.tables:

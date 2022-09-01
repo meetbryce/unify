@@ -42,7 +42,7 @@ def test_apispec_class():
 
 def test_connector():
     fpath = os.path.join(os.path.dirname(__file__), "connections.yaml")
-    connections = Connection.setup_connections(fpath, storage_mgr_maker=lambda x: x)
+    connections = Connection.setup_connections(connections_path=fpath, storage_mgr_maker=lambda x: x)
     assert len(connections) > 0
 
     assert connections[0].adapter is not None

@@ -14,6 +14,7 @@ import re
 import sys
 import traceback
 import typing
+import yaml
 
 import lark
 from lark import Lark, Visitor
@@ -63,7 +64,8 @@ from .parsing_utils import (
     find_node_return_children,
     collect_child_strings,
     collect_child_text,
-    collect_strings
+    collect_strings,
+    collect_child_string_list
 )
 
 # Verify DB settings
@@ -73,8 +75,9 @@ if 'DATABASE_BACKEND' not in os.environ or os.environ['DATABASE_BACKEND'] not in
 dbmgr: DBWrapper = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
        
 
-def find_connections_file():
+def load_connections_config():
     trylist = [
+        os.path.expanduser("~/unify/unify_connections.yaml"),
         os.path.expanduser("~/unify_connections.yaml"),
         os.path.realpath("./unify_connections.yaml")
     ]
@@ -82,7 +85,8 @@ def find_connections_file():
         trylist.insert(0, os.environ['UNIFY_CONNECTIONS'])
     for p in trylist:
         if os.path.exists(p):
-            return p
+            logger.info("Loading connections config from: {}".format(p))
+            return yaml.safe_load(open(p))
     raise RuntimeError("Could not find unify_connections.yaml in HOME or current directory.")
 
 class SimpleLogger(UnifyLogger):
@@ -526,8 +530,6 @@ class TableLoader:
                     self.connections = given_connections
                 else:
                     self.connections: list[Connection] = Connection.setup_connections(
-                        find_connections_file(),
-                        # FIXME: provide Duckdb here
                         storage_mgr_maker=lambda schema: UnifyDBStorageManager(schema, duck)
                     )
             except:
@@ -581,6 +583,9 @@ class TableLoader:
     def refresh_table(self, table_ref):
         self.tables[table_ref].refresh_table(tableLoader=self)
 
+    def query_table(self, query):
+        pass
+
     def read_table_rows(self, table, limit=None):
         with dbmgr() as duck:
             if not self.table_exists_in_db(table):
@@ -610,11 +615,8 @@ class TableLoader:
             with dbmgr() as duck:
                 duck.execute(f"select 1 from {table}")
             return True
-        except Exception as e:
-            if 'Catalog Error' in str(e):
-                return False
-            else:
-                raise
+        except TableMissingException:
+            return False
 
 class ParserVisitor(Visitor):
     """ Utility class for visiting our parse tree and assembling the relevant parts
@@ -764,7 +766,20 @@ class ParserVisitor(Visitor):
         self._the_command = 'run_schedule'
 
     def select_query(self, tree):
+        # lark: select_query: "select" WS col_list WS "from" WS table_list (WS where_clause)? (WS order_clause)? (WS limit_clause)?
         self._the_command = 'select_query'
+        cols = collect_child_string_list("col_list", tree)
+        cols = [c for c in cols if c.strip() != ""]
+        self._the_command_args["col_list"] = cols
+        tabs = collect_child_string_list("table_list", tree)
+        tabs = [t for t in tabs if t.strip() != ""]
+        self._the_command_args["table_list"] = tabs
+        self._the_command_args["where_clause"] = collect_child_text("where_clause", tree, self._full_code)
+        self._the_command_args["order_clause"] = collect_child_text("order_clause", tree, self._full_code)
+        lim = collect_child_strings("limit_clause", tree)
+        if lim:
+            self._the_command_args["limit_clause"] = lim.strip()
+
     
     def select_for_writing(self, tree):
         self._the_command = "select_for_writing"
@@ -1042,7 +1057,7 @@ class CommandInterpreter:
     def email_command(self, email_object, recipients, subject=None, notebook_path: str=None):
         """ email [notebook|<table>|chart <chart>| to '<recipients>' - email a chart or notebook to the recipients """
 
-        recipients = re.split("\s*,\s*", recipients)
+        recipients = re.split(r"\s*,\s*", recipients)
         if email_object == "notebook":
             # Need to render and email the current notebook
             if notebook_path:

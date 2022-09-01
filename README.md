@@ -111,7 +111,7 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 
 1. [done] Implement unit tests
 1. [done] Implement table refresh, with support for strategies
-1. Implement scheduled automatic table refresh
+1. [done] Implement scheduled automatic table refresh
 1. [done] Implement GSheets adapter
 1. Implement AWS Cost Reporting adapter
    - Need to support AWS authentication
@@ -127,6 +127,8 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 1. Implement "run [<notebook>] at <schedule>" command
 1. Have "show tables" indicate table comment and if data has been loaded from the table yet
 1. [done] Automagically show hyperlinks for URL content from tables
+1. Start working on "lineage" features that can show which notebook/code produced a table
+1. Make sure date typing works properly on table load
 1. Jupyter UI integration: 
     1. Schema browser tree panel
     1. [done] Custom charting command

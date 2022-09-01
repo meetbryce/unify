@@ -9,7 +9,7 @@ Install Jupyter, and run `jupyter-lab` to open the web interface.
 
 Install the Unify kernel for development (sometimes have to do this when env restarts):
 
-    jupyter kernelspec install ./unify_kernel
+    jupyter kernelspec install ./unify_kernel --user
 
 To test with the Jupyter console:
 

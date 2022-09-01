@@ -9,3 +9,8 @@
     options:
       MOCKSVC_USER: scott@example.com
       MOCKSVC_PASS: abc123
+- gsheets:
+    adapter: gsheets
+    options:
+      client_json_path: ~/unify/gauth_client_id.json
+      client_creds_path: ~/unify/user_creds.json

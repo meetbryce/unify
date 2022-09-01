@@ -25,7 +25,9 @@ class Connection:
         self.is_valid = self.adapter.validate()
 
     @classmethod
-    def setup_connections(cls, path=None, conn_list=None, storage_mgr_maker=None):
+    def setup_connections(cls, conn_list=None, connections_path=None, storage_mgr_maker=None):
+        from unify import load_connections_config
+
         adapter_table = {}
         for f in glob.glob(os.path.join(os.path.dirname(__file__), "../rest_specs/*spec.yaml")):
             spec = yaml.load(open(f), Loader=yaml.FullLoader)
@@ -33,14 +35,16 @@ class Connection:
                 continue
             klass = RESTAdapter
             if 'class' in spec and spec['class'].lower() == 'gsheetsadapter':
-                from .gsheets.gsheets_adapter import GSheetsAdapter
+                from gsheets.gsheets_adapter import GSheetsAdapter
                 klass = GSheetsAdapter
             adapter_table[spec['name']] = (klass, spec)
         
         if conn_list:
             connections = conn_list
+        elif connections_path is not None:
+            connections = yaml.safe_load(open(connections_path))
         else:
-            connections = yaml.load(open(path), Loader=yaml.FullLoader)
+            connections = load_connections_config()
         result = []
         # Instantiate each adapter, resolve auth vars, and validate the connection
         for opts in connections:
@@ -197,6 +201,10 @@ class OutputLogger:
 
     def get_df(self):
         return self.df
+
+    def clear(self):
+        self.buffer = []
+        self.df = None
         
 class UnifyLogger:
     INFO = 1
@@ -295,7 +303,7 @@ class TableUpdater:
         pass
 
 
-class RESTTable(TableDef):
+class RESTTable(TableDef):    
     def __init__(self, spec, dictvals):
         super().__init__(dictvals['name'])
         fmt = string.Formatter()
@@ -327,13 +335,6 @@ class RESTTable(TableDef):
             self.refresh_strategy = self.refresh['strategy']
         else:
             self.refresh_strategy = 'reload'
-
-        # REMOVE OLD REFRESH CODE
-        self.refresh_params = dictvals.get('refresh_params', {})
-        if '_ts_format' in self.refresh_params:
-            self.refresh_ts_format = self.refresh_params.pop('_ts_format')
-        else:
-            self.refresh_ts_format = '%Y-%m-%dT%H:%M:%S'
 
         self.create_method, self.create_path = self.parse_resource(dictvals.get('create_resource'))
         self.create_args = [t[1] for t in fmt.parse(self.create_path or '') if t[1] is not None]
@@ -455,16 +456,17 @@ class RESTTable(TableDef):
                                 f"Error: parent record missing col {parent_col}: ", record
                             )
                     if do_row:
-                        for page, size_return in self._query_resource(record, logger):
+                        for page, size_return in self._query_resource(tableLoader, record, logger):
                             yield (page, size_return)
         else:
             # Simple query
-            for page, size_return in self._query_resource(logger=logger):
+            for page, size_return in self._query_resource(tableLoader, logger=logger):
                 yield (page, size_return)
 
     def _query_resource(
         self, 
-        query_params={}, 
+        tableLoader,
+        query_params={},
         logger: UnifyLogger = None
         ):
         session = requests.Session()
@@ -472,6 +474,8 @@ class RESTTable(TableDef):
 
         pager = PagingHelper.get_pager(self.paging_options)
         params = self.params.copy()
+        self.expand_sql_params(params, tableLoader)
+        
         page = 1
         safety_max_pages = 200000 # prevent infinite loop in case "pages finished logic" fails
 
@@ -510,6 +514,15 @@ class RESTTable(TableDef):
             if page > self.max_pages:
                 print("Aborting table scan after {} pages", page-1)
                 break
+
+
+    def expand_sql_params(self, params: dict, tableLoader):
+        """ Evaluates SQL syntax parameters which can pull parameter values by querying other tables """
+        for key, value in params.items():
+            m = re.match(r"%\((.*)\)")
+            if m:
+                query = m.group(1)
+
 
 class ReloadStrategy(TableUpdater):
     def __init__(self, table_def: TableDef) -> None:

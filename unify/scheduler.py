@@ -1,6 +1,7 @@
 # Executes notebooks according to the saved schedules
 import logging
 import os
+import sys
 import time
 
 import nbformat
@@ -38,9 +39,26 @@ def run_notebook(nb_path: str):
         logger.error("Error executing notebook: {}".format(nb_path))
         logger.error(e)
 
-def run_schedules():
+def find_notebook(notebook: str):
+    if os.path.exists(notebook):
+        return notebook
+    else:
+        nbpath = os.path.join(os.path.dirname(__file__), "../notebooks", notebook)
+        if os.path.exists(nbpath):
+            return nbpath
+        else:
+            raise RuntimeError(f"Cannot find notebook '{notebook}'")
+    
+def run_schedules(notebook_list = []):
     global notebook_contents
 
+    if notebook_list:
+        for nb in notebook_list:
+            nb_path = find_notebook(nb)
+            notebook_contents[nb_path] = open(nb_path).read()
+            run_notebook(nb_path)
+        return
+        
     interpreter = CommandInterpreter(silence_errors=True)
     for row in interpreter._list_schedules():
         logger.info("Executing notebook schedule id: {}".format(row["id"]))
@@ -74,4 +92,4 @@ def run_schedules():
         time.sleep(30)
 
 if __name__ == '__main__':
-    run_schedules()
+    run_schedules(sys.argv)

@@ -98,16 +98,6 @@ tables:
       table: orgs
       mapping:
         org: login
-    columns:
-      - name: org
-        source: owner.login
-      - name: name
-        key: True
-      - name: owner
-        source: owner.login
-      - name: private
-        type: BOOLEAN
-      - name: description
   - name: pulls
     query_resource: GET /repos/{owner}/{repo}/pulls
     supports_paging: True
@@ -115,34 +105,12 @@ tables:
       sort: created
       direction: desc
       state: all
-#     owner,repo: select owner_login, name from repos
-#
-#
-#      
     args_query:
       table: repos
       mapping:
         owner: owner_login
         repo: name
     select: id, url, node_id, number, state, locked, title, user, body, draft, created_at, updated_at, head_repo_name
-    columns:
-      - name: repo_owner
-        source: repo.owner.login
-      - name: repo
-        source: head.repo.name
-      - name: id
-        type: INT
-        key: True
-      - name: number
-        type: INT
-      - name: state
-      - name: title
-      - name: user 
-        source: user.login
-      - name: created_at
-        type: TIMESTAMP
-      - name: updated_at
-        type: TIMESTAMP
   - name: pull_reviews
     query_resource: GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews
     supports_paging: True

@@ -7,10 +7,11 @@ from unify import CommandInterpreter
 
 def test_updates_strategy():
     table = "mocksvc.repos1100"
+    c = CommandInterpreter()
+    
     with requests_mock.Mocker() as mock:
         MockSvc.setup_mocksvc_api(mock)
 
-        c = CommandInterpreter()
         c.run_command(f"drop table if exists {table}")
         c.run_command(f"select * from {table}")
 

@@ -27,5 +27,21 @@ def test_scheduler_commands():
     lines, df = interp.run_command("run delete '{}'".format(id1))
     lines, df = interp.run_command("run delete '{}'".format(id2))
 
+def test_scheduler_backend():
+    # We want to schedule a few notebooks to run on different schedules, then interrogate
+    # the scheduler package and verify that the notebook jobs are scheduled at the right times.
+    #
+    # Note that we don't try to actually run the jobs nor muck with "wall time".
+    interp = CommandInterpreter()
+    lines: list[str]
+    df: pd.DataFrame
+
+    nb1 = "Incident Stats.ipynb"
+    nb2 = "Coder Stats.ipynb"
+
+    lines, df = interp.run_command(f"run '{nb1}' at 23:00")
+    lines, df = interp.run_command(f"run '{nb2}' every day starting at 08:00")
+
+
 
 
