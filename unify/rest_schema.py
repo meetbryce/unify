@@ -518,8 +518,9 @@ class RESTTable(TableDef):
 
     def expand_sql_params(self, params: dict, tableLoader):
         """ Evaluates SQL syntax parameters which can pull parameter values by querying other tables """
+        return
         for key, value in params.items():
-            m = re.match(r"%\((.*)\)")
+            m = re.match(r"%\((.*)\)", value)
             if m:
                 query = m.group(1)
 

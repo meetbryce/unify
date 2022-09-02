@@ -1055,7 +1055,7 @@ class CommandInterpreter:
             return self._execute_duck(self._cmd)
 
     def email_command(self, email_object, recipients, subject=None, notebook_path: str=None):
-        """ email [notebook|<table>|chart <chart>| to '<recipients>' - email a chart or notebook to the recipients """
+        """ email [notebook|<table>|chart <chart>| to '<recipients>' [subject 'msg subject'] - email a chart or notebook to the recipients """
 
         recipients = re.split(r"\s*,\s*", recipients)
         if email_object == "notebook":
@@ -1172,6 +1172,7 @@ class CommandInterpreter:
         self.load_adapter_data(schema, table_root)
 
     def run_notebook_command(self, run_at_time: str, notebook_path: str, repeater: str=None):
+        """ run [every day|week|month] at <date> <time> - Execute this notebook on a regular schedule """
         if not self.interactive:
             return
         if notebook_path is None:
@@ -1201,12 +1202,14 @@ class CommandInterpreter:
         self.print(f"Scheduled to run notebook {notebook}")
 
     def run_schedule(self):
+        """ run schedule - displays the current list of scheduled tasks """
         store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
         items = store.list_objects("schedules")
         items = map(lambda row: [row[0], row[1]['notebook'], row[1]['run_at'], row[1]['repeater']], items)
         return pd.DataFrame(items, columns=["schedule_id", "notebook", "run_at", "repeat"])
 
     def delete_schedule(self, schedule_id):
+        """ run delete <notebook> - Delete the schedule for the indicated notebook """
         store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
         schedule = store.get_object("schedules", schedule_id)
         if schedule:
@@ -1307,7 +1310,7 @@ class CommandInterpreter:
             self.print("Loading table...")
             return False
 
-    def select_query(self, fail_if_missing=False):
+    def select_query(self, fail_if_missing=False, **kwargs):
         """ select <columns> from <table> [where ...] [order by ...] [limit ...] [offset ...] """
         try:
             return self._execute_duck(self._cmd)
