@@ -110,7 +110,7 @@ tables:
       mapping:
         owner: owner_login
         repo: name
-    select: id, url, node_id, number, state, locked, title, user, body, draft, created_at, updated_at, head_repo_name
+    select: id, url, html_url, node_id, number, state, locked, title, user, body, draft, created_at, updated_at, head_repo_name
   - name: pull_reviews
     query_resource: GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews
     supports_paging: True

@@ -25,71 +25,82 @@ logger.addHandler(ch)
 
 notebook_contents = {}
 
-def run_notebook(nb_path: str):
+def run_notebook(notebook: str):
     global notebook_contents
     try:
-        nb_contents=notebook_contents[nb_path]
+        nb_contents=notebook_contents[notebook]
         notebook = nbformat.reads(nb_contents, as_version=4)
         # Now execute the notebook to generate up to date output results (run live queries, etc...)
         ep = ExecutePreprocessor(timeout=600, kernel_name='unify_kernel')
-        logger.info("Executing notebook: {}".format(nb_path))
-        ep.preprocess(notebook, {'metadata': {'path': os.path.dirname(nb_path)}})
+        logger.info("Executing notebook: {}".format(notebook))
+        ep.preprocess(notebook, {'metadata': {'path': "."}})
         logger.info("Notebook done")
     except Exception as e:
-        logger.error("Error executing notebook: {}".format(nb_path))
+        logger.error("Error executing notebook: {}".format(notebook))
         logger.error(e)
 
-def find_notebook(notebook: str):
-    if os.path.exists(notebook):
-        return notebook
-    else:
-        nbpath = os.path.join(os.path.dirname(__file__), "../notebooks", notebook)
-        if os.path.exists(nbpath):
-            return nbpath
-        else:
-            raise RuntimeError(f"Cannot find notebook '{notebook}'")
-    
+def reload_schedules():
+    rel_sentinel = "/tmp/reload_unify_schedule"
+    logger.info(f"checking for schedule reload file at {rel_sentinel}")
+    if os.path.exists(rel_sentinel):
+        logger.critical("Found reload request")
+        os.remove(rel_sentinel)
+        schedule.clear()
+        run_schedules()
+
+def run_immediately(notebook_list: list):
+    global notebook_contents
+
+    interpreter = CommandInterpreter(silence_errors=True)
+    for row in interpreter._list_schedules():
+        if row['id'] in notebook_list:
+            sched = row['schedule']
+            notebook = sched['notebook']
+            notebook_contents[notebook] = sched['contents']
+            run_notebook(notebook)   
+
 def run_schedules(notebook_list = []):
     global notebook_contents
 
-    if notebook_list:
-        for nb in notebook_list:
-            nb_path = find_notebook(nb)
-            notebook_contents[nb_path] = open(nb_path).read()
-            run_notebook(nb_path)
-        return
-        
     interpreter = CommandInterpreter(silence_errors=True)
     for row in interpreter._list_schedules():
-        logger.info("Executing notebook schedule id: {}".format(row["id"]))
+        logger.info("Schedule run schedule id: {}".format(row["id"]))
         sched = row['schedule']
         if 'contents' not in sched:
             logger.error("No notebook contents found for schedule: {}".format(str(row)))
             continue
-        notebook_contents[sched['notebook']] = sched['contents']
+
+        notebook = sched['notebook']
+        notebook_contents[notebook] = sched['contents']
         
         run_at_time = pd.to_datetime(sched['run_at'])
         if sched['repeater'] == 'day':
             schedule.every().day.at(str(run_at_time.time())).do(
                 run_notebook, 
-                nb_path=sched['notebook']
+                notebook=notebook
             )
         elif sched['repeater'] == 'week':
             getattr(schedule.every(), run_at_time.day_name().lower()).at(str(run_at_time.time())).do(
                 run_notebook, 
-                nb_path=sched['notebook']
+                notebook=notebook
             )
-        elif sched['repeat'] == 'month':
+        elif sched['repeater'] == 'month':
             # See if today is same day of the month as starting date, and if so then
             # run the job today. Assumes we re-schedule all jobs each day
             pass
 
-        print(schedule.get_jobs())
+    schedule.every(2).minutes.do(reload_schedules)
+    print("\n".join([str(j) for j in schedule.get_jobs()]))
 
+def schedule_loop():
     while True:
         logger.info("Waking...")
         schedule.run_pending()
         time.sleep(30)
 
 if __name__ == '__main__':
-    run_schedules(sys.argv[1:])
+    if len(sys.argv) > 1:
+        run_immediately(sys.argv[1:])
+    else:
+        run_schedules(sys.argv[1:])
+        schedule_loop()
