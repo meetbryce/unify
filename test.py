@@ -7,6 +7,9 @@ import base64
 import pyarrow as pa
 import requests
 import time
+import yaml
+import logging
+from pprint import pprint
 
 if False:
 	print(__file__)
@@ -200,7 +203,30 @@ def test_school():
 	else:
 		print('Authentication Error')
 
-test_school()
+def test_aws_cost_api():
+	logging.basicConfig()
+	logging.getLogger().setLevel(logging.DEBUG)
+	requests_log = logging.getLogger("requests.packages.urllib3")
+	requests_log.setLevel(logging.DEBUG)
+	requests_log.propagate = True
+
+	import requests
+	from requests_aws4auth import AWS4Auth
+	endpoint = 'https://ce.us-east-1.amazonaws.com/'
+	auth = AWS4Auth(os.environ['AWS_ACCESS_KEY_ID'], os.environ['AWS_SECRET_ACCESS_KEY'], os.environ['AWS_DEFAULT_REGION'], 'ce')
+	spec = yaml.safe_load(open("rest_specs/aws_costs_spec.yaml"))
+
+	table = spec['tables'][0]
+
+	headers = table.get('headers', {})
+
+	body = table['post']
+	body['Dimension'] = 'SERVICE'
+
+	response = requests.post(endpoint, headers=headers, auth=auth, json=body)
+	pprint(response.json())
+
+test_aws_cost_api()
 
 
 

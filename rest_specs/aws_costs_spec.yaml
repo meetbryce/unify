@@ -1,22 +1,34 @@
-# https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/CommonParameters.htm#
-enabled: false
-# Request signing library
-# https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/CommonParameters.html
+enabled: true
 name: aws_costs
 base_url: https://ce.us-east-1.amazonaws.com
-paging:
-  strategy: pageAndCount
-  page_param: page
-  count_param: per_page
-  page_size: 100
-pageIndexArg: page
-pageMaxArg: per_page
-dateParser: '%Y-%m-%dT%H:%M:%SZ'
 auth:
-  type: BASIC
-  uservar: GHUSER
-  tokenvar: GHTOKEN
+  type: AWS4Auth
+  access_id: AWS_ACCESS_KEY_ID
+  secret_key: AWS_SECRET_ACCESS_KEY
+  region: AWS_DEFAULT_REGION
+  service: ce
 tables:
+  - name: cost_dimensions
+    resource_path: /
+    result_body_path: DimensionValues
+    headers:
+      Content-Type: application/x-amz-json-1.1
+      X-Amz-Target: AWSInsightsIndexService.GetDimensionValues
+    paging:
+      strategy: pagerToken
+      pager_token_path: NextPageToken
+      count_param: $post.MaxResults
+      token_param: $post.NextPageToken
+      page_size: 100
+    post:
+      TimePeriod: 
+        # Start: sql@(select cast((now() - interval 6 month), as date)
+        # End: sql@(select cast(now() as date)
+        Start: '2022-01-01'
+        End: '2022-08-10'
+      Context: COST_AND_USAGE
+      Dimension: SERVICE
+#      Dimension: [AZ,INSTANCE_TYPE,LINKED_ACCOUNT,LINKED_ACCOUNT_NAME,OPERATION,PURCHASE_TYPE,REGION,SERVICE,SERVICE_CODE,USAGE_TYPE,USAGE_TYPE_GROUP,RECORD_TYPE,OPERATING_SYSTEM,TENANCY,SCOPE,PLATFORM,SUBSCRIPTION_ID,LEGAL_ENTITY_NAME,DEPLOYMENT_OPTION,DATABASE_ENGINE,CACHE_ENGINE,INSTANCE_TYPE_FAMILY,BILLING_ENTITY,RESERVATION_ID,RESOURCE_ID,RIGHTSIZING_TYPE,SAVINGS_PLANS_TYPE,SAVINGS_PLAN_ARN,PAYMENT_OPTION,AGREEMENT_END_DATE_TIME_AFTER,AGREEMENT_END_DATE_TIME_BEFORE,INVOICING_ENTITY]
   - name: costs
     headers:
       Content-Type: application/x-amz-json-1.1
@@ -24,18 +36,13 @@ tables:
     resource_path: /
     post:
       TimePeriod: 
-        Start: sql@(select cast((now() - interval 6 month), as date)
-        End: sql@(select cast(now() as date)
+        # Start: sql@(select cast((now() - interval 6 month), as date)
+        # End: sql@(select cast(now() as date)
+        Start: '2022-08-01'
+        End: '2022-08-10'
       Granularity: DAILY
       GroupBy:
         - Type: DIMENSION
           Key: SERVICE
       Metrics:
         - BlendedCost
-        - UnblendedCost
-        - UsageQuantity
-  - name: org_members
-    resource_path: /orgs/{org}/members
-    supports_paging: True
-    params:
-      org: sql@(select login from orgs)    

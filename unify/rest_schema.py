@@ -323,6 +323,8 @@ class RESTTable(TableDef):
         self.query_method = dictvals.get('method', 'GET')
         self.query_date_format = spec.query_date_format
 
+        self.headers = dictvals.get('headers', {})
+
         if dictvals.get('query_resource'):
             self.query_method, self.query_path = self.parse_resource(dictvals.get('query_resource'))
         self.query_args = [t[1] for t in fmt.parse(self.query_path) if t[1] is not None]        
@@ -361,25 +363,14 @@ class RESTTable(TableDef):
 
         self.colmap = {col.name: col for col in self.columns}
         self.params = dictvals.get('params', {})
-        self.request_data = dictvals.get('body')
+        self.post = dictvals.get('post')
         if dictvals.get('args_query'):
             self.args_query_table = dictvals['args_query']['table']
             self.args_query_mappings = dictvals['args_query']['mapping']
             self.args_query_exclusions = (dictvals['args_query'].get('exclude') or "").split(",")
         else:
             self.args_query_table = None
-        self.keyColumnName = self.keyColumnType = None
-        for c in self.columns:
-            if c.is_key:
-                self.keyColumnName = c.name
-                self.keyColumnType = c.type
-        if self.keyColumnName is None:
-            #print(f"!!WARNING: table {spec.name}.{self.name} has no key column defined")
-            self.is_cacheable = False
-        else:
-            self.is_cacheable = True
-
-        # TODO: What about multiple keys?
+        self.keyColumnName = self.keyColumnType = None       
 
     def is_sql_query_param(self, key, value):
         return re.match(r"sql@\((.*)\)", value)
@@ -503,6 +494,7 @@ class RESTTable(TableDef):
         ):
         session = requests.Session()
         self.spec._setup_request_auth(session)
+        session.headers.update(self.headers)
 
         pager = PagingHelper.get_pager(self.paging_options)
         params = self.params.copy()
@@ -520,8 +512,12 @@ class RESTTable(TableDef):
             url = (self.spec.base_url + self.query_path).format(**query_params)
             params.update(pager.get_request_params())
             
-            print(url, params)
-            r = session.get(url, params=params)
+            if self.post:
+                print("POST ", url, params)
+                r = session.post(url, json=self.post)
+            else:
+                print(url, params)
+                r = session.get(url, params=params)
 
             if r.status_code >= 400:
                 print(r.text)
@@ -651,6 +647,9 @@ class Adapter:
                     elif "{" in  value:
                         # Resolve a string with connection opt references
                         auth_tree[key] = value.format(**conn_opts)
+                    elif not re.match(r"[A-Z_]+", value):
+                        # allow static values that are not like XXX_XXX
+                        pass
                     else:
                         print(f"Error: auth key {key} missing value in connection options")
         resolve_auth_values(self.auth, connection_opts)
@@ -709,7 +708,7 @@ class RESTAdapter(Adapter):
     def list_tables(self) -> List[TableDef]:
         return self.tables
 
-    def _setup_request_auth(self, session):
+    def _setup_request_auth(self, session: requests.Session):
         user = ''
         token = ''
         session.headers.update({"Content-Type" : "application/json"})
@@ -730,6 +729,14 @@ class RESTAdapter(Adapter):
             session.headers.update(dynValues)
         elif authType == 'PARAMS':
             session.params.update(dynValues)
+        elif authType == 'AWS4Auth':
+            from requests_aws4auth import AWS4Auth
+            session.auth = AWS4Auth(
+                self.auth['access_id'],
+                self.auth['secret_key'],
+                self.auth['region'],
+                self.auth['service']
+            )
         elif authType == 'NONE':
             pass
         else:

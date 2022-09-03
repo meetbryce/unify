@@ -84,6 +84,12 @@ class DBWrapper:
     def get_short_date_cast(self, column):
         return f"strftime(CAST(\"{column}\" AS TIMESTAMP), '%m/%d/%y %H:%M')"
 
+    def drop_schema(self, schema, cascade: bool=False):
+        sql = f"drop schema {schema}"
+        if cascade:
+            sql += " cascade"
+        return self.execute(sql)
+
 DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_HOME, exist_ok=True)
 
@@ -400,6 +406,12 @@ class ClickhouseWrapper(DBWrapper):
 
     def drop_memory_table(self, table_root: str):
         self.execute(f"DROP TABLE IF EXISTS default.{table_root}")
+
+    def drop_schema(self, schema, cascade: bool=False):
+        sql = f"drop database {schema}"
+        if cascade:
+            sql += " cascade"
+        return self.execute(sql)
 
     def _infer_df_columns(self, df: pd.DataFrame):
         schema = pa.Schema.from_pandas(df)

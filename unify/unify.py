@@ -149,7 +149,7 @@ class BaseTableScan(Thread):
         Thread.__init__(self)
         self.tableMgr: TableMgr = tableMgr
         self.tableLoader = tableLoader
-        self.table_ref = tableMgr.adapter.name + "." + tableMgr.table_spec.name
+        self.table_ref = tableMgr.schema + "." + tableMgr.table_spec.name
         self.select = select
         self.storage_mgr: UnifyDBStorageManager = None
         self.analyzed_columns = []
@@ -187,7 +187,7 @@ class BaseTableScan(Thread):
         cols: list[ColumnIntel] = sorted(self.analyzed_columns, key=lambda ci: ci.attrs['order'])
         for col in cols:
             self.storage_mgr.insert_column_intel(
-                schema=self.tableMgr.adapter.name,
+                schema=self.tableMgr.schema,
                 table_root=self.tableMgr.table_spec.name,
                 column=col.name,
                 attrs=col.attrs
@@ -354,15 +354,16 @@ class InitialTableLoad(BaseTableScan):
         self.clear_analyzed_columns(self.table_ref)
 
     def _flush_rows_to_db(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
+        breakpoint()
         ## Default version works when loading a new table
         print(f"Saving page {page} with {next_df.shape[1]} columns")
         if page <= flush_count:
             # First set of pages, so create the table
-            self.create_table_with_first_page(duck, next_df, tableMgr.adapter.name, tableMgr.table_spec.name)
+            self.create_table_with_first_page(duck, next_df, tableMgr.schema, tableMgr.table_spec.name)
         else:
             duck.append_dataframe_to_table(
                 next_df, 
-                tableMgr.adapter.name, 
+                tableMgr.schema, 
                 tableMgr.table_spec.name
             )
 
@@ -397,7 +398,7 @@ class TableUpdateScan(BaseTableScan):
             # Updater will replace the existing table rather than appending to it. So
             # download data into a temp file
             self._target_table_root = self.tableMgr.table_spec.name + "__temp"
-            self._target_table = self.tableMgr.adapter.name + "." + self._target_table_root
+            self._target_table = self.tableMgr.schema + "." + self._target_table_root
             # drop the temp table in case it's lying around
             duck.execute(f"DROP TABLE IF EXISTS {self._target_table}")
             # Use parent class to download data from the target API (calling _flush_rows along the way)
@@ -406,7 +407,7 @@ class TableUpdateScan(BaseTableScan):
             duck.replace_table(self._target_table, self.tableMgr.name)
         else:
             self._target_table_root = self.tableMgr.table_spec.name
-            self._target_table = self.tableMgr.adapter.name + "." + self._target_table_root
+            self._target_table = self.tableMgr.schema + "." + self._target_table_root
             super().perform_scan(duck)
 
     def get_query_mgr(self):
@@ -420,13 +421,13 @@ class TableUpdateScan(BaseTableScan):
                 self.create_table_with_first_page(
                     duck, 
                     next_df, 
-                    tableMgr.adapter.name, 
+                    tableMgr.schema, 
                     self._target_table_root
                 )
             else:
                 duck.append_dataframe_to_table(
                     next_df, 
-                    self.tableMgr.adapter.name, 
+                    self.tableMgr.schema, 
                     self._target_table_root
                 )
             return
@@ -447,7 +448,7 @@ class TableUpdateScan(BaseTableScan):
         duck.drop_memory_table("__keys")
 
         # Now append the new records             
-        duck.append_dataframe_to_table(next_df, tableMgr.adapter.name, self._target_table_root)
+        duck.append_dataframe_to_table(next_df, tableMgr.schema, self._target_table_root)
 
 
 class TableExporter(Thread):
@@ -742,6 +743,7 @@ class ParserVisitor(Visitor):
     def drop_schema(self, tree):
         self._the_command = "drop_schema"
         self._the_command_args["schema_ref"] = find_node_return_child("schema_ref", tree)
+        self._the_command_args["cascade"] = self._full_code.strip().lower().endswith("cascade")
 
     def email_command(self, tree):
         self._the_command = "email_command"
@@ -1088,11 +1090,11 @@ class CommandInterpreter:
         if val == "y":
             return self._execute_duck(self._cmd)
 
-    def drop_schema(self, schema_ref):
+    def drop_schema(self, schema_ref, cascade: bool):
         """ drop <schema> [cascade] - removes the entire schema from the database """
         val = input(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)? ")
         if val == "y":
-            return self._execute_duck(self._cmd)
+            return self.duck.drop_schema(schema_ref, cascade)
 
     def email_command(self, email_object, recipients, subject=None, notebook_path: str=None):
         """ email [notebook|<table>|chart <chart>| to '<recipients>' [subject 'msg subject'] - email a chart or notebook to the recipients """
