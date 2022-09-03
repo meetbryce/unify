@@ -2,3 +2,40 @@
 enabled: false
 # Request signing library
 # https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/CommonParameters.html
+name: aws_costs
+base_url: https://ce.us-east-1.amazonaws.com
+paging:
+  strategy: pageAndCount
+  page_param: page
+  count_param: per_page
+  page_size: 100
+pageIndexArg: page
+pageMaxArg: per_page
+dateParser: '%Y-%m-%dT%H:%M:%SZ'
+auth:
+  type: BASIC
+  uservar: GHUSER
+  tokenvar: GHTOKEN
+tables:
+  - name: costs
+    headers:
+      Content-Type: application/x-amz-json-1.1
+      X-Amz-Target: AWSInsightsIndexService.GetCostAndUsage
+    resource_path: /
+    post:
+      TimePeriod: 
+        Start: sql@(select cast((now() - interval 6 month), as date)
+        End: sql@(select cast(now() as date)
+      Granularity: DAILY
+      GroupBy:
+        - Type: DIMENSION
+          Key: SERVICE
+      Metrics:
+        - BlendedCost
+        - UnblendedCost
+        - UsageQuantity
+  - name: org_members
+    resource_path: /orgs/{org}/members
+    supports_paging: True
+    params:
+      org: sql@(select login from orgs)    

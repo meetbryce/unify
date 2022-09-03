@@ -523,7 +523,8 @@ class TableLoader:
        2. Never queried. Call the Adapter to query the data and store it to local db.
        3. Table exists in the local db.
     """
-    def __init__(self, silence_errors=False, given_connections: list[Connection]=None):
+    def __init__(self, silence_errors=False, given_connections: list[Connection]=None, lark_parser: Lark=None):
+        self.lark_parser = lark_parser
         with dbmgr() as duck:       
             try:
                 if given_connections:
@@ -583,8 +584,38 @@ class TableLoader:
     def refresh_table(self, table_ref):
         self.tables[table_ref].refresh_table(tableLoader=self)
 
-    def query_table(self, query):
-        pass
+    def query_table(self, schema: str, query: str):
+        parser_visitor = ParserVisitor()
+        parse_tree = self.lark_parser.parse(query)
+        command = parser_visitor.perform_new_visit(parse_tree, full_code=query)
+        query_parts = parser_visitor._the_command_args
+        if command == 'select_query':
+            # Load data from referenced tables if needed. Tables must not be qualified
+            # so they can only use tables from the same schema
+            table_list = []
+            for table in query_parts["table_list"]:
+                if "." in table:
+                    raise RuntimeError(f"Adapter queries cannot use qualified table names: {table}. Query: {query}")
+                table = schema + "." + table
+                if not self.table_exists_in_db(table):
+                    tmgr = self.tables[table]
+                    # TODO: Might want a timeout for large parent tables
+                    tmgr.load_table(tableLoader=self, waitForScan=True)
+                table_list.append(table)
+
+            if query_parts.get("limit_clause"):
+                limit = " LIMIT " + query_parts["limit_clause"]
+            else:
+                limit = ""
+            parent_query = "SELECT " + ",".join(query_parts["col_list"]) + \
+                            " FROM " + ",".join(table_list) + \
+                            (query_parts["where_clause"] or '') + \
+                            (query_parts["order_clause"] or '') + \
+                            limit
+            with dbmgr() as duck:
+                yield duck.execute_df(parent_query)
+        else:
+            raise RuntimeError(f"Invalid SQL query: {query}")
 
     def read_table_rows(self, table, limit=None):
         with dbmgr() as duck:
@@ -834,12 +865,17 @@ class CommandInterpreter:
         path = os.path.join(os.path.dirname(__file__), "grammar.lark")
         self.parser = Lark(open(path).read(), propagate_positions=True)
         self.parser_visitor = ParserVisitor()
-        self.loader = TableLoader(silence_errors)
+        self.loader = TableLoader(silence_errors, lark_parser=self.parser)
         self.adapters: dict[str, Adapter] = self.loader.adapters
         self.logger: OutputLogger = None
         self.session_vars: dict[str, object] = {}
         self.email_helper: EmailHelper = EmailHelper()
         self.duck: DBWrapper = None
+        # Some commands we only support in interactive sessions. In non-interactive cases (background execution)
+        # these commands will be no-ops.
+        self.commands_needing_interaction = [
+            'run_notebook_command'
+        ]
 
     def _list_schemas(self, match_prefix=None):
         with dbmgr() as duck:
@@ -940,7 +976,6 @@ class CommandInterpreter:
         # This is a hack for the email command, which will execute a notebook which needs exclusive
         # access to the database, so we defer to running the command until after we close the db.
         run_command_after_closing_db = None
-        self.interactive = interactive
         try:
             with dbmgr() as duck:
                 self.duck = duck
@@ -959,7 +994,12 @@ class CommandInterpreter:
                 try:
                     parse_tree = self.parser.parse(self._cmd)
                     command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
-                    if command:
+
+                    if not interactive and command in self.commands_needing_interaction:
+                        self.print(f"Skipping command: {command}")
+                        command = None
+
+                    if command:    
                         method = getattr(self, command)
                         if 'notebook_path' in inspect.signature(method).parameters:
                             nb_path = get_notebook_func() if get_notebook_func else None
@@ -1173,8 +1213,6 @@ class CommandInterpreter:
 
     def run_notebook_command(self, run_at_time: str, notebook_path: str, repeater: str=None):
         """ run [every day|week|month] at <date> <time> - Execute this notebook on a regular schedule """
-        if not self.interactive:
-            return
         if notebook_path is None:
             self.print("Error, must supply a notebook name or full path")
             return

@@ -1,3 +1,4 @@
+from cgi import parse_multipart
 import glob
 import os
 import re
@@ -380,6 +381,15 @@ class RESTTable(TableDef):
 
         # TODO: What about multiple keys?
 
+    def is_sql_query_param(self, key, value):
+        return re.match(r"sql@\((.*)\)", value)
+
+    def requires_parent_query(self):
+        # See if any params refer to parent table queries
+        for key, value in self.params.items():
+            if self.is_sql_query_param(key, value):
+                return True
+
     def parent_table(self):
         if self.args_query_table:
             return self.spec.lookupTable(self.args_query_table)
@@ -458,11 +468,33 @@ class RESTTable(TableDef):
                     if do_row:
                         for page, size_return in self._query_resource(tableLoader, record, logger):
                             yield (page, size_return)
+        elif self.requires_parent_query():
+            print(">>Running parent SQL query: ", self.params)
+            df: pd.DataFrame = None
+            for param_names, df in self.run_param_query(tableLoader):
+                for row in df.values:
+                    record = dict(zip(param_names, row))
+                    for page, size_return in self._query_resource(tableLoader, record, logger):
+                        yield (page, size_return)
         else:
             # Simple query
             for page, size_return in self._query_resource(tableLoader, logger=logger):
                 yield (page, size_return)
 
+    def run_param_query(self, tableLoader):
+        # Evaluates SQL syntax parameters which can pull parameter values by querying other tables.
+        # The select statement must return columns in the right order to match the parameter
+        # list in the config.       
+        # FIXME: Handle multiple queries
+        for key, value in self.params.items():
+            m = re.match(r"sql@\((.*)\)", value)
+            cols = re.split(r"\s*,\s*", key)
+            if m:
+                query = m.group(1)
+                for df in tableLoader.query_table(self.spec.name, query):
+                    yield cols, df
+                return #only run the first query
+                    
     def _query_resource(
         self, 
         tableLoader,
@@ -474,7 +506,12 @@ class RESTTable(TableDef):
 
         pager = PagingHelper.get_pager(self.paging_options)
         params = self.params.copy()
-        self.expand_sql_params(params, tableLoader)
+        for key in query_params.keys():
+            params.pop(key, None) # remove param that may have been provided by a parent query
+        
+        for k, v in self.params.items():
+            if self.is_sql_query_param(k, v):
+                params.pop(k, None) # works because we are modifying our local copy, iterating over 'self.params'
         
         page = 1
         safety_max_pages = 200000 # prevent infinite loop in case "pages finished logic" fails
@@ -515,14 +552,6 @@ class RESTTable(TableDef):
                 print("Aborting table scan after {} pages", page-1)
                 break
 
-
-    def expand_sql_params(self, params: dict, tableLoader):
-        """ Evaluates SQL syntax parameters which can pull parameter values by querying other tables """
-        return
-        for key, value in params.items():
-            m = re.match(r"%\((.*)\)", value)
-            if m:
-                query = m.group(1)
 
 
 class ReloadStrategy(TableUpdater):
