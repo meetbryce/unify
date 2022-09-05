@@ -305,8 +305,18 @@ class BaseTableScan(Thread):
         for query_result in resource_query_mgr.query_resource(self.tableLoader, logger):
             json_page = query_result.json
             size_return = query_result.size_return
-            record_path = self.tableMgr.table_spec.result_body_path
-            df = pd.json_normalize(json_page, record_path=record_path, sep='_')
+            record_path = self.tableMgr.table_spec.result_body_path.split(".")
+            metas = None
+            if self.tableMgr.table_spec.result_meta_paths:
+                metas = self.tableMgr.table_spec.result_meta_paths
+                if not isinstance(metas, list):
+                    metas = [metas]
+                metas = [p.split(".") for p in metas]
+            df = pd.json_normalize(
+                json_page, 
+                record_path=record_path, 
+                meta=metas,
+                sep='_')
             # adapters can provide extra data to merge into the result table. See
             # the `copy_params_to_output` property.
             if query_result.merge_cols:

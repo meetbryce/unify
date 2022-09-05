@@ -2,6 +2,7 @@ from cgi import parse_multipart
 import glob
 import os
 import re
+from pprint import pprint
 import string
 import sys
 from tempfile import NamedTemporaryFile
@@ -363,6 +364,7 @@ class RESTTable(TableDef):
             self.static_values = dictvals.get('values')
         self.result_body_path = dictvals.get('result_body_path')
         self.result_type = dictvals.get('result_type') or 'list'
+        self.result_meta_paths = dictvals.get('result_meta_paths')
 
         # parse columns
         self.columns = []
@@ -536,7 +538,7 @@ class RESTTable(TableDef):
     def _query_resource(
         self, 
         tableLoader,
-        api_params={},
+        orig_api_params={},
         logger: UnifyLogger = None
         ):
         """
@@ -552,6 +554,8 @@ class RESTTable(TableDef):
         safety_max_pages = 200000 # prevent infinite loop in case "pages finished logic" fails
 
         while page < safety_max_pages:
+            api_params = orig_api_params.copy() # Fresh copy each page
+
             url = (self.spec.base_url + self.query_path).format(**api_params)
             api_params.update(pager.get_request_params())
             
@@ -585,6 +589,8 @@ class RESTTable(TableDef):
             size_return = []
 
             json_result = r.json()
+            pprint(json_result)
+
             yield (json_result, size_return)
 
             if not pager.next_page(size_return[0], json_result):

@@ -74,22 +74,28 @@ tables:
       Context: ${Context}
       Dimension: ${Dimension}
       MaxResults: ${MaxResults}
-      NextPageToken: ${Next}
+      NextPageToken: ${NextPageToken}
     copy_params_to_output: [Context, Dimension]
-  - name: costs
+  - name: costs_by_service
     headers:
       Content-Type: application/x-amz-json-1.1
       X-Amz-Target: AWSInsightsIndexService.GetCostAndUsage
     resource_path: /
+    result_body_path: ResultsByTime.Groups
+    result_meta_paths: ["ResultsByTime.TimePeriod.Start", "ResultsByTime.TimePeriod.End"]
+    supports_paging: true
+    params:
+      start_date: sql@(select cast((now() - interval 6 month) as date))
+      end_date: sql@(select cast(now() as date))
     post:
       TimePeriod: 
-        # Start: sql@(select cast((now() - interval 6 month), as date)
-        # End: sql@(select cast(now() as date)
-        Start: '2022-08-01'
-        End: '2022-08-10'
+        Start: ${start_date}
+        End: ${end_date}
       Granularity: DAILY
       GroupBy:
         - Type: DIMENSION
           Key: SERVICE
       Metrics:
         - BlendedCost
+        - UnblendedCost
+      NextPageToken: ${NextPageToken}
