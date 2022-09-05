@@ -1,3 +1,4 @@
+import os
 import pytest
 import requests_mock
 
@@ -6,6 +7,8 @@ from mocksvc.mocksvc import MockSvc
 from unify import CommandInterpreter
 
 def test_updates_strategy():
+    os.environ.pop('UNIFY_SKIP_COLUMN_INTEL', None) # need column intel for peek
+
     table = "mocksvc.repos1100"
     c = CommandInterpreter()
     

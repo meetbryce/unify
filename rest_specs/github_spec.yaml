@@ -55,9 +55,3 @@ tables:
     supports_paging: True
     params:
       owner,repo,pull_number: sql@(select user_login, head_repo_name, number from pulls)
-    # args_query:
-    #   table: pulls
-    #   mapping:
-    #     owner: repo_owner
-    #     repo: repo
-    #     pull_number: number

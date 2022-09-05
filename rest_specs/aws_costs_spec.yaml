@@ -7,28 +7,75 @@ auth:
   secret_key: AWS_SECRET_ACCESS_KEY
   region: AWS_DEFAULT_REGION
   service: ce
+paging:
+  strategy: pagerToken
+  pager_token_path: NextPageToken
+  count_param: MaxResults
+  token_param: NextPageToken
+  page_size: 100
 tables:
   - name: cost_dimensions
     resource_path: /
     result_body_path: DimensionValues
+    supports_paging: true
     headers:
       Content-Type: application/x-amz-json-1.1
       X-Amz-Target: AWSInsightsIndexService.GetDimensionValues
-    paging:
-      strategy: pagerToken
-      pager_token_path: NextPageToken
-      count_param: $post.MaxResults
-      token_param: $post.NextPageToken
-      page_size: 100
+    params:
+      Context,Dimension: 
+        - [COST_AND_USAGE, AZ]
+        - [COST_AND_USAGE, INSTANCE_TYPE]
+        - [COST_AND_USAGE, LINKED_ACCOUNT]
+        - [COST_AND_USAGE, LINKED_ACCOUNT_NAME]
+        - [COST_AND_USAGE, OPERATION]
+        - [COST_AND_USAGE, PURCHASE_TYPE]
+        - [COST_AND_USAGE, REGION]
+        - [COST_AND_USAGE, SERVICE]
+        - [COST_AND_USAGE, SERVICE_CODE]
+        - [COST_AND_USAGE, USAGE_TYPE]
+        - [COST_AND_USAGE, USAGE_TYPE_GROUP]
+        - [COST_AND_USAGE, RECORD_TYPE]
+        - [COST_AND_USAGE, OPERATING_SYSTEM]
+        - [COST_AND_USAGE, TENANCY]
+        - [COST_AND_USAGE, SCOPE]
+        - [COST_AND_USAGE, PLATFORM]
+        - [COST_AND_USAGE, SUBSCRIPTION_ID]
+        - [COST_AND_USAGE, LEGAL_ENTITY_NAME]
+        - [COST_AND_USAGE, DEPLOYMENT_OPTION]
+        - [COST_AND_USAGE, DATABASE_ENGINE]
+        - [COST_AND_USAGE, CACHE_ENGINE]
+        - [COST_AND_USAGE, INSTANCE_TYPE_FAMILY]
+        - [COST_AND_USAGE, BILLING_ENTITY]
+        - [COST_AND_USAGE, RESERVATION_ID]
+        - [COST_AND_USAGE, RESOURCE_ID]
+        - [COST_AND_USAGE, RIGHTSIZING_TYPE]
+        - [COST_AND_USAGE, SAVINGS_PLANS_TYPE]
+        - [COST_AND_USAGE, SAVINGS_PLAN_ARN]
+        - [COST_AND_USAGE, PAYMENT_OPTION]
+        - [COST_AND_USAGE, AGREEMENT_END_DATE_TIME_AFTER]
+        - [COST_AND_USAGE, AGREEMENT_END_DATE_TIME_BEFORE]
+        - [COST_AND_USAGE, INVOICING_ENTITY]
+        - [RESERVATIONS, AZ]
+        - [RESERVATIONS, CACHE_ENGINE]
+        - [RESERVATIONS, DEPLOYMENT_OPTION]
+        - [RESERVATIONS, INSTANCE_TYPE]
+        - [RESERVATIONS, LINKED_ACCOUNT]
+        - [RESERVATIONS, PLATFORM]
+        - [RESERVATIONS, REGION]
+        - [RESERVATIONS, SCOPE]
+        - [RESERVATIONS, TAG]
+        - [RESERVATIONS, TENANCY]
+      start_date: sql@(select cast((now() - interval 6 month) as date))
+      end_date: sql@(select cast(now() as date))
     post:
       TimePeriod: 
-        # Start: sql@(select cast((now() - interval 6 month), as date)
-        # End: sql@(select cast(now() as date)
-        Start: '2022-01-01'
-        End: '2022-08-10'
-      Context: COST_AND_USAGE
-      Dimension: SERVICE
-#      Dimension: [AZ,INSTANCE_TYPE,LINKED_ACCOUNT,LINKED_ACCOUNT_NAME,OPERATION,PURCHASE_TYPE,REGION,SERVICE,SERVICE_CODE,USAGE_TYPE,USAGE_TYPE_GROUP,RECORD_TYPE,OPERATING_SYSTEM,TENANCY,SCOPE,PLATFORM,SUBSCRIPTION_ID,LEGAL_ENTITY_NAME,DEPLOYMENT_OPTION,DATABASE_ENGINE,CACHE_ENGINE,INSTANCE_TYPE_FAMILY,BILLING_ENTITY,RESERVATION_ID,RESOURCE_ID,RIGHTSIZING_TYPE,SAVINGS_PLANS_TYPE,SAVINGS_PLAN_ARN,PAYMENT_OPTION,AGREEMENT_END_DATE_TIME_AFTER,AGREEMENT_END_DATE_TIME_BEFORE,INVOICING_ENTITY]
+        Start: ${start_date}
+        End: ${end_date}
+      Context: ${Context}
+      Dimension: ${Dimension}
+      MaxResults: ${MaxResults}
+      NextPageToken: ${Next}
+    copy_params_to_output: [Context, Dimension]
   - name: costs
     headers:
       Content-Type: application/x-amz-json-1.1

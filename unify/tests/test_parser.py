@@ -230,3 +230,12 @@ def test_select_parsing(visitor, parser):
             "limit_clause": limit_clause
         }
     )
+
+    verify_parse(v, p,
+        "select_query",
+        "select cast(now() as date)",
+        args= {
+            "col_list": ["cast(now() as date)"]
+        }
+    )
+    

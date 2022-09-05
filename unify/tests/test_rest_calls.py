@@ -72,21 +72,21 @@ def test_calling_rest_api(connection, logger):
 
         table_spec = connection.adapter.lookupTable("repos100")
         total_records = 0
-        for json, size_return in table_spec.query_resource(None, logger):
-            total_records += len(json)
-            size_return.append(len(json))
+        for qres in table_spec.query_resource(None, logger):
+            total_records += len(qres.json)
+            qres.size_return.append(len(qres.json))
         assert total_records == 100
 
         table_spec = connection.adapter.lookupTable("repos27")
         total_records = 0
-        for json, size_return in table_spec.query_resource(None, logger):
-            total_records += len(json)
-            size_return.append(len(json))
+        for qres in table_spec.query_resource(None, logger):
+            total_records += len(qres.json)
+            qres.size_return.append(len(qres.json))
         assert total_records == 27
 
         table_spec = connection.adapter.lookupTable("repos1100")
         total_records = 0
-        for json, size_return in table_spec.query_resource(None, logger):
-            total_records += len(json)
-            size_return.append(len(json))
+        for qres in table_spec.query_resource(None, logger):
+            total_records += len(qres.json)
+            qres.size_return.append(len(qres.json))
         assert total_records == 1027

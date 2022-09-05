@@ -4,10 +4,13 @@ import os
 import re
 import string
 import sys
+from tempfile import NamedTemporaryFile
 import yaml
 from typing import List, AnyStr, Dict, Union
 import typing
 from datetime import datetime
+from collections.abc import Iterable
+from collections import namedtuple
 
 import requests
 import pandas as pd
@@ -215,6 +218,11 @@ class UnifyLogger:
     def log_table(table: str, level: int, *args) -> None:
         pass
 
+AdapterQueryResult = namedtuple(
+    'AdapterQueryResult', 
+    ['json','size_return','merge_cols'],
+    defaults={'merge_cols':None}
+)
 
 class TableDef:
     def __init__(self, name):
@@ -266,6 +274,7 @@ class TableDef:
         self._select_list = selects
 
     def query_resource(self, tableLoader, logger: UnifyLogger):
+        """ Yields AdapterQueryResults for each page of an API endpoint """
         pass
 
     @property
@@ -298,7 +307,7 @@ class TableUpdater:
         return False
 
     def query_resource(self, tableLoader, logger: UnifyLogger):
-        """ Generator which yields (page, size_return) tuples for all records updated
+        """ Generator which yields AdapterQueryResults for all records updated
             since the `updates_since` timestamp.
         """
         pass
@@ -324,6 +333,10 @@ class RESTTable(TableDef):
         self.query_date_format = spec.query_date_format
 
         self.headers = dictvals.get('headers', {})
+        # List of parameters that should be merged into the output table
+        self.copy_params_to_output = dictvals.get('copy_params_to_output')
+        if self.copy_params_to_output and not isinstance(self.copy_params_to_output, list):
+            self.copy_params_to_output = [self.copy_params_to_output]
 
         if dictvals.get('query_resource'):
             self.query_method, self.query_path = self.parse_resource(dictvals.get('query_resource'))
@@ -364,26 +377,14 @@ class RESTTable(TableDef):
         self.colmap = {col.name: col for col in self.columns}
         self.params = dictvals.get('params', {})
         self.post = dictvals.get('post')
-        if dictvals.get('args_query'):
-            self.args_query_table = dictvals['args_query']['table']
-            self.args_query_mappings = dictvals['args_query']['mapping']
-            self.args_query_exclusions = (dictvals['args_query'].get('exclude') or "").split(",")
-        else:
-            self.args_query_table = None
         self.keyColumnName = self.keyColumnType = None       
 
-    def is_sql_query_param(self, key, value):
-        return re.match(r"sql@\((.*)\)", value)
-
-    def requires_parent_query(self):
-        # See if any params refer to parent table queries
-        for key, value in self.params.items():
-            if self.is_sql_query_param(key, value):
-                return True
-
-    def parent_table(self):
-        if self.args_query_table:
-            return self.spec.lookupTable(self.args_query_table)
+    def get_sql_query_param(self, key, value):
+        if not isinstance(value, str):
+            return None
+        m = re.match(r"sql@\((.*)\)", value)
+        if m:
+            return m.group(1)
         else:
             return None
 
@@ -424,100 +425,146 @@ class RESTTable(TableDef):
                 f"Invalid refresh strategy '{self.refresh_strategy}' for table {self.name}"
             )
 
+    # def old_query_resource(self, tableLoader, logger: UnifyLogger):
+    #     """ Generator which yields (page, size_return) tuples for all rows from
+    #         an API endpoint. Each page should be a list of dicts representing
+    #         each row of results.
+
+    #         Because a resource may reference a parent query to provide API query
+    #         args, the 'tableLoader' argument is provided for querying the rows
+    #         of a parent table.
+    #     """
+    #     if self.parent_table():
+    #         # Run our parent query and then our query with parameters from each parent record
+    #         print(">>Running parent query: ", self.parent_table())
+    #         for df in tableLoader.read_table_rows(self.parent_table().qualified_name()):
+    #             for record in df.to_dict('records'):
+    #                 do_row = True
+    #                 for key in self.args_query_mappings:
+    #                     parent_col = self.args_query_mappings[key]
+    #                     if parent_col in record:
+    #                         record[key] = record[parent_col]
+    #                         if record[key] in self.args_query_exclusions:
+    #                             logger.log_table(
+    #                                 self.name, 
+    #                                 UnifyLogger.DEBUG,
+    #                                 "Excluding parent row with key: ", record[key]
+    #                             )
+    #                             do_row = False
+    #                     else:
+    #                         logger.log_table(
+    #                             self.name,
+    #                             UnifyLogger.WARNING,
+    #                             f"Error: parent record missing col {parent_col}: ", record
+    #                         )
+    #                 if do_row:
+    #                     for page, size_return in self._query_resource(tableLoader, record, logger):
+    #                         yield (page, size_return)
+    #     elif self.requires_parent_query():
+    #         print(">>Running parent SQL query: ", self.params)
+    #         df: pd.DataFrame = None
+    #         for param_names, df in self.run_param_query(tableLoader):
+    #             for row in df.values:
+    #                 record = dict(zip(param_names, row))
+    #                 for page, size_return in self._query_resource(tableLoader, record, logger):
+    #                     yield (page, size_return)
+    #     else:
+    #         # Simple query
+    #         for page, size_return in self._query_resource(tableLoader, logger=logger):
+    #             yield (page, size_return)
+
     def query_resource(self, tableLoader, logger: UnifyLogger):
-        """ Generator which yields (page, size_return) tuples for all rows from
-            an API endpoint. Each page should be a list of dicts representing
-            each row of results.
+        for params_record in self.generate_param_values(tableLoader):
+            print("Params: ", params_record)
+            if self.copy_params_to_output:
+                merge_cols = {k: params_record.get(k) for k in self.copy_params_to_output}
+            else:
+                merge_cols = None
+            for page, size_return in self._query_resource(tableLoader, params_record.copy(), logger):
+                yield AdapterQueryResult(json=page, size_return=size_return, merge_cols=merge_cols)
 
-            Because a resource may reference a parent query to provide API query
-            args, the 'tableLoader' argument is provided for querying the rows
-            of a parent table.
+    def generate_param_values(self, tableLoader):
+        """ 
+            Generates multiple param values for the API call. If all parameters are scalar values
+            then this function just yields a single parameters dict. But if we find parameters that 
+            generate multiple values, either via an embedded SQL query, or via a literal list of values,
+            then we generate a parameter dict for each value.
         """
-        if self.parent_table():
-            # Run our parent query and then our query with parameters from each parent record
-            print(">>Running parent query: ", self.parent_table())
-            for df in tableLoader.read_table_rows(self.parent_table().qualified_name()):
-                for record in df.to_dict('records'):
-                    do_row = True
-                    for key in self.args_query_mappings:
-                        parent_col = self.args_query_mappings[key]
-                        if parent_col in record:
-                            record[key] = record[parent_col]
-                            if record[key] in self.args_query_exclusions:
-                                logger.log_table(
-                                    self.name, 
-                                    UnifyLogger.DEBUG,
-                                    "Excluding parent row with key: ", record[key]
-                                )
-                                do_row = False
-                        else:
-                            logger.log_table(
-                                self.name,
-                                UnifyLogger.WARNING,
-                                f"Error: parent record missing col {parent_col}: ", record
-                            )
-                    if do_row:
-                        for page, size_return in self._query_resource(tableLoader, record, logger):
-                            yield (page, size_return)
-        elif self.requires_parent_query():
-            print(">>Running parent SQL query: ", self.params)
-            df: pd.DataFrame = None
-            for param_names, df in self.run_param_query(tableLoader):
-                for row in df.values:
-                    record = dict(zip(param_names, row))
-                    for page, size_return in self._query_resource(tableLoader, record, logger):
-                        yield (page, size_return)
-        else:
-            # Simple query
-            for page, size_return in self._query_resource(tableLoader, logger=logger):
-                yield (page, size_return)
+        # Setup parameters. Copy the literal ones.
+        params = self.params.copy()
 
-    def run_param_query(self, tableLoader):
-        # Evaluates SQL syntax parameters which can pull parameter values by querying other tables.
-        # The select statement must return columns in the right order to match the parameter
-        # list in the config.       
-        # FIXME: Handle multiple queries
-        for key, value in self.params.items():
-            m = re.match(r"sql@\((.*)\)", value)
-            cols = re.split(r"\s*,\s*", key)
-            if m:
-                query = m.group(1)
-                for df in tableLoader.query_table(self.spec.name, query):
-                    yield cols, df
-                return #only run the first query
+        # Now expand any SQL query references. A query could return multiple results or a
+        # single one.
+
+        for pname, value in self.params.items():
+            sql_query = self.get_sql_query_param(pname, value)
+            if sql_query:
+                # FIXME: Handle multiple cols
+                for df in tableLoader.query_table(self.spec.name, sql_query):
+                    if df.shape[0] == 0:
+                        # no values, so remove the parameter
+                        del params[pname]
+                    elif df.shape[0] == 1:
+                        params[pname] = df.to_numpy()[0].astype('str')[0]
+                    else:
+                        params[pname] = df.to_numpy().astype('str')
+
+        # Now run through parameters and if we find one with multiple values we generate
+        # param dictionaries with each value
+
+        sent_values = False
+        for pname, value in self.params.items():
+            if not isinstance(value, str) and isinstance(value, Iterable):
+                sent_values = True
+                param_cols = re.split(r"\s*,\s*", pname)
+                del params[pname] # will refill below
+                for row in value:
+                    if len(param_cols) == 1:
+                        params[pname] = (row[0] if hasattr(row, 'size') else row)
+                    else:
+                        # Unpack multiple param values
+                        params.update(dict(zip(param_cols, row)))
+                    # Now send params back to call, which will issue the API call using those
+                    # params (and possibly paginating the results)
+                    yield params
+                return # only allow one multi-value parameter for now
+        
+        if not sent_values:
+            # If nothing but scalar params then just yield the single record
+            yield params    
                     
     def _query_resource(
         self, 
         tableLoader,
-        query_params={},
+        api_params={},
         logger: UnifyLogger = None
         ):
+        """
+            Call a REST API given the provide api_params. Also handles pagination of the API.
+        """
         session = requests.Session()
         self.spec._setup_request_auth(session)
         session.headers.update(self.headers)
 
         pager = PagingHelper.get_pager(self.paging_options)
-        params = self.params.copy()
-        for key in query_params.keys():
-            params.pop(key, None) # remove param that may have been provided by a parent query
-        
-        for k, v in self.params.items():
-            if self.is_sql_query_param(k, v):
-                params.pop(k, None) # works because we are modifying our local copy, iterating over 'self.params'
         
         page = 1
         safety_max_pages = 200000 # prevent infinite loop in case "pages finished logic" fails
 
         while page < safety_max_pages:
-            url = (self.spec.base_url + self.query_path).format(**query_params)
-            params.update(pager.get_request_params())
+            url = (self.spec.base_url + self.query_path).format(**api_params)
+            api_params.update(pager.get_request_params())
             
             if self.post:
-                print("POST ", url, params)
-                r = session.post(url, json=self.post)
+                remove_keys = []
+                post = self.interpolate_post_values(self.post, api_params, remove_keys)
+                for k in remove_keys:
+                    api_params.pop(k, None)
+                print("POST ", url, api_params, post)
+                r = session.post(url, params=api_params, json=post)
             else:
-                print(url, params)
-                r = session.get(url, params=params)
+                print(url, api_params)
+                r = session.get(url, params=api_params)
 
             if r.status_code >= 400:
                 print(r.text)
@@ -548,6 +595,35 @@ class RESTTable(TableDef):
                 print("Aborting table scan after {} pages", page-1)
                 break
 
+    def interpolate_post_values(self, node, params: dict, remove_keys: list):
+        """ Substitutes parameters into a request POST body by finding
+            ${var} references. Returns a copy of the POST body with the substituted
+            values.
+        """
+        if isinstance(node, str):
+            for k, v in params.items():
+                pattern = "${" + k + "}"
+                if node == pattern:
+                    node = v # allow to substitute the whole value
+                    remove_keys.append(k)
+                elif pattern in node:
+                    node = node.replace(pattern, str(v))
+                    remove_keys.append(k)
+            if isinstance(node, str) and re.match(r"\$\{[a-zA-Z0-9_-]+\}", node):
+                # remove key references not supplied in params
+                print("Removing undefined reference: ", node)
+                node = None
+            return node
+        elif isinstance(node, list):
+            return [self.interpolate_post_values(v, params, remove_keys) for v in node]
+        elif isinstance(node, dict):
+            dup = node.copy()
+            for key, value in node.items():
+                dup[key] = self.interpolate_post_values(value, params, remove_keys)
+            return dup
+        else:
+            # Non-strings just return as is
+            return node  
 
 
 class ReloadStrategy(TableUpdater):
@@ -559,8 +635,8 @@ class ReloadStrategy(TableUpdater):
 
     def query_resource(self, tableLoader, logger: UnifyLogger):
         """ Just delegate to the TableDef like a first load. """
-        for page, size_return in self.table_def.query_resource(tableLoader, logger):
-            yield (page, size_return)
+        for query_result in self.table_def.query_resource(tableLoader, logger):
+            yield query_result
 
 class UpdatesStrategy(TableUpdater):
     def __init__(self, table_def: TableDef, updates_since: datetime) -> None:
@@ -599,8 +675,8 @@ class UpdatesStrategy(TableUpdater):
             self.table_def.params = dict(args)
 
             """ Just delegate to the TableDef like a first load. """
-            for page, size_return in self.table_def.query_resource(tableLoader, logger):
-                yield (page, size_return)
+            for query_result in self.table_def.query_resource(tableLoader, logger):
+                yield query_result
         finally:
             self.table_def.params = save_params
 

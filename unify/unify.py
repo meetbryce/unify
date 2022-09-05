@@ -22,6 +22,7 @@ from lark.visitors import v_args
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+import sqlparse
 from typing import Dict
 # CHARTING
 import matplotlib.pyplot as plt
@@ -157,6 +158,8 @@ class BaseTableScan(Thread):
     def analyze_columns(self, df: pd.DataFrame):
         # Analyze a page of rows and extract useful column intelligence information for 
         # potential use later, such as by the `peek` command.
+        if os.environ.get('UNIFY_SKIP_COLUMN_INTEL'):
+            return
         for order, column in enumerate(df.columns):
             lowercol = column.lower()
             attrs = {
@@ -184,6 +187,8 @@ class BaseTableScan(Thread):
             self.analyzed_columns.append(ColumnIntel(column, attrs))
 
     def save_analyzed_columns(self):
+        if os.environ.get('UNIFY_SKIP_COLUMN_INTEL'):
+            return
         cols: list[ColumnIntel] = sorted(self.analyzed_columns, key=lambda ci: ci.attrs['order'])
         for col in cols:
             self.storage_mgr.insert_column_intel(
@@ -297,9 +302,16 @@ class BaseTableScan(Thread):
 
         resource_query_mgr = self.get_query_mgr()
 
-        for json_page, size_return in resource_query_mgr.query_resource(self.tableLoader, logger):
+        for query_result in resource_query_mgr.query_resource(self.tableLoader, logger):
+            json_page = query_result.json
+            size_return = query_result.size_return
             record_path = self.tableMgr.table_spec.result_body_path
             df = pd.json_normalize(json_page, record_path=record_path, sep='_')
+            # adapters can provide extra data to merge into the result table. See
+            # the `copy_params_to_output` property.
+            if query_result.merge_cols:
+                for col, val in query_result.merge_cols.items():
+                    df[col] = val
             size_return.append(df.shape[0])
 
             if df.shape[0] == 0:
@@ -354,7 +366,6 @@ class InitialTableLoad(BaseTableScan):
         self.clear_analyzed_columns(self.table_ref)
 
     def _flush_rows_to_db(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
-        breakpoint()
         ## Default version works when loading a new table
         print(f"Saving page {page} with {next_df.shape[1]} columns")
         if page <= flush_count:
@@ -586,37 +597,69 @@ class TableLoader:
         self.tables[table_ref].refresh_table(tableLoader=self)
 
     def query_table(self, schema: str, query: str):
-        parser_visitor = ParserVisitor()
-        parse_tree = self.lark_parser.parse(query)
-        command = parser_visitor.perform_new_visit(parse_tree, full_code=query)
-        query_parts = parser_visitor._the_command_args
-        if command == 'select_query':
-            # Load data from referenced tables if needed. Tables must not be qualified
-            # so they can only use tables from the same schema
-            table_list = []
-            for table in query_parts["table_list"]:
-                if "." in table:
-                    raise RuntimeError(f"Adapter queries cannot use qualified table names: {table}. Query: {query}")
-                table = schema + "." + table
-                if not self.table_exists_in_db(table):
-                    tmgr = self.tables[table]
-                    # TODO: Might want a timeout for large parent tables
-                    tmgr.load_table(tableLoader=self, waitForScan=True)
-                table_list.append(table)
+        # Our parser wasn't smart enough:
+        # parser_visitor = ParserVisitor()
+        # parse_tree = self.lark_parser.parse(query)
+        # command = parser_visitor.perform_new_visit(parse_tree, full_code=query)
+        # query_parts = parser_visitor._the_command_args
 
-            if query_parts.get("limit_clause"):
-                limit = " LIMIT " + query_parts["limit_clause"]
-            else:
-                limit = ""
-            parent_query = "SELECT " + ",".join(query_parts["col_list"]) + \
-                            " FROM " + ",".join(table_list) + \
-                            (query_parts["where_clause"] or '') + \
-                            (query_parts["order_clause"] or '') + \
-                            limit
-            with dbmgr() as duck:
-                yield duck.execute_df(parent_query)
+        parsed = sqlparse.parse(query)[0]
+        if parsed[0].ttype != sqlparse.tokens.DML or parsed[0].value != 'select':
+            raise RuntimeError(f"Invalid statement type: '{query}'")
+
+        # Verify, for safety, no other DMLs inside
+        col_list = []
+        past_cols = False
+        past_from = False
+        past_tables = False
+        table_list = []
+        funcs = []
+        where_clause = ""
+        for idx in range(1, len(parsed.tokens)):
+            token = parsed.tokens[idx]
+            if isinstance(token, sqlparse.sql.IdentifierList):
+                if not past_cols:
+                    col_list = re.split(r"\s*,\s*", token.value)
+                    past_cols = True
+                elif past_from and not past_tables:
+                    table_list = re.split(r"\s*,\s*", token.value)
+                    past_tables = True
+
+            if token.ttype == sqlparse.tokens.Keyword:
+                if token.value == 'from':
+                    past_from = True
+            if isinstance(token, sqlparse.sql.Where):
+                where_clause = token.value
+            if token.ttype == sqlparse.tokens.DML:
+                raise RuntimeError(f"Invalid sql query has embedded DML '{query}'")
+            if isinstance(token, sqlparse.sql.Function):
+                funcs.append(token.value)
+
+        if len(col_list) == 0 and len(funcs) > 0:
+            col_list.append(funcs[0]) # allow a simple select of a function value
+
+        if len(col_list) == 0:
+            raise RuntimeError(f"Invalid query references no columns or functions: '{query}'")
+
+        table_refs = []
+        for table in table_list:
+            if "." in table:
+                raise RuntimeError(f"Adapter queries cannot use qualified table names: {table}. Query: {query}")
+            table = schema + "." + table
+            if not self.table_exists_in_db(table):
+                tmgr = self.tables[table]
+                # TODO: Might want a timeout for large parent tables
+                tmgr.load_table(tableLoader=self, waitForScan=True)
+            table_refs.append(table)
+
+        if table_refs:
+            from_clause = " FROM " + ",".join(table_refs)
         else:
-            raise RuntimeError(f"Invalid SQL query: {query}")
+            from_clause = ""
+
+        parent_query = "SELECT " + ",".join(col_list) + from_clause + where_clause
+        with dbmgr() as duck:
+            yield duck.execute_df(parent_query)
 
     def read_table_rows(self, table, limit=None):
         with dbmgr() as duck:
