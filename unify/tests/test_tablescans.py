@@ -32,6 +32,7 @@ def test_tableloader(connections):
 
         assert loader.table_exists_in_db("mocksvc.repos27") == False
         loader.materialize_table("mocksvc", "repos27")
+        loader.create_views("mocksvc", "repos27")
 
         assert loader.table_exists_in_db("mocksvc.repos27")
 
@@ -44,6 +45,9 @@ def test_tableloader(connections):
             assert len(recs) > 0
 
             assert duck.execute("select count(*) from mocksvc.repos27").fetchone()[0] == 27
+
+            # Check that our view was created
+            assert duck.execute("select count(*) from mocksvc.repos_view").fetchone()[0] == 27
 
         loader.refresh_table("mocksvc.repos27")
 

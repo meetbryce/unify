@@ -26,3 +26,10 @@ tables:
       strategy: updates
       params:
         later_than: "{timestamp}"
+views:
+  - name: repos_view
+    from: repos27
+    query: |
+      SELECT 
+        id as idkey, full_name as bigname
+      

@@ -65,8 +65,8 @@ tables:
         - [RESERVATIONS, SCOPE]
         - [RESERVATIONS, TAG]
         - [RESERVATIONS, TENANCY]
-      start_date: sql@(select cast((now() - interval 6 month) as date))
-      end_date: sql@(select cast(now() as date))
+      start_date: sql@(select cast(cast((now() - interval 6 month) as date) as varchar))
+      end_date: sql@(select cast(cast(now() as date) as varchar))
     post:
       TimePeriod: 
         Start: ${start_date}
@@ -85,8 +85,8 @@ tables:
     result_meta_paths: ["ResultsByTime.TimePeriod.Start", "ResultsByTime.TimePeriod.End"]
     supports_paging: true
     params:
-      start_date: sql@(select cast((now() - interval 6 month) as date))
-      end_date: sql@(select cast(now() as date))
+      start_date: sql@(select cast(cast((now() - interval 6 month) as date) as varchar))
+      end_date: sql@(select cast(cast(now() as date) as varchar))
     post:
       TimePeriod: 
         Start: ${start_date}
@@ -99,3 +99,12 @@ tables:
         - BlendedCost
         - UnblendedCost
       NextPageToken: ${NextPageToken}
+views:
+  - name: costs
+    from: costs_by_service
+    query: |
+      SELECT
+        arrayElement(cast(Keys as Array(String)),1) as service, 
+        cast(Metrics_BlendedCost_Amount as Float) as blended,
+        cast(ResultsByTime_TimePeriod_Start as Date) as start,
+        cast(ResultsByTime_TimePeriod_End as Date) as end

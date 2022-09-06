@@ -631,6 +631,11 @@ class RESTTable(TableDef):
             # Non-strings just return as is
             return node  
 
+RESTView = namedtuple(
+    'RESTView', 
+    ['name','from_list','query', 'help'], 
+    defaults={'help':None}
+)
 
 class ReloadStrategy(TableUpdater):
     def __init__(self, table_def: TableDef) -> None:
@@ -786,9 +791,26 @@ class RESTAdapter(Adapter):
         else:
             print("Warning: spec '{}' has no tables defined".format(self.name))
 
+        if "views" in spec:
+            self.views = []
+            for d in spec['views']:
+                if 'name' in d and 'from' in d and 'query' in d:
+                    self.views.append(
+                        RESTView(name=d['name'], 
+                            from_list=d['from'], 
+                            query=d['query'],
+                            help=d.get('help')
+                        )
+                    )
+                else:
+                    raise RuntimeError(f"Missing one of name, from or query from view: {d}")                   
+
 
     def list_tables(self) -> List[TableDef]:
         return self.tables
+
+    def list_views(self) -> List[RESTView]:
+        return self.views
 
     def _setup_request_auth(self, session: requests.Session):
         user = ''

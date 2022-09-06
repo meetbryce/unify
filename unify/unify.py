@@ -45,6 +45,7 @@ from .rest_schema import (
     Adapter, 
     Connection, 
     OutputLogger, 
+    RESTView,
     TableDef,
     TableUpdater,
     UnifyLogger
@@ -305,7 +306,9 @@ class BaseTableScan(Thread):
         for query_result in resource_query_mgr.query_resource(self.tableLoader, logger):
             json_page = query_result.json
             size_return = query_result.size_return
-            record_path = self.tableMgr.table_spec.result_body_path.split(".")
+            record_path = self.tableMgr.table_spec.result_body_path
+            if record_path is not None:
+                record_path = record_path.split(".")
             metas = None
             if self.tableMgr.table_spec.result_meta_paths:
                 metas = self.tableMgr.table_spec.result_meta_paths
@@ -590,6 +593,26 @@ class TableLoader:
             tmgr = self._get_table_mgr(qual)
             tmgr.load_table(tableLoader=self)
             return tmgr.has_data()
+
+    def create_views(self, schema, table):
+        # (Re)create any views defined that depend on the the indicated table
+        with dbmgr() as duck:
+            qual = schema + "." + table
+            tmgr = self._get_table_mgr(qual)
+            views: typing.List[RESTView] = tmgr.adapter.list_views()
+            if views:
+                for view in views:
+                    if table in view.from_list:
+                        duck.execute(f"DROP VIEW IF EXISTS {tmgr.schema}.{view.name}")
+                        query = view.query
+                        if not query.strip().lower().startswith("select"):
+                            query = "SELECT " + query
+                        froms = view.from_list
+                        if not isinstance(froms, list):
+                            froms = [froms]
+                        froms = ",".join([tmgr.schema + "." + table for table in froms])
+                        duck.execute(f"CREATE VIEW {tmgr.schema}.{view.name} AS {query} FROM {froms}")
+
 
     def analyze_columns(self, table_ref):
         with dbmgr() as duck:
@@ -1398,6 +1421,7 @@ class CommandInterpreter:
 
     def load_adapter_data(self, schema_name, table_name):
         if self.loader.materialize_table(schema_name, table_name):
+            self.loader.create_views(schema_name, table_name)
             return True
         else:
             self.print("Loading table...")

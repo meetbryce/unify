@@ -1,89 +1,224 @@
 enabled: true
-# Name of this connector, will be mapped to a Presto schema
+# Name of this adapter. Connections will refer to this name in the connections.yaml config file.
 name: github
 # Base URL for the REST API
 base_url: https://api.github.com
-# For pagination by page number, the name of the page number (index) query arg
-pageIndexArg: page
-# The "row count" query arg
-pageMaxArg: per_page
-# If this API uses "page tokens", specify the dot-path into the result to extract the "next page" token
-next_page_token: <field path>
-# Maximum records queryable per page
-maxPerPage: 100
+#
+# Authorization is specified with the 'auth' dictionary:
+#
+auth:
+  type: BASIC # one of NONE, BASIC, BEARER, HEADERS, PARAMS, or AWS4Auth
+  uservar: USER
+  tokenvar: PASSWORD
+  # The other keys depend on the auth type.
+  # BASIC:
+  #   uservar: <the user name>
+  #   tokenvar: <the auth token>
+  # BEARER:
+  #    tokenvar: <the auth token>
+  # HEADERS:
+  #    Each key, value is passed as a header
+  # PARAMS:
+  #    Each key, value is passed a a URL parameter
+  # AWS4Auth:
+  #    access_id: <access key id>
+  #    secret_key: <access secret key>
+  #    region: <AWS region>
+  #    service: # the 2 letter AWS service name
+  # Typically each value specifies an *option key* that will be defined in the connections.yaml 
+  # config file.
+#
+# Pagination is controlled by the *paging* dictionary
+#
+paging:
+  strategy: pageAndCount # one of pageAndCount, offsetAndCount, pagerToken
+  page_param: page
+  count_param: per_page
+  page_size: 100
+  # The other properties depend on which paging strategy is selected
+  #
+  # strategy: pageAndCount
+  # page_param: <name of the "current page" parameter 
+  # count_param: <name of the "requested page size" parameter
+  # page_size:  the requested page size (int)
+  #
+  # strategy: offsetAndCount
+  # offset_param: <name of the "cursor offset" parameter>
+  # count_param: <name of the "requested number of results" parameter>
+  # page_size:  the requested count size (int)
+  #
+  # strategy: pagerToken
+  # In this strategy a request will return a "next page token" inside the body of the last set of
+  # results. You specify the JSON path to that value and indicate the parameter name to provide
+  # the token in the next request.
+  # token_param: <name of the "next page token" parameter>
+  # count_param: <name of the "requested number of results" parameter>
+  # pager_token_path: JSON path to the next page token in the result body
+  # page_size:  the requested count size (int)
+
 # The strptime format for parsing timestamps
 dateParser: '%Y-%m-%dT%H:%M:%SZ'
-# The number of seconds to cache API responses
-cacheTTLSecs: 43200
-# The API authentication method
-auth:
-# type is BASIC, BEARER, HEADERS, PARAMS. If HEADERS then another "headers" key should be
-# included which contains a dictionary of header names, ENV VAR pairs.
-# If PARAMS then another "params" key should contains dictionary of parameter name, ENV VAR pairs.
-  type: BASIC
-# env var name holding the basic auth username
-  uservar: GHUSER
-# env var name holding the basic auth token
-  tokenvar: GHTOKEN
-# list of table definitions
+
+#
+# Table definitions
+#
+# Each table definition maps an API request type to a table in the database. We can handle both
+# GET and POST requests, and complex logic for determining the details of the API call.
+# If an API supports paging then you must specify `supports_paging: true` and then the paging
+# strategy defined for the API will be used.
+#
 tables:
-# The name of table in presto  
+# The name of generated table
   - name: users
-# The API query resource method and path, or "<inline>" to provide static results from this file
-# Like: GET /v1/users
-    query_resource: <method> <path>
-# If the resource path includes arguments, you can specify a subquery to provide arg
-# values if they are omitted from the WHERE clause.
-    args_query:
-      table: <sub query table name>
-# The nested 'mapping' dict maps resource_path args to the sub-query result columns      
-      mapping:
-        org: login
-
-# If the connector supports mutations for this resource, you can indicate the REST
-# resources for each type of mutation, giving the http method and path together.
-    create_resource: <method> <path>
-    upsert_resource: <method> <path>
-    delete_resource: <method> <path>
-
-# another table
-  - name: users
-# the API resource path. Can include {vars} which must be supplied either
-# in the where clause or via query from another table.
-    resource_path: /users
-# The API call result at `resource_path` is expected to be an array. If it will only
-# contain a single value you can override the result type to `object`.    
-    result_type: object
-# optional additional query args to the REST API call for this path
+    # the path to the API resource. You can use {param} syntax if variable values need to provided
+    # in the API path. You populate these values via the `params` section (see below).
+    resource_path: /v1/{org}/users 
+    # If result records are nested inside the result JSON body, specify the dot-separated path
+    # to find the result list inside the body using `result_body_path`.
+    result_body_path: results
+    #
+    # In some cases you may want additional fields from the JSON payload that appear "above"
+    # the result list to be cloned onto each row. Use the `result_meta_paths` attribute for
+    # this purpose. Say your result looks like:
+    # {
+    #    results: 
+    #      inner_value: [
+    #         {
+    #          field1: value1
+    #         },
+    #         {
+    #          field1: value2
+    #         },
+    #      ],
+    #      tag_name: "foo"
+    #
+    # So your `result_body_path` points to the `inner_value` list:
+    result_body_path: results.inner_value
+    # and you want to include column "tag_name=foo" in each record, you can specify the
+    # path to this additional field:
+    result_meta_paths: [["results", "tag_name"]]
+    # Now your resulting records will look like:
+    #    field1         tag_name
+    #    ---------      ----------
+    #    value1         foo
+    #    value2         foo
+    # You can supply multiple paths, and each path is a list of element names.
+    #
+    #
+    # Specify if this API resource supports paging
+    supports_paging: true
+    # Optional additional headers to supply to the API call. Below are examples from the AWS Costs Adapter.
+    headers:
+      Content-Type: application/x-amz-json-1.1
+      X-Amz-Target: AWSInsightsIndexService.GetDimensionValues
+    #
+    # Parameters
+    # 
+    # We support multiple ways to parameterize the API calls. The simplest case is providing 
+    # static values to one or more URL parameters:
     params:
-      key: value
-# list of column definitions. Column definitions contain the follwing fields,
-# only "name" is required:
-# name: name of the column in the presto table
-# type: presto column type: VARCHAR (default), INT, BOOLEAN, TIMESTAMP, JSON
-# source: a dot separated path into the JSON blob to extract the source field, or "<args>" meaning the column is in the WHERE clause
-# comment: Column annotation
-# source_table: If the resource path var is omitted from the WHERE clause, this points
-# to a table from which a set of matching values can be queried
-# source_table_field: The field name from the source_table query
-    columns:
-      - name: login
-        type: VARCHAR
-      - name: id
-        type: INT
-      - name: node_id
-        type: VARCHAR
-      - name: avatar_url
-        type: VARCHAR
-      - name: url
-        type: VARCHAR
-      - name: type
-        type: VARCHAR
-      - name: name
-        type: VARCHAR
-      - name: location
-        type: VARCHAR
-      - name: email
-        type: VARCHAR
-      - name: followers
-        type: INT
+      sort_by: name
+      deleted: 0
+    # This will add `?sort_by=name,deleted=0` to every API call.
+    # This works with resource path parameters also, like:
+    resource_path: /v1/{org}/users
+    params:
+      org: AcmeCo
+    #
+    # A key feature is that a param definition can provide *multiple values*. In this case
+    # the API will be called with each value of that parameter. For example:
+    resource_path: /v1/{org}/users
+    params:
+      org: [org1, org2]
+    # Will call our API with `/v1/org1/users` and `/v1/org2/users`. 
+    # Many REST APIs are organized in a hierarchy, where you values from a "parent API" provide
+    # the parameters to another API call. Github is a good example, where the API call
+    # to retrieve the set of Orgs available to a user is a simple API call:
+  - name: orgs
+    resource_path: /user/orgs
+    #
+    # But if we want to get the list of ALL members of every Org that a user belongs to, then 
+    # we need to call the Org Members API call with each org id in turn, like:
+    #   GET /orgs/org1/members
+    #   GET /orgs/org2/members 
+    #   etc...
+    #
+    # To support this, a param can use a `sql query` to reference the values returned from another
+    # API call. See the definition for the org_members API below:
+  - name: org_members
+    resource_path: /orgs/{org}/members
+    params:
+      org: sql@(select login from orgs)    
+    #
+    # The special syntax `sql@(<query)` is interpreted to run the SQL query against the database
+    # to retrieve values for another API call. When the `org_members` table is loaded, the
+    # `orgs` table will be loaded first, and then the Org Id's (via the 'login' column) will
+    # be queried from that table and used in a series of calls to the Org Members API. These
+    # calls can be nested indefinitely, so that table C can reference table B, which can reference
+    # table A.
+    #
+    # Since we support SQL queries for parent->child lookups, we can also use basic queries to
+    # dynamically populate a parameter. This is used in the AWS Costs adapter:
+    params:
+      start_date: sql@(select cast((now() - interval 6 month) as date))
+    # Any valid SQL functions can be used and the query can return a single or multiple values.
+    # Note that for security that the query can only refer to tables within the current adapter -
+    # you cannot query data from other schemas and in fact schema qualified table references
+    # (like "select col from sch1.tab1") will raise an error. 
+    #
+    # POST requests
+    #
+    # By default API calls use HTTP GET, but you can provide a post body to issue POSTs.
+    # Use the 'post' dictionary:
+    post:
+      field1: value1
+      sub_part1:
+        - start: "08:00"
+        - end: "12:00"
+    # This dictionary will be converted to JSON and sent as the body of the request. 
+    # You cannot directly parameterize the POST body, but you can refer to `param` values
+    # that are themselves dynamic:
+    post:
+      start_time: ${start_time}
+    # The `${}` syntax will be sustituted with the current param value with that name.
+    # This works inside strings as well:
+    post:
+      filter: "date < ${current_time}"
+    #
+    # Copying parameter values to the output table
+    #
+    # If you want to include parameter values in the output table because they aren't
+    # present in the API result, use the `copy_params_to_output` property
+    copy_params_to_output: [Context, Dimension]
+    # and provide a list of param names. 
+#
+# Defining Views
+# 
+# It is intended that Adapter tables reflect the exact structure of API responses from 
+# the source system. Rather than trying to transform data in place, instead you can
+# simply create a VIEW against the raw data table. This VIEW will be re-created each time
+# the source table is loaded. This allows an Adapter author to create one or more "user friendly"
+# views of data from a source system. A view can select specific columns, rename them, cast
+# data to more usable types, or perform other types of transformations. You can join data together
+# from multiple tables, etc... 
+#
+# The only limitation is that views can only reference tables defined in the current Adapter.
+# In fact table references should never include a schema qualification.
+#
+# The "views" property is a list of dictionaries, which each dict defines a view.
+- views:
+  - name: simple_orders # the name of the view
+    # a single or list of multiple tables that the view selects from.
+    from: raw_orders_table 
+    # the query should be the full SELECT statement for the view. The system will
+    # automatically generate the "CREATE VIEW AS" part of the statement. The list of
+    # tables in the FROM clause must match those in the `from` property.
+    query: |
+      SELECT 
+         order_id as id, 
+        order_warehouse_name as name 
+      FROM 
+        raw_orders_table
+      WHERE
+        order_date > (now() - interval 6 months)
+        

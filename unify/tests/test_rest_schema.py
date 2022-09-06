@@ -2,7 +2,7 @@ import io
 import os
 import yaml
 
-from unify.rest_schema import Adapter, RESTAdapter, RESTTable, Connection
+from unify.rest_schema import Adapter, RESTAdapter, RESTTable, Connection, RESTView
 from unify import OutputLogger
 
 def test_apispec_class():
@@ -22,12 +22,17 @@ def test_apispec_class():
         {"name":"users", "resource_path": "/users"}
     ]
 
+    views = [
+        {"name":"repo_view", "from":"repos", "query":"select name, date"}
+    ]
+
     rest_tables = [RESTTable(spec, t) for t in tables]
     assert rest_tables[0].name == "repos"
     assert rest_tables[0].query_path == "/repos"
     assert rest_tables[0].spec == spec
 
     config['tables'] = tables
+    config['views'] = views
 
     spec = RESTAdapter(config)
     assert len(spec.tables) == 2
@@ -39,6 +44,11 @@ def test_apispec_class():
     spec.run_command("help", output)
     assert "\n".join(output.get_output()) == config["help"]
 
+    assert len(spec.list_views()) == 1
+    v = spec.list_views()[0]
+    assert isinstance(v, RESTView)
+    assert v.name == 'repo_view'
+    assert v.from_list == 'repos'
 
 def test_connector():
     fpath = os.path.join(os.path.dirname(__file__), "connections.yaml")
@@ -52,9 +62,3 @@ def test_connector():
     conn_config = next(conn for conn in config if next(iter(conn.keys())) == "github")
     conn_config = next(iter(conn_config.values()))
     assert "options" in conn_config
-
-
-
-
-
-    

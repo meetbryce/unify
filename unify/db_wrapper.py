@@ -113,6 +113,8 @@ class DuckDBWrapper(DBWrapper):
                 m = re.search("(\w+)\."+table_root, str(e))
                 if m:
                     schema = m.group(1)
+                else:
+                    schema = ""
                 raise TableMissingException(schema + "." + table_root)
             else:
                 raise
@@ -127,7 +129,7 @@ class DuckDBWrapper(DBWrapper):
 
     def delete_rows(self, table, filter_values: dict=None, where_clause: str=None):
         if filter_values:
-            query = f"delete from {table} where " + ",".join([f"{key} = ?" for key in filter_values.keys()])
+            query = f"delete from {table} where " + " and ".join([f"{key} = ?" for key in filter_values.keys()])
             query = self._substitute_args(query, filter_values.values())
         else:
             query = f"delete from {table} where {where_clause}"
