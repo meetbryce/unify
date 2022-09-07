@@ -95,15 +95,16 @@ class UnifyKernel(Kernel):
                 if lines:
                     self.send_response(self.iopub_socket, 'stream', {'name': 'stdout', 'text': "\n".join(lines)})
                 if isinstance(object, pd.DataFrame):
-                    content = {
-                        'source': 'kernel',
-                        'data': { 
-                            'text/html': object.to_html(index=False, render_links=True, escape=False),
-                            'text/plain': object.to_string(index=False)
-                        },
-                        'metadata' : {}
-                    }
-                    self.send_response(self.iopub_socket, 'display_data', content)
+                    with pd.option_context('display.float_format', '{:0.2f}'.format):
+                        content = {
+                            'source': 'kernel',
+                            'data': { 
+                                'text/html': object.to_html(index=False, render_links=True, escape=False),
+                                'text/plain': object.to_string(index=False)
+                            },
+                            'metadata' : {}
+                        }
+                        self.send_response(self.iopub_socket, 'display_data', content)
                 elif isinstance(object, dict) and 'mime_type' in object:
                     print("Got a dict with mime_type: ", object['mime_type'], " returning image")
                     enc_data = urllib.parse.quote(base64.b64encode(object['data']))

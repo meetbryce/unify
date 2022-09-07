@@ -24,6 +24,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 import sqlparse
 from typing import Dict
+import sqlglot
 # CHARTING
 import matplotlib.pyplot as plt
 
@@ -594,24 +595,38 @@ class TableLoader:
             tmgr.load_table(tableLoader=self)
             return tmgr.has_data()
 
+    def qualify_tables_in_view_query(self, query: str, from_list: list[str], schema: str,
+                                    dialect: str):
+        """ Replaces non-qualified table references in a view query with qualified ones.
+            Returns the corrected query.
+        """
+        if not isinstance(from_list, list):
+            from_list = [from_list]
+        froms = ",".join([(schema + "." + t) for t in from_list])
+        return sqlglot.parse_one(query, read=dialect).from_(froms, append=False).sql()
+
     def create_views(self, schema, table):
         # (Re)create any views defined that depend on the the indicated table
+        qual = schema + "." + table
+        tmgr = self._get_table_mgr(qual)
+        views: typing.List[RESTView] = tmgr.adapter.list_views()
+        if not views:
+            return
         with dbmgr() as duck:
-            qual = schema + "." + table
-            tmgr = self._get_table_mgr(qual)
-            views: typing.List[RESTView] = tmgr.adapter.list_views()
-            if views:
-                for view in views:
-                    if table in view.from_list:
-                        duck.execute(f"DROP VIEW IF EXISTS {tmgr.schema}.{view.name}")
+            for view in views:
+                if table in view.from_list:
+                    query = None
+                    if isinstance(view.query, dict):
+                        if duck.dialect() in view.query:
+                            query = view.query[duck.dialect()]
+                        else:
+                            print(f"Skipping view {view.name} with no dialect for current database")
+                            return
+                    else:
                         query = view.query
-                        if not query.strip().lower().startswith("select"):
-                            query = "SELECT " + query
-                        froms = view.from_list
-                        if not isinstance(froms, list):
-                            froms = [froms]
-                        froms = ",".join([tmgr.schema + "." + table for table in froms])
-                        duck.execute(f"CREATE VIEW {tmgr.schema}.{view.name} AS {query} FROM {froms}")
+                    query = self.qualify_tables_in_view_query(query, view.from_list, tmgr.schema, duck.dialect())
+                    duck.execute(f"DROP VIEW IF EXISTS {tmgr.schema}.{view.name}")
+                    duck.execute(f"CREATE VIEW {tmgr.schema}.{view.name} AS {query}")
 
 
     def analyze_columns(self, table_ref):
@@ -1536,7 +1551,8 @@ class UnifyRepl:
                                 "max_rows" : None,
                                 "min_rows" : 10,
                                 "max_colwidth": 50,
-                                "header": True
+                                "header": True,
+                                "float_format": '{:0.2f}'.format
                             }
                             if df.shape[0] > 40:
                                 pydoc.pager(df.to_string(**fmt_opts))

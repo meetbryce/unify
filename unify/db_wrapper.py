@@ -90,6 +90,9 @@ class DBWrapper:
             sql += " cascade"
         return self.execute(sql)
 
+    def dialect(self):
+        return "postgres"
+
 DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_HOME, exist_ok=True)
 
@@ -102,6 +105,9 @@ class DuckDBWrapper(DBWrapper):
 
     def __init__(self):
         pass
+
+    def dialect(self):
+        return "duckdb"
 
     def execute(self, query: str, args=[]):
         try:
@@ -263,6 +269,9 @@ class ClickhouseWrapper(DBWrapper):
 
     def __init__(self):
         self.client = None
+
+    def dialect(self):
+        return "clickhouse"
 
     def __enter__(self):
         if 'DATABASE_HOST' not in os.environ:

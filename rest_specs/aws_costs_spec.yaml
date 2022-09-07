@@ -14,7 +14,7 @@ paging:
   token_param: NextPageToken
   page_size: 100
 tables:
-  - name: cost_dimensions
+  - name: dimension_values
     resource_path: /
     result_body_path: DimensionValues
     supports_paging: true
@@ -102,9 +102,24 @@ tables:
 views:
   - name: costs
     from: costs_by_service
-    query: |
-      SELECT
-        arrayElement(cast(Keys as Array(String)),1) as service, 
-        cast(Metrics_BlendedCost_Amount as Float) as blended,
-        cast(ResultsByTime_TimePeriod_Start as Date) as start,
-        cast(ResultsByTime_TimePeriod_End as Date) as end
+    help: A simplified view of daily costs by service (service, day, blended, unblended)
+    query:
+      clickhouse: |
+        SELECT
+          arrayElement(cast(Keys as Array(String)),1) as service, 
+          cast(Metrics_BlendedCost_Amount as Float) as blended,
+          cast(Metrics_UnblendedCost_Amount as Float) as unblended,
+          cast(ResultsByTime_TimePeriod_Start as Date) as start,
+          cast(ResultsByTime_TimePeriod_End as Date) as day
+        FROM
+          costs_by_service
+      duckdb: |
+        SELECT
+          regexp_replace(Keys, '[''\[\]]*', '', 'g') as service,
+          cast(Metrics_BlendedCost_Amount as Float) as blended,
+          cast(Metrics_UnblendedCost_Amount as Float) as unblended,
+          cast(ResultsByTime_TimePeriod_Start as Date) as start,
+          cast(ResultsByTime_TimePeriod_End as Date) as day
+        FROM
+          costs_by_service
+      

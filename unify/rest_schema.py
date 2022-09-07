@@ -589,7 +589,7 @@ class RESTTable(TableDef):
             size_return = []
 
             json_result = r.json()
-            pprint(json_result)
+            #pprint(json_result)
 
             yield (json_result, size_return)
 
