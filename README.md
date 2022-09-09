@@ -124,11 +124,12 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 1. [done] Pluggable database, plus Clickhouse backend
 1. SQL expressions for rest specs
 1. [done] Implement "peek <table>" command which automatically selects interesting columns
-1. Implement "run [<notebook>] at <schedule>" command
+1. [done] Implement "run [<notebook>] at <schedule>" command
 1. Have "show tables" indicate table comment and if data has been loaded from the table yet
 1. [done] Automagically show hyperlinks for URL content from tables
 1. Start working on "lineage" features that can show which notebook/code produced a table
-1. Make sure date typing works properly on table load
+1. Make sure date/float typing works properly on table load
+1. Add S3 adapter and implement CSV and parquest file and dir import
 1. Jupyter UI integration: 
     1. Schema browser tree panel
     1. [done] Custom charting command

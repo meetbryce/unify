@@ -25,7 +25,7 @@ if __name__ == '__main__':
                     log("Table not loaded, skipping")
                     continue
                 for sub_cmd in [
-                    f"python unify.py -e 'refresh table {table}'"
+                    f"python -m unify -e 'refresh table {table}'"
                 ]:
                     log(sub_cmd)
                     output = subprocess.run(sub_cmd, shell=True, check=False, capture_output=True)

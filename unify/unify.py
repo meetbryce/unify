@@ -5,11 +5,13 @@ import time
 from datetime import datetime, timedelta
 import io
 import inspect
+import json
 import logging
 import math
 import os
 from threading import Thread
 import pydoc
+from pprint import pprint
 import re
 import sys
 import traceback
@@ -22,7 +24,9 @@ from lark.visitors import v_args
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+import sqlparse
 from typing import Dict
+import sqlglot
 # CHARTING
 import matplotlib.pyplot as plt
 
@@ -44,6 +48,7 @@ from .rest_schema import (
     Adapter, 
     Connection, 
     OutputLogger, 
+    RESTView,
     TableDef,
     TableUpdater,
     UnifyLogger
@@ -149,7 +154,7 @@ class BaseTableScan(Thread):
         Thread.__init__(self)
         self.tableMgr: TableMgr = tableMgr
         self.tableLoader = tableLoader
-        self.table_ref = tableMgr.adapter.name + "." + tableMgr.table_spec.name
+        self.table_ref = tableMgr.schema + "." + tableMgr.table_spec.name
         self.select = select
         self.storage_mgr: UnifyDBStorageManager = None
         self.analyzed_columns = []
@@ -157,6 +162,8 @@ class BaseTableScan(Thread):
     def analyze_columns(self, df: pd.DataFrame):
         # Analyze a page of rows and extract useful column intelligence information for 
         # potential use later, such as by the `peek` command.
+        if os.environ.get('UNIFY_SKIP_COLUMN_INTEL'):
+            return
         for order, column in enumerate(df.columns):
             lowercol = column.lower()
             attrs = {
@@ -184,10 +191,12 @@ class BaseTableScan(Thread):
             self.analyzed_columns.append(ColumnIntel(column, attrs))
 
     def save_analyzed_columns(self):
+        if os.environ.get('UNIFY_SKIP_COLUMN_INTEL'):
+            return
         cols: list[ColumnIntel] = sorted(self.analyzed_columns, key=lambda ci: ci.attrs['order'])
         for col in cols:
             self.storage_mgr.insert_column_intel(
-                schema=self.tableMgr.adapter.name,
+                schema=self.tableMgr.schema,
                 table_root=self.tableMgr.table_spec.name,
                 column=col.name,
                 attrs=col.attrs
@@ -297,9 +306,28 @@ class BaseTableScan(Thread):
 
         resource_query_mgr = self.get_query_mgr()
 
-        for json_page, size_return in resource_query_mgr.query_resource(self.tableLoader, logger):
+        for query_result in resource_query_mgr.query_resource(self.tableLoader, logger):
+            json_page = query_result.json
+            size_return = query_result.size_return
             record_path = self.tableMgr.table_spec.result_body_path
-            df = pd.json_normalize(json_page, record_path=record_path, sep='_')
+            if record_path is not None:
+                record_path = record_path.split(".")
+            metas = None
+            if self.tableMgr.table_spec.result_meta_paths:
+                metas = self.tableMgr.table_spec.result_meta_paths
+                if not isinstance(metas, list):
+                    metas = [metas]
+                metas = [p.split(".") for p in metas]
+            df = pd.json_normalize(
+                json_page, 
+                record_path=record_path, 
+                meta=metas,
+                sep='_')
+            # adapters can provide extra data to merge into the result table. See
+            # the `copy_params_to_output` property.
+            if query_result.merge_cols:
+                for col, val in query_result.merge_cols.items():
+                    df[col] = val
             size_return.append(df.shape[0])
 
             if df.shape[0] == 0:
@@ -358,11 +386,11 @@ class InitialTableLoad(BaseTableScan):
         print(f"Saving page {page} with {next_df.shape[1]} columns")
         if page <= flush_count:
             # First set of pages, so create the table
-            self.create_table_with_first_page(duck, next_df, tableMgr.adapter.name, tableMgr.table_spec.name)
+            self.create_table_with_first_page(duck, next_df, tableMgr.schema, tableMgr.table_spec.name)
         else:
             duck.append_dataframe_to_table(
                 next_df, 
-                tableMgr.adapter.name, 
+                tableMgr.schema, 
                 tableMgr.table_spec.name
             )
 
@@ -397,7 +425,7 @@ class TableUpdateScan(BaseTableScan):
             # Updater will replace the existing table rather than appending to it. So
             # download data into a temp file
             self._target_table_root = self.tableMgr.table_spec.name + "__temp"
-            self._target_table = self.tableMgr.adapter.name + "." + self._target_table_root
+            self._target_table = self.tableMgr.schema + "." + self._target_table_root
             # drop the temp table in case it's lying around
             duck.execute(f"DROP TABLE IF EXISTS {self._target_table}")
             # Use parent class to download data from the target API (calling _flush_rows along the way)
@@ -406,7 +434,7 @@ class TableUpdateScan(BaseTableScan):
             duck.replace_table(self._target_table, self.tableMgr.name)
         else:
             self._target_table_root = self.tableMgr.table_spec.name
-            self._target_table = self.tableMgr.adapter.name + "." + self._target_table_root
+            self._target_table = self.tableMgr.schema + "." + self._target_table_root
             super().perform_scan(duck)
 
     def get_query_mgr(self):
@@ -420,13 +448,13 @@ class TableUpdateScan(BaseTableScan):
                 self.create_table_with_first_page(
                     duck, 
                     next_df, 
-                    tableMgr.adapter.name, 
+                    tableMgr.schema, 
                     self._target_table_root
                 )
             else:
                 duck.append_dataframe_to_table(
                     next_df, 
-                    self.tableMgr.adapter.name, 
+                    self.tableMgr.schema, 
                     self._target_table_root
                 )
             return
@@ -447,7 +475,7 @@ class TableUpdateScan(BaseTableScan):
         duck.drop_memory_table("__keys")
 
         # Now append the new records             
-        duck.append_dataframe_to_table(next_df, tableMgr.adapter.name, self._target_table_root)
+        duck.append_dataframe_to_table(next_df, tableMgr.schema, self._target_table_root)
 
 
 class TableExporter(Thread):
@@ -487,6 +515,8 @@ TableLoader = typing.NewType("TableLoader", None)
 class TableMgr:
     def __init__(self, schema, adapter, table_spec, auth = None, params={}):
         self.schema = schema
+        if schema is None or table_spec.name is None:
+            raise RuntimeError(f"Bad schema {schema} or missing table_spec name {table_spec}")
         self.name = schema + "." + table_spec.name
         self.adapter = adapter
         self.table_spec: TableDef = table_spec
@@ -523,7 +553,8 @@ class TableLoader:
        2. Never queried. Call the Adapter to query the data and store it to local db.
        3. Table exists in the local db.
     """
-    def __init__(self, silence_errors=False, given_connections: list[Connection]=None):
+    def __init__(self, silence_errors=False, given_connections: list[Connection]=None, lark_parser: Lark=None):
+        self.lark_parser = lark_parser
         with dbmgr() as duck:       
             try:
                 if given_connections:
@@ -564,9 +595,46 @@ class TableLoader:
     def materialize_table(self, schema, table):
         with dbmgr() as duck:
             qual = schema + "." + table
-            tmgr = self._get_table_mgr(qual)
+            try:
+                tmgr = self._get_table_mgr(qual)
+            except KeyError:
+                raise TableMissingException(f"{schema}.{table}")
             tmgr.load_table(tableLoader=self)
             return tmgr.has_data()
+
+    def qualify_tables_in_view_query(self, query: str, from_list: list[str], schema: str,
+                                    dialect: str):
+        """ Replaces non-qualified table references in a view query with qualified ones.
+            Returns the corrected query.
+        """
+        if not isinstance(from_list, list):
+            from_list = [from_list]
+        froms = ",".join([(schema + "." + t) for t in from_list])
+        return sqlglot.parse_one(query, read=dialect).from_(froms, append=False).sql()
+
+    def create_views(self, schema, table):
+        # (Re)create any views defined that depend on the the indicated table
+        qual = schema + "." + table
+        tmgr = self._get_table_mgr(qual)
+        views: typing.List[RESTView] = tmgr.adapter.list_views()
+        if not views:
+            return
+        with dbmgr() as duck:
+            for view in views:
+                if table in view.from_list:
+                    query = None
+                    if isinstance(view.query, dict):
+                        if duck.dialect() in view.query:
+                            query = view.query[duck.dialect()]
+                        else:
+                            print(f"Skipping view {view.name} with no dialect for current database")
+                            return
+                    else:
+                        query = view.query
+                    query = self.qualify_tables_in_view_query(query, view.from_list, tmgr.schema, duck.dialect())
+                    duck.execute(f"DROP VIEW IF EXISTS {tmgr.schema}.{view.name}")
+                    duck.execute(f"CREATE VIEW {tmgr.schema}.{view.name} AS {query}")
+
 
     def analyze_columns(self, table_ref):
         with dbmgr() as duck:
@@ -583,8 +651,70 @@ class TableLoader:
     def refresh_table(self, table_ref):
         self.tables[table_ref].refresh_table(tableLoader=self)
 
-    def query_table(self, query):
-        pass
+    def query_table(self, schema: str, query: str):
+        # Our parser wasn't smart enough:
+        # parser_visitor = ParserVisitor()
+        # parse_tree = self.lark_parser.parse(query)
+        # command = parser_visitor.perform_new_visit(parse_tree, full_code=query)
+        # query_parts = parser_visitor._the_command_args
+
+        parsed = sqlparse.parse(query)[0]
+        if parsed[0].ttype != sqlparse.tokens.DML or parsed[0].value != 'select':
+            raise RuntimeError(f"Invalid statement type: '{query}'")
+
+        # Verify, for safety, no other DMLs inside
+        col_list = []
+        past_cols = False
+        past_from = False
+        past_tables = False
+        table_list = []
+        funcs = []
+        where_clause = ""
+        for idx in range(1, len(parsed.tokens)):
+            token = parsed.tokens[idx]
+            if isinstance(token, sqlparse.sql.IdentifierList):
+                if not past_cols:
+                    col_list = re.split(r"\s*,\s*", token.value)
+                    past_cols = True
+                elif past_from and not past_tables:
+                    table_list = re.split(r"\s*,\s*", token.value)
+                    past_tables = True
+
+            if token.ttype == sqlparse.tokens.Keyword:
+                if token.value == 'from':
+                    past_from = True
+            if isinstance(token, sqlparse.sql.Where):
+                where_clause = token.value
+            if token.ttype == sqlparse.tokens.DML:
+                raise RuntimeError(f"Invalid sql query has embedded DML '{query}'")
+            if isinstance(token, sqlparse.sql.Function):
+                funcs.append(token.value)
+
+        if len(col_list) == 0 and len(funcs) > 0:
+            col_list.append(funcs[0]) # allow a simple select of a function value
+
+        if len(col_list) == 0:
+            raise RuntimeError(f"Invalid query references no columns or functions: '{query}'")
+
+        table_refs = []
+        for table in table_list:
+            if "." in table:
+                raise RuntimeError(f"Adapter queries cannot use qualified table names: {table}. Query: {query}")
+            table = schema + "." + table
+            if not self.table_exists_in_db(table):
+                tmgr = self.tables[table]
+                # TODO: Might want a timeout for large parent tables
+                tmgr.load_table(tableLoader=self, waitForScan=True)
+            table_refs.append(table)
+
+        if table_refs:
+            from_clause = " FROM " + ",".join(table_refs)
+        else:
+            from_clause = ""
+
+        parent_query = "SELECT " + ",".join(col_list) + from_clause + where_clause
+        with dbmgr() as duck:
+            yield duck.execute_df(parent_query)
 
     def read_table_rows(self, table, limit=None):
         with dbmgr() as duck:
@@ -711,6 +841,7 @@ class ParserVisitor(Visitor):
     def drop_schema(self, tree):
         self._the_command = "drop_schema"
         self._the_command_args["schema_ref"] = find_node_return_child("schema_ref", tree)
+        self._the_command_args["cascade"] = self._full_code.strip().lower().endswith("cascade")
 
     def email_command(self, tree):
         self._the_command = "email_command"
@@ -764,6 +895,10 @@ class ParserVisitor(Visitor):
 
     def run_schedule(self, tree):
         self._the_command = 'run_schedule'
+
+    def run_info(self, tree):
+        self._the_command = 'run_info'
+        self._the_command_args['schedule_id'] = find_node_return_child("schedule_ref", tree).strip("'")
 
     def select_query(self, tree):
         # lark: select_query: "select" WS col_list WS "from" WS table_list (WS where_clause)? (WS order_clause)? (WS limit_clause)?
@@ -834,12 +969,17 @@ class CommandInterpreter:
         path = os.path.join(os.path.dirname(__file__), "grammar.lark")
         self.parser = Lark(open(path).read(), propagate_positions=True)
         self.parser_visitor = ParserVisitor()
-        self.loader = TableLoader(silence_errors)
+        self.loader = TableLoader(silence_errors, lark_parser=self.parser)
         self.adapters: dict[str, Adapter] = self.loader.adapters
         self.logger: OutputLogger = None
         self.session_vars: dict[str, object] = {}
         self.email_helper: EmailHelper = EmailHelper()
         self.duck: DBWrapper = None
+        # Some commands we only support in interactive sessions. In non-interactive cases (background execution)
+        # these commands will be no-ops.
+        self.commands_needing_interaction = [
+            'run_notebook_command'
+        ]
 
     def _list_schemas(self, match_prefix=None):
         with dbmgr() as duck:
@@ -940,7 +1080,6 @@ class CommandInterpreter:
         # This is a hack for the email command, which will execute a notebook which needs exclusive
         # access to the database, so we defer to running the command until after we close the db.
         run_command_after_closing_db = None
-        self.interactive = interactive
         try:
             with dbmgr() as duck:
                 self.duck = duck
@@ -959,7 +1098,12 @@ class CommandInterpreter:
                 try:
                     parse_tree = self.parser.parse(self._cmd)
                     command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
-                    if command:
+
+                    if not interactive and command in self.commands_needing_interaction:
+                        self.print(f"Skipping command: {command}")
+                        command = None
+
+                    if command:    
                         method = getattr(self, command)
                         if 'notebook_path' in inspect.signature(method).parameters:
                             nb_path = get_notebook_func() if get_notebook_func else None
@@ -1048,11 +1192,11 @@ class CommandInterpreter:
         if val == "y":
             return self._execute_duck(self._cmd)
 
-    def drop_schema(self, schema_ref):
+    def drop_schema(self, schema_ref, cascade: bool):
         """ drop <schema> [cascade] - removes the entire schema from the database """
         val = input(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)? ")
         if val == "y":
-            return self._execute_duck(self._cmd)
+            return self.duck.drop_schema(schema_ref, cascade)
 
     def email_command(self, email_object, recipients, subject=None, notebook_path: str=None):
         """ email [notebook|<table>|chart <chart>| to '<recipients>' [subject 'msg subject'] - email a chart or notebook to the recipients """
@@ -1171,10 +1315,26 @@ class CommandInterpreter:
         schema, table_root = table_ref.split(".")
         self.load_adapter_data(schema, table_root)
 
+    def run_info(self, schedule_id):
+        """ run info <notebook> - Shows details on the schedule for the indicated notebook """
+        store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
+        schedule = store.get_object("schedules", schedule_id)
+        if schedule:
+            self.print("Schedule: ", schedule['run_at'], " repeat: ", schedule['repeater'])
+            contents = schedule['contents']
+            body = json.loads(contents)
+            for cell in body['cells']:
+                if 'source' in cell:
+                    if isinstance(cell['source'], list):
+                        for line in cell['source']:
+                            self.print("| ", line)
+                    else:
+                        self.print("| ", cell['source'])
+        else:
+            self.print("No schedule found")
+
     def run_notebook_command(self, run_at_time: str, notebook_path: str, repeater: str=None):
         """ run [every day|week|month] at <date> <time> - Execute this notebook on a regular schedule """
-        if not self.interactive:
-            return
         if notebook_path is None:
             self.print("Error, must supply a notebook name or full path")
             return
@@ -1305,6 +1465,7 @@ class CommandInterpreter:
 
     def load_adapter_data(self, schema_name, table_name):
         if self.loader.materialize_table(schema_name, table_name):
+            self.loader.create_views(schema_name, table_name)
             return True
         else:
             self.print("Loading table...")
@@ -1419,7 +1580,8 @@ class UnifyRepl:
                                 "max_rows" : None,
                                 "min_rows" : 10,
                                 "max_colwidth": 50,
-                                "header": True
+                                "header": True,
+                                "float_format": '{:0.2f}'.format
                             }
                             if df.shape[0] > 40:
                                 pydoc.pager(df.to_string(**fmt_opts))

@@ -84,6 +84,15 @@ class DBWrapper:
     def get_short_date_cast(self, column):
         return f"strftime(CAST(\"{column}\" AS TIMESTAMP), '%m/%d/%y %H:%M')"
 
+    def drop_schema(self, schema, cascade: bool=False):
+        sql = f"drop schema {schema}"
+        if cascade:
+            sql += " cascade"
+        return self.execute(sql)
+
+    def dialect(self):
+        return "postgres"
+
 DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_HOME, exist_ok=True)
 
@@ -95,7 +104,10 @@ class DuckDBWrapper(DBWrapper):
         each time to manage. Context manager for accessing the DuckDB database """
 
     def __init__(self):
-        pass
+        print(f"Connecting to local DuckDB database")
+
+    def dialect(self):
+        return "duckdb"
 
     def execute(self, query: str, args=[]):
         try:
@@ -107,6 +119,8 @@ class DuckDBWrapper(DBWrapper):
                 m = re.search("(\w+)\."+table_root, str(e))
                 if m:
                     schema = m.group(1)
+                else:
+                    schema = ""
                 raise TableMissingException(schema + "." + table_root)
             else:
                 raise
@@ -121,7 +135,7 @@ class DuckDBWrapper(DBWrapper):
 
     def delete_rows(self, table, filter_values: dict=None, where_clause: str=None):
         if filter_values:
-            query = f"delete from {table} where " + ",".join([f"{key} = ?" for key in filter_values.keys()])
+            query = f"delete from {table} where " + " and ".join([f"{key} = ?" for key in filter_values.keys()])
             query = self._substitute_args(query, filter_values.values())
         else:
             query = f"delete from {table} where {where_clause}"
@@ -255,6 +269,10 @@ class ClickhouseWrapper(DBWrapper):
 
     def __init__(self):
         self.client = None
+        print(f"Connecting to clickhouse database at: {os.environ['DATABASE_HOST']}")
+
+    def dialect(self):
+        return "clickhouse"
 
     def __enter__(self):
         if 'DATABASE_HOST' not in os.environ:
@@ -400,6 +418,12 @@ class ClickhouseWrapper(DBWrapper):
 
     def drop_memory_table(self, table_root: str):
         self.execute(f"DROP TABLE IF EXISTS default.{table_root}")
+
+    def drop_schema(self, schema, cascade: bool=False):
+        sql = f"drop database {schema}"
+        if cascade:
+            sql += " cascade"
+        return self.execute(sql)
 
     def _infer_df_columns(self, df: pd.DataFrame):
         schema = pa.Schema.from_pandas(df)

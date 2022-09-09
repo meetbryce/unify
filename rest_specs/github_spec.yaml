@@ -17,87 +17,30 @@ paging:
 pageIndexArg: page
 pageMaxArg: per_page
 dateParser: '%Y-%m-%dT%H:%M:%SZ'
-# Github data doesn't change that often
-cacheTTLSecs: 43200
 auth:
   type: BASIC
   uservar: GHUSER
   tokenvar: GHTOKEN
-polling_interval_secs: 1800
 tables:
   - name: orgs
     resource_path: /user/orgs
-    columns:
-      - name: login
-      - name: description
-      - name: url
   - name: org_members
     resource_path: /orgs/{org}/members
     supports_paging: True
-# New syntax
-#   params:
-#      org: \%(select login from orgs)    
-    args_query:
-      table: orgs
-      mapping:
-        org: login
-    columns:
-      - name: site_admin
-        type: BOOLEAN
-      - name: org
-        source: <args>
-      - name: user
-        source: login
+    params:
+      org: sql@(select login from orgs)    
   - name: users
     resource_path: /users/{login}
-    args_query:
-      table: org_members
-      mapping:
-        login: login
-    result_type: object
-    columns:
-      - name: login
-        type: VARCHAR
-      - name: id
-        type: INT
-        key: true
-      - name: node_id
-        type: VARCHAR
-      - name: avatar_url
-        type: VARCHAR
-      - name: url
-        type: VARCHAR
-      - name: type
-        type: VARCHAR
-      - name: name
-        type: VARCHAR
-      - name: location
-        type: VARCHAR
-      - name: email
-        type: VARCHAR
-      - name: followers
-        type: INT
+    params:
+      login: sql@(select login from org_members)
   - name: myself
     resource_path: /user
-    result_type: object
-    columns:
-      - name: id
-        type: INT
-      - name: login
-      - name: avatar_url
-      - name: url
-      - name: name
-      - name: company
-      - name: email
   - name: repos
     resource_path: /orgs/{org}/repos
     supports_paging: True
     params:
       type: all
-    args_query:
-      table: orgs
-      mapping:
-        org: login
+      org: sql@(select login from orgs)
   - name: pulls
     query_resource: GET /repos/{owner}/{repo}/pulls
     supports_paging: True
@@ -105,51 +48,10 @@ tables:
       sort: created
       direction: desc
       state: all
-    args_query:
-      table: repos
-      mapping:
-        owner: owner_login
-        repo: name
+      owner,repo: sql@(select owner_login, name from repos)
     select: id, url, html_url, node_id, number, state, locked, title, user, body, draft, created_at, updated_at, head_repo_name
   - name: pull_reviews
     query_resource: GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews
     supports_paging: True
-    args_query:
-      table: pulls
-      mapping:
-        owner: repo_owner
-        repo: repo
-        pull_number: number
-    columns:
-      - name: body
-      - name: state
-      - name: submitted_at
-        type: TIMESTAMP
-      - name: user
-        source: user.login
-      - name: id
-        type: INT
-        key: True
-  - name: repo_events
-    resource_path: /repos/{owner}/{repo}/events
-    args_query:
-      table: repos
-      mapping:
-        owner: owner
-        repo: name
-    columns:
-      - name: owner
-        source: <args>
-      - name: repo
-        source: <args>
-      - name: id
-      - name: type
-      - name: actor
-        source: actor.login
-      - name: repo_path
-        source: repo.name
-      - name: created_at
-        type: TIMESTAMP
-# 
-########################################
-# 
+    params:
+      owner,repo,pull_number: sql@(select user_login, head_repo_name, number from pulls)

@@ -1,4 +1,125 @@
-# https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/CommonParameters.htm#
-enabled: false
-# Request signing library
-# https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/CommonParameters.html
+enabled: true
+name: aws_costs
+base_url: https://ce.us-east-1.amazonaws.com
+auth:
+  type: AWS4Auth
+  access_id: AWS_ACCESS_KEY_ID
+  secret_key: AWS_SECRET_ACCESS_KEY
+  region: AWS_DEFAULT_REGION
+  service: ce
+paging:
+  strategy: pagerToken
+  pager_token_path: NextPageToken
+  count_param: MaxResults
+  token_param: NextPageToken
+  page_size: 100
+tables:
+  - name: dimension_values
+    resource_path: /
+    result_body_path: DimensionValues
+    supports_paging: true
+    headers:
+      Content-Type: application/x-amz-json-1.1
+      X-Amz-Target: AWSInsightsIndexService.GetDimensionValues
+    params:
+      Context,Dimension: 
+        - [COST_AND_USAGE, AZ]
+        - [COST_AND_USAGE, INSTANCE_TYPE]
+        - [COST_AND_USAGE, LINKED_ACCOUNT]
+        - [COST_AND_USAGE, LINKED_ACCOUNT_NAME]
+        - [COST_AND_USAGE, OPERATION]
+        - [COST_AND_USAGE, PURCHASE_TYPE]
+        - [COST_AND_USAGE, REGION]
+        - [COST_AND_USAGE, SERVICE]
+        - [COST_AND_USAGE, SERVICE_CODE]
+        - [COST_AND_USAGE, USAGE_TYPE]
+        - [COST_AND_USAGE, USAGE_TYPE_GROUP]
+        - [COST_AND_USAGE, RECORD_TYPE]
+        - [COST_AND_USAGE, OPERATING_SYSTEM]
+        - [COST_AND_USAGE, TENANCY]
+        - [COST_AND_USAGE, SCOPE]
+        - [COST_AND_USAGE, PLATFORM]
+        - [COST_AND_USAGE, SUBSCRIPTION_ID]
+        - [COST_AND_USAGE, LEGAL_ENTITY_NAME]
+        - [COST_AND_USAGE, DEPLOYMENT_OPTION]
+        - [COST_AND_USAGE, DATABASE_ENGINE]
+        - [COST_AND_USAGE, CACHE_ENGINE]
+        - [COST_AND_USAGE, INSTANCE_TYPE_FAMILY]
+        - [COST_AND_USAGE, BILLING_ENTITY]
+        - [COST_AND_USAGE, RESERVATION_ID]
+        - [COST_AND_USAGE, RESOURCE_ID]
+        - [COST_AND_USAGE, RIGHTSIZING_TYPE]
+        - [COST_AND_USAGE, SAVINGS_PLANS_TYPE]
+        - [COST_AND_USAGE, SAVINGS_PLAN_ARN]
+        - [COST_AND_USAGE, PAYMENT_OPTION]
+        - [COST_AND_USAGE, AGREEMENT_END_DATE_TIME_AFTER]
+        - [COST_AND_USAGE, AGREEMENT_END_DATE_TIME_BEFORE]
+        - [COST_AND_USAGE, INVOICING_ENTITY]
+        - [RESERVATIONS, AZ]
+        - [RESERVATIONS, CACHE_ENGINE]
+        - [RESERVATIONS, DEPLOYMENT_OPTION]
+        - [RESERVATIONS, INSTANCE_TYPE]
+        - [RESERVATIONS, LINKED_ACCOUNT]
+        - [RESERVATIONS, PLATFORM]
+        - [RESERVATIONS, REGION]
+        - [RESERVATIONS, SCOPE]
+        - [RESERVATIONS, TAG]
+        - [RESERVATIONS, TENANCY]
+      start_date: sql@(select cast(cast((now() - interval 6 month) as date) as varchar))
+      end_date: sql@(select cast(cast(now() as date) as varchar))
+    post:
+      TimePeriod: 
+        Start: ${start_date}
+        End: ${end_date}
+      Context: ${Context}
+      Dimension: ${Dimension}
+      MaxResults: ${MaxResults}
+      NextPageToken: ${NextPageToken}
+    copy_params_to_output: [Context, Dimension]
+  - name: costs_by_service
+    headers:
+      Content-Type: application/x-amz-json-1.1
+      X-Amz-Target: AWSInsightsIndexService.GetCostAndUsage
+    resource_path: /
+    result_body_path: ResultsByTime.Groups
+    result_meta_paths: ["ResultsByTime.TimePeriod.Start", "ResultsByTime.TimePeriod.End"]
+    supports_paging: true
+    params:
+      start_date: sql@(select cast(cast((now() - interval 6 month) as date) as varchar))
+      end_date: sql@(select cast(cast(now() as date) as varchar))
+    post:
+      TimePeriod: 
+        Start: ${start_date}
+        End: ${end_date}
+      Granularity: DAILY
+      GroupBy:
+        - Type: DIMENSION
+          Key: SERVICE
+      Metrics:
+        - BlendedCost
+        - UnblendedCost
+      NextPageToken: ${NextPageToken}
+views:
+  - name: costs
+    from: costs_by_service
+    help: A simplified view of daily costs by service (service, day, blended, unblended)
+    query:
+      clickhouse: |
+        SELECT
+          arrayElement(cast(Keys as Array(String)),1) as service, 
+          cast(Metrics_BlendedCost_Amount as Float) as blended,
+          cast(Metrics_UnblendedCost_Amount as Float) as unblended,
+          cast(ResultsByTime_TimePeriod_Start as Date) as start,
+          cast(ResultsByTime_TimePeriod_End as Date) as day
+        FROM
+          costs_by_service
+      duckdb: |
+        SELECT
+          regexp_replace(Keys, '[''\[\]]*', '', 'g') as service,
+          cast(Metrics_BlendedCost_Amount as Float) as blended,
+          cast(Metrics_UnblendedCost_Amount as Float) as unblended,
+          cast(ResultsByTime_TimePeriod_Start as Date) as start,
+          cast(ResultsByTime_TimePeriod_End as Date) as day
+        FROM
+          costs_by_service
+      

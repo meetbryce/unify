@@ -26,3 +26,16 @@ tables:
       strategy: updates
       params:
         later_than: "{timestamp}"
+views:
+  - name: repos_view
+    from: repos27
+    query: |
+      SELECT 
+        id as idkey, full_name as bigname from repos27
+    help: "A simple view on the repos27 table"
+  - name: repos11_short
+    from: repos1100
+    query: |
+      SELECT 
+        count(id) as count, name from repos1100 where id != '5' group by name
+    help: "A more complex view with grouping"
