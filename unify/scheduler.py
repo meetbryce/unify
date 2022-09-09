@@ -29,7 +29,7 @@ class OurProcessor(ExecutePreprocessor):
     def preprocess_cell(self, cell, resources, index):
         super().preprocess_cell(cell, resources, index)
         if 'source' in cell:
-            logger.info("Executing cell: ", cell['source'])
+            logger.info("Executing cell: {}".format(str(cell['source'])))
 
 def run_notebook(notebook_id: str):
     global notebook_contents
