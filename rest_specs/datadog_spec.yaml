@@ -1,18 +1,47 @@
 enabled: true
 name: datadog
-base_url: https://api.datadoghq.com/api/v1
+base_url: https://api.datadoghq.com/api
 auth:
   type: HEADERS
   headers:
     DD-API-KEY: DD_API_KEY
     DD-APPLICATION-KEY: DD_APP_KEY
+paging:
+  strategy: pagerToken
+  pager_token_path: metadata.pagination.next_record_id
+  count_param: noparam
+  token_param: next_record_id
+  page_size: 100
 tables:
   - name: metrics
-    resource_path: /metrics
+    resource_path: /v1/metrics
     result_body_path: metrics
     params:
       from: 1624575829
-    columns:
-      - name: metric_name
-        type: VARCHAR
-        source: .
+  - name: bill_summary
+    resource_path: /v1/usage/billable-summary
+    result_body_path: usage
+    params:
+      month: sql@(select cast(date_trunc('month', now()) as varchar))
+  - name: monthly_attribution
+    resource_path: /v1/usage/monthly-attribution
+    supports_paging: true
+    params:
+      start_month: sql@(select cast(date_trunc('month', now() - interval 6 month) as varchar))
+      end_month: sql@(select cast(date_trunc('month', now()) as varchar))
+      fields: "*"
+  - name: hourly_usage
+    resource_path: /v2/usage/hourly_usage
+    result_body_path: data.attributes.measurements
+    result_meta_paths: ["data.attributes.org_name", "data.attributes.product_family", "data.attributes.timestamp"]
+    paging:
+      strategy: pagerToken
+      pager_token_path: metadata.pagination.next_record_id
+      count_param: "page[limit]"
+      token_param: "page[next_record_id]"
+      page_size: 100
+    params:
+      "filter[timestamp][start]": sql@(select cast(date_trunc('month', now()) as varchar))
+      "filter[timestamp][end]": sql@(select cast(now() as varchar))
+      "filter[product_families]": all
+

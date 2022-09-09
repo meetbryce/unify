@@ -32,7 +32,7 @@ tables:
     refresh:
       strategy: updates
       params: 
-        jql: "updated >= '{timestamp}' and created > 2022-07-28 order by created"
+        jql: "updated >= '${timestamp}' and created > 2022-07-28 order by created"
     result_body_path: issues
     select: "id, key, fields_project_id, fields_project_key, fields_summary, fields_reporter_.+, fields_assignee_.+, \n
     fields_status_.+, fields.created, fields.updated, fields_issuetype_name, fields_priority_name, \n
@@ -40,7 +40,6 @@ tables:
     key_column: id
   - name: myself
     resource_path: /rest/api/3/myself
-    result_type: object
     columns:
       - name: account_id
         source: accountId
@@ -73,8 +72,9 @@ tables:
     params:
       jql: order by created DESC
       fields: key
-    refresh_params:
-      jql: updated >= '{checkpoint}'
+    # FIXME: convert to strategy
+    #refresh_params:
+    #  jql: updated >= '{checkpoint}'
     result_body_path: issues
     columns:
       - name: id
@@ -88,8 +88,8 @@ tables:
     params:
       jql: order by created DESC
       expand: changelog
-    refresh_params:
-      jql: updated >= '{checkpoint}'
+    #refresh_params:
+    #  jql: updated >= '{checkpoint}'
     result_body_path: issues
     columns:
       - name: id
@@ -106,58 +106,3 @@ tables:
       - name: items
         source: changelog.histories.items
         type: JSON
-
-  - name: transitions
-    query_resource: GET /rest/api/3/search
-    supports_paging: True
-    params:
-      jql: order by created DESC
-      expand: changelog
-    refresh_params:
-      jql: updated >= '{checkpoint}'
-    json_response: |
-      {
-         "issues" : [
-           {
-             "*id" : "123",
-             "*key" : "abc123",
-             "changelog" : {
-                "histories" : [
-                   {
-                      "author" : {
-                         "accountId" : "606f3cb8126db9006f2e67b6",
-                         "accountType" : "atlassian",
-                         "active" : true,
-                         "*displayName|{display_name}" : "Bruce Rechichar",
-                         "*emailAddress|{email_address}" : "bruce@tatari.tv",
-                         "self" : "https://tatari.atlassian.net/rest/api/3/user?accountId=606f3cb8126db9006f2e67b6",
-                         "timeZone" : "America/Los_Angeles"
-                      },
-                      "*created" : "2021-08-13T09:34:24.545-0700|{DATE}",
-                      "*id|{history_id}" : "abc369295",
-                      "*items" : [
-                         {
-                            "field" : "resolution",
-                            "fieldId" : "resolution",
-                            "fieldtype" : "jira",
-                            "from" : null,
-                            "fromString" : null,
-                            "to" : "10000",
-                            "toString" : "Done"
-                         },
-                         {
-                            "field" : "status",
-                            "fieldId" : "status",
-                            "fieldtype" : "jira",
-                            "from" : "10190",
-                            "fromString" : "Resolved",
-                            "to" : "10189",
-                            "toString" : "Closed"
-                         }
-                      ]
-                   }
-                ]
-              }
-            }
-         ]
-      }

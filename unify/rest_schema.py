@@ -67,6 +67,15 @@ class Connection:
     def list_tables(self):
         return self.adapter.list_tables()
 
+def validate_dict(object_type: str, object_name: str, opts: dict, valid_keys: dict):
+    for key in opts.keys():
+        if key not in valid_keys:
+            raise RuntimeError(f"Invalid key '{key}' for {object_type} - {object_name}")
+        else:
+            val_type = valid_keys[key]
+            if not isinstance(opts[key], val_type):
+                raise RuntimeError(f"Invalid type for key '{key}' for {object_type} - {object_name}, expected: {val_type}")
+
 class RESTCol:
     def __init__(self, dictvals):
         self.name = dictvals['name'].lower()
@@ -314,15 +323,45 @@ class TableUpdater:
         pass
 
 
-class RESTTable(TableDef):    
+class RESTTable(TableDef):
+    VALID_KEYS = {
+        'name': str,
+        'resource_path': str,
+        'result_body_path' : (str, list),
+        'result_meta_paths': list,
+        'supports_paging': bool,
+        'paging': dict,
+        'headers': dict,
+        'params': dict,
+        'post': dict,
+        'select': str,
+        'copy_params_to_output': list,
+        'key_column': str,
+        'refresh': dict,
+        # deprecated
+        'query_resource': str,
+        'columns': list,
+    }
+
     def __init__(self, spec, dictvals):
         super().__init__(dictvals['name'])
         fmt = string.Formatter()
-        self.max_pages = 50000
+        self.max_pages = 50000 # TODO: Alow adapter to override this
+
+        validate_dict(
+            "Table definition", 
+            spec.name + "." + self.name, 
+            dictvals, 
+            valid_keys=RESTTable.VALID_KEYS
+        )
 
         self._supports_paging = dictvals.get('supports_paging', False)
         if self._supports_paging:
-            self.paging_options = spec.paging_options
+            if 'paging' in dictvals:
+                # Allow per-table paging options
+                self.paging_options = dictvals['paging']
+            else:
+                self.paging_options = spec.paging_options
         else:
             self.paging_options = None
 
@@ -363,7 +402,6 @@ class RESTTable(TableDef):
         if (self.query_path == '<inline>'):
             self.static_values = dictvals.get('values')
         self.result_body_path = dictvals.get('result_body_path')
-        self.result_type = dictvals.get('result_type') or 'list'
         self.result_meta_paths = dictvals.get('result_meta_paths')
 
         # parse columns
@@ -589,7 +627,7 @@ class RESTTable(TableDef):
             size_return = []
 
             json_result = r.json()
-            #pprint(json_result)
+            pprint(json_result)
 
             yield (json_result, size_return)
 
@@ -791,8 +829,8 @@ class RESTAdapter(Adapter):
         else:
             print("Warning: spec '{}' has no tables defined".format(self.name))
 
+        self.views = []
         if "views" in spec:
-            self.views = []
             for d in spec['views']:
                 if 'name' in d and 'from' in d and 'query' in d:
                     self.views.append(

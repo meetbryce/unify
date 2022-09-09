@@ -25,14 +25,20 @@ logger.addHandler(ch)
 
 notebook_contents = {}
 
-def run_notebook(notebook: str):
+class OurProcessor(ExecutePreprocessor):
+    def preprocess_cell(self, cell, resources, index):
+        super().preprocess_cell(cell, resources, index)
+        if 'source' in cell:
+            logger.info("Executing cell: ", cell['source'])
+
+def run_notebook(notebook_id: str):
     global notebook_contents
     try:
-        nb_contents=notebook_contents[notebook]
+        nb_contents=notebook_contents[notebook_id]
         notebook = nbformat.reads(nb_contents, as_version=4)
         # Now execute the notebook to generate up to date output results (run live queries, etc...)
-        ep = ExecutePreprocessor(timeout=600, kernel_name='unify_kernel')
-        logger.info("Executing notebook: {}".format(notebook))
+        ep = OurProcessor(timeout=600, kernel_name='unify_kernel')
+        logger.info("Executing notebook: {}".format(notebook_id))
         ep.preprocess(notebook, {'metadata': {'path': "."}})
         logger.info("Notebook done")
     except Exception as e:

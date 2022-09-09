@@ -25,6 +25,7 @@ command: show_tables
          | email_command
          | run_notebook_command
          | run_schedule
+         | run_info
          | delete_schedule
          | help
 
@@ -93,6 +94,8 @@ run_at_command: "run" WS (notebook_ref WS)? "at" WS datetime
 run_every_command: "run" WS (notebook_ref WS)? "every" WS repeater WS "starting"? WS "at" WS datetime
 
 run_schedule: "run" WS "schedule"
+
+run_info: "run" WS "info" schedule_ref
 
 delete_schedule: "run" WS "delete" schedule_ref
 

@@ -107,6 +107,9 @@ tables:
     #
     # Specify if this API resource supports paging
     supports_paging: true
+    # You can specific a distinct paging strategy for a single API resource, otherwise will inherit
+    # from top-level.
+    paging:  # see 'paging' dict above
     # Optional additional headers to supply to the API call. Below are examples from the AWS Costs Adapter.
     headers:
       Content-Type: application/x-amz-json-1.1
@@ -134,8 +137,7 @@ tables:
     # Many REST APIs are organized in a hierarchy, where you values from a "parent API" provide
     # the parameters to another API call. Github is a good example, where the API call
     # to retrieve the set of Orgs available to a user is a simple API call:
-  - name: orgs
-    resource_path: /user/orgs
+    # GET /user/orgs
     #
     # But if we want to get the list of ALL members of every Org that a user belongs to, then 
     # we need to call the Org Members API call with each org id in turn, like:
@@ -191,6 +193,28 @@ tables:
     # present in the API result, use the `copy_params_to_output` property
     copy_params_to_output: [Context, Dimension]
     # and provide a list of param names. 
+    #
+    # Refresh strategies
+    # 
+    # We support multipe strategies for pulling API resource updates after our initial table
+    # load is done. The default strategy is 'reload', which simply loads all data again from
+    # the API and replaces the existing table.
+    #
+    # Use the 'updates' strategy when you can parameterize the API call so as to request updated
+    # records.
+    refresh:
+      strategy: updates
+      params:
+      # indicate a dictionary of params to filter the API results to only return new records
+      # The 'value' can reference either system variables or use a "sql@()" select.
+        key: value 
+      # The system var `${timestamp}` can be used to get the "last record time", typcically to filter
+      # for all records updated since that time. Like with JIRA:
+    refresh:
+      strategy: updates
+      params: 
+        jql: "updated >= '${timestamp}' and created > 2022-07-28 order by created"
+
 #
 # Defining Views
 # 

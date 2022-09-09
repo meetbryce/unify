@@ -104,7 +104,7 @@ class DuckDBWrapper(DBWrapper):
         each time to manage. Context manager for accessing the DuckDB database """
 
     def __init__(self):
-        pass
+        print(f"Connecting to local DuckDB database")
 
     def dialect(self):
         return "duckdb"
@@ -269,6 +269,7 @@ class ClickhouseWrapper(DBWrapper):
 
     def __init__(self):
         self.client = None
+        print(f"Connecting to clickhouse database at: {os.environ['DATABASE_HOST']}")
 
     def dialect(self):
         return "clickhouse"

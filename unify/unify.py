@@ -5,11 +5,13 @@ import time
 from datetime import datetime, timedelta
 import io
 import inspect
+import json
 import logging
 import math
 import os
 from threading import Thread
 import pydoc
+from pprint import pprint
 import re
 import sys
 import traceback
@@ -513,6 +515,8 @@ TableLoader = typing.NewType("TableLoader", None)
 class TableMgr:
     def __init__(self, schema, adapter, table_spec, auth = None, params={}):
         self.schema = schema
+        if schema is None or table_spec.name is None:
+            raise RuntimeError(f"Bad schema {schema} or missing table_spec name {table_spec}")
         self.name = schema + "." + table_spec.name
         self.adapter = adapter
         self.table_spec: TableDef = table_spec
@@ -591,7 +595,10 @@ class TableLoader:
     def materialize_table(self, schema, table):
         with dbmgr() as duck:
             qual = schema + "." + table
-            tmgr = self._get_table_mgr(qual)
+            try:
+                tmgr = self._get_table_mgr(qual)
+            except KeyError:
+                raise TableMissingException(f"{schema}.{table}")
             tmgr.load_table(tableLoader=self)
             return tmgr.has_data()
 
@@ -888,6 +895,10 @@ class ParserVisitor(Visitor):
 
     def run_schedule(self, tree):
         self._the_command = 'run_schedule'
+
+    def run_info(self, tree):
+        self._the_command = 'run_info'
+        self._the_command_args['schedule_id'] = find_node_return_child("schedule_ref", tree).strip("'")
 
     def select_query(self, tree):
         # lark: select_query: "select" WS col_list WS "from" WS table_list (WS where_clause)? (WS order_clause)? (WS limit_clause)?
@@ -1303,6 +1314,24 @@ class CommandInterpreter:
         self._execute_duck(f"drop table {table_ref}")
         schema, table_root = table_ref.split(".")
         self.load_adapter_data(schema, table_root)
+
+    def run_info(self, schedule_id):
+        """ run info <notebook> - Shows details on the schedule for the indicated notebook """
+        store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
+        schedule = store.get_object("schedules", schedule_id)
+        if schedule:
+            self.print("Schedule: ", schedule['run_at'], " repeat: ", schedule['repeater'])
+            contents = schedule['contents']
+            body = json.loads(contents)
+            for cell in body['cells']:
+                if 'source' in cell:
+                    if isinstance(cell['source'], list):
+                        for line in cell['source']:
+                            self.print("| ", line)
+                    else:
+                        self.print("| ", cell['source'])
+        else:
+            self.print("No schedule found")
 
     def run_notebook_command(self, run_at_time: str, notebook_path: str, repeater: str=None):
         """ run [every day|week|month] at <date> <time> - Execute this notebook on a regular schedule """
