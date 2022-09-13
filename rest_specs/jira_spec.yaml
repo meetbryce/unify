@@ -37,7 +37,7 @@ tables:
     select: "id, key, fields_project_id, fields_project_key, fields_summary, fields_reporter_.+, fields_assignee_.+, \n
     fields_status_.+, fields.created, fields.updated, fields_issuetype_name, fields_priority_name, \n
     fields_resolution_name"
-    key_column: id
+    key_columns: id
   - name: myself
     resource_path: /rest/api/3/myself
     columns:

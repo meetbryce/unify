@@ -25,7 +25,7 @@ tables:
     refresh:
       strategy: updates
       params:
-        later_than: "{timestamp}"
+        later_than: "${timestamp}"
 views:
   - name: repos_view
     from: repos27

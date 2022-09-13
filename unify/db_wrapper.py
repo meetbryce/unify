@@ -465,11 +465,12 @@ class ClickhouseWrapper(DBWrapper):
         self.client.execute(sql)
 
         logger.debug("Writing dataframe to table")
-        self.client.insert_dataframe(
-            f"INSERT INTO {schema}.{table_root} VALUES", 
-            value, 
-            settings={'use_numpy': True}
-        )
+        if value.shape[0] > 0:
+            self.client.insert_dataframe(
+                f"INSERT INTO {schema}.{table_root} VALUES", 
+                value, 
+                settings={'use_numpy': True}
+            )
 
     def append_dataframe_to_table(self, value: pd.DataFrame, schema: str, table_root: str):
         # There is a problem where a REST API returns a boolean column, but the first page 

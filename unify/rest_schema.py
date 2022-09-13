@@ -18,6 +18,7 @@ import pandas as pd
 from jsonpath_ng import parse
 
 from .storage_manager import StorageManager
+from .data_utils import interp_dollar_values
 
 Adapter = typing.NewType("Adapter", None)
 TableUpdater = typing.NewType("TableUpdater", None)
@@ -336,7 +337,7 @@ class RESTTable(TableDef):
         'post': dict,
         'select': str,
         'copy_params_to_output': list,
-        'key_column': str,
+        'key_columns': (list, str),
         'refresh': dict,
         # deprecated
         'query_resource': str,
@@ -716,7 +717,10 @@ class UpdatesStrategy(TableUpdater):
         # parameters, using the right format for the source system
 
         timestamp = self.updates_timestamp.strftime(self.table_def.query_date_format)
-        args = {k:v.replace("{timestamp}",timestamp) for (k,v) in self.params.items()}
+
+        args = interp_dollar_values(self.params, {
+            "timestamp": timestamp
+        })
 
         # Overwride the static params set in the Table spec
         try:

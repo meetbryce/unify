@@ -145,7 +145,7 @@ TABLE: WORD
 SCHEMA: WORD
 
 create_chart_where: "where" (WS chart_param WS? "=" WS? param_value) (WS "and" WS chart_param WS? "=" WS? param_value)*
-create_chart: "create chart" WS chart_name? WS? ("from" chart_source)? "as" chart_type WS create_chart_where
+create_chart: "create chart" WS chart_name? WS? ("from" chart_source)? "as" chart_type WS? create_chart_where?
 
 chart_name: WORD
 chart_param: X_PARAM
@@ -153,12 +153,14 @@ chart_param: X_PARAM
              | TITLE_PARAM
              | X_AXIS_LABEL
              | STACKED_PARAM
+             | COLOR_PARAM
              
 X_PARAM: "x"
 Y_PARAM: "y"
 TITLE_PARAM: "title"
 X_AXIS_LABEL: "x_axis_label"
 STACKED_PARAM: "stacked"
+COLOR_PARAM: "color"
 
 param_value: WORD | SINGLE_QUOTED_STRING
 column_ref: WORD

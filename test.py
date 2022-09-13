@@ -85,6 +85,30 @@ def test_redmail(nb_email):
 			}
 		)
 
+def test_redmail_image():
+	email = EmailSender(
+		host='smtp.gmail.com',
+		port='465',
+		username=os.environ['EMAIL_USERNAME'],
+		password=os.environ['EMAIL_PASSWORD'],
+		cls_smtp=smtplib.SMTP_SSL,
+		use_starttls=False
+	)
+
+	email.send(
+		subject='Another inline image testing',
+		sender="scottp@berkeleyzone.net",
+		receivers=['scottp@berkeleyzone.net'],
+		html="""
+			<h1>Hi,</h1>
+			<p>have you seen this?</p>
+			{{ myimg }}
+    	""",
+			body_images={
+				"myimg": "costs.png",
+			}
+		)
+
 
 def convert_nb():
 	from nb2mail import MailExporter
@@ -226,7 +250,7 @@ def test_aws_cost_api():
 	response = requests.post(endpoint, headers=headers, auth=auth, json=body)
 	pprint(response.json())
 
-test_aws_cost_api()
-
+#test_aws_cost_api()
+test_redmail_image()
 
 

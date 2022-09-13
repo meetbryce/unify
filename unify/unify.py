@@ -29,6 +29,7 @@ from typing import Dict
 import sqlglot
 # CHARTING
 import matplotlib.pyplot as plt
+import altair
 
 import pandas as pd
 import pyarrow as pa
@@ -798,14 +799,15 @@ class ParserVisitor(Visitor):
         # collect chart params
         key = value = None
         params = {}
-        for child in self._the_command_args['chart_where'].children:
-            key = key or find_node_return_child("chart_param", child)
-            value = value or find_node_return_child("param_value", child)
-            if value is not None:
-                value = value.strip("'")
-            if key and value:
-                params[key] = value
-                key = value = None
+        if self._the_command_args['chart_where']:
+            for child in self._the_command_args['chart_where'].children:
+                key = key or find_node_return_child("chart_param", child)
+                value = value or find_node_return_child("param_value", child)
+                if value is not None:
+                    value = value.strip("'")
+                if key and value:
+                    params[key] = value
+                    key = value = None
         self._the_command_args['chart_params'] = params
 
     def create_statement(self, tree):
@@ -975,6 +977,7 @@ class CommandInterpreter:
         self.session_vars: dict[str, object] = {}
         self.email_helper: EmailHelper = EmailHelper()
         self.duck: DBWrapper = None
+        self.last_chart = None
         # Some commands we only support in interactive sessions. In non-interactive cases (background execution)
         # these commands will be no-ops.
         self.commands_needing_interaction = [
@@ -1212,6 +1215,12 @@ class CommandInterpreter:
                 self.email_helper.send_notebook(notebook_path, recipients, subject)
             else:
                 self.print("Error, could not determine notebook name")
+        elif email_object == "chart":
+            if self.last_chart:                
+                self.print(f"Emailing last chart to {recipients}")
+                self.email_helper.send_chart(self.last_chart, recipients, subject)
+            else:
+                self.print("Error no recent chart available")
         else:
             if subject is None:
                 subject = f"{email_object} contents - Unify"
@@ -1519,7 +1528,7 @@ class CommandInterpreter:
         self.loader.truncate_table(table_schema_ref)
         self.print("Table cleared: ", table_schema_ref)
 
-    def create_chart(
+    def old_create_chart(
         self, 
         chart_name=None, 
         chart_type=None, 
@@ -1551,6 +1560,41 @@ class CommandInterpreter:
         imgdata.seek(0)
         return {"mime_type": "image/png", "data": imgdata.getvalue()}
 
+    def create_chart(
+        self, 
+        chart_name=None, 
+        chart_type=None, 
+        chart_source=None, 
+        chart_where=None,
+        chart_params: dict={}):
+        # Note of these renderers worked for both Jupyterlab and email
+        # --> mimetype, notebook, html
+        altair.renderers.enable('png')
+
+        if "x" not in chart_params:
+            source = pd.DataFrame({
+                'a': ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'],
+                'b': [28, 55, 43, 91, 81, 53, 19, 87, 52]
+            })
+
+            self.last_chart = altair.Chart(source).mark_bar().encode(
+                x='a',
+                y='b'
+            )
+            return self.last_chart
+            #raise RuntimeError("Missing 'x' column parameter for chart X axis")
+        df = self._last_result
+        if df is None:
+            raise RuntimeError("No query result available")
+
+        title = chart_params.pop('title', '')
+
+        self.last_chart = altair.Chart(df).mark_bar(). \
+            encode(**chart_params). \
+            properties(title=title, height=600, width=800)
+
+        return self.last_chart
+
 class UnifyRepl:
     def __init__(self, interpreter: CommandInterpreter, wide_display=False):
         self.interpreter = interpreter
@@ -1571,7 +1615,7 @@ class UnifyRepl:
                         continue
                     outputs, df = self.interpreter.run_command(cmd)
                     print("\n".join(outputs))
-                    if df is not None:
+                    if isinstance(df, pd.DataFrame):
                         with pd.option_context('display.max_rows', None):
                             if df.shape[0] == 0:
                                 continue
@@ -1587,6 +1631,8 @@ class UnifyRepl:
                                 pydoc.pager(df.to_string(**fmt_opts))
                             else:
                                 print(df.to_string(**fmt_opts))
+                    elif df is not None:
+                        print(df)
                 except RuntimeError as e:
                     print(e)
                 except Exception as e:

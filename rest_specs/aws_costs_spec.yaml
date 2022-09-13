@@ -87,6 +87,11 @@ tables:
     params:
       start_date: sql@(select cast(cast((now() - interval 6 month) as date) as varchar))
       end_date: sql@(select cast(cast(now() as date) as varchar))
+    refresh:
+      strategy: updates
+      params:
+        start_date: ${timestamp_day}
+    key_columns: ["Keys", "ResultsByTime_TimePeriod_Start"]
     post:
       TimePeriod: 
         Start: ${start_date}

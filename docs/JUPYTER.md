@@ -44,6 +44,12 @@ The full chart syntax should look like:
 <chart type> - bar_chart, line_chart, pie_chart
 <column> - column reference
 
+# incidents chart
+alt.Chart(df).mark_bar().encode(x='month',y='count', color='priority',order=order).show()
+
+# AWS costs chart
+alt.Chart(df).mark_bar().encode(x='end_date',y='total',color='svc_name').show()
+
 More parameters to the chart can be captured in more k=<val> stanzas in the where clause.
 
 Multiple charts can be combined as:

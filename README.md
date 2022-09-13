@@ -88,7 +88,7 @@ they are globally defined, available, and persistent. Other variables are consid
 and only live the lifetime a session.
 
 Creating a variable as the result of a select statement is equivalent to creating
-a _materialized_ view - the query is evaulated immediate and the results are stored
+a _materialized_ view - the query is evaulated immediately and the results are stored
 as the present and future value of the variable. To create a variable which executes the
 query each time it is used you should just create a normal `view` using `create view`.
 
@@ -114,15 +114,16 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 1. [done] Implement scheduled automatic table refresh
 1. [done] Implement GSheets adapter
 1. Implement AWS Cost Reporting adapter
-   - Need to support AWS authentication
-   - Support POSTing for REST API calls
-   - Support pulling the right values out of the result
+   - [done] Need to support AWS authentication
+   - [done] Support POSTing for REST API calls
+   - [done] Support pulling the right values out of the result
+   - Implement updates
 1. [done] Implement Lark parser for more complex syntax support
 1. [done] Implement full `show` commands
 1. [done] Implement dollar variables
 1. Unobtrusive table loading status supporting interrupts
 1. [done] Pluggable database, plus Clickhouse backend
-1. SQL expressions for rest specs
+1. [done] SQL expressions for rest specs
 1. [done] Implement "peek <table>" command which automatically selects interesting columns
 1. [done] Implement "run [<notebook>] at <schedule>" command
 1. Have "show tables" indicate table comment and if data has been loaded from the table yet

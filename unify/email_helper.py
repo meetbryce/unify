@@ -3,6 +3,7 @@ import os
 import re
 import smtplib
 from email.parser import Parser
+from email.mime.image import MIMEImage
 
 import pandas as pd
 from redmail import EmailSender
@@ -70,7 +71,6 @@ class EmailHelper:
             return "{{ " + cid + " }}"
 
         html = re.sub(r'<img src="cid:(.*)"/>', replace_tag, html)
-        breakpoint()
 
         images = []
         # We are assuming the html references will match the payloads
@@ -107,3 +107,25 @@ class EmailHelper:
                     file_name: data_frame
                 }
             )
+
+    def send_chart(self, chart, recipients: list, subject: str=None):
+        if subject is None:
+            subject = "Here is your chart"
+
+        data = chart._repr_mimebundle_()
+        if isinstance(data, (tuple,list)):
+            data = data[0]
+
+        image_data = None
+        mime_type = None
+        for mime_type in data:
+            image_data = data[mime_type]
+            break
+
+        self.sender.send(
+            subject=subject,
+            sender=self.from_address,
+            receivers=recipients,
+            html="<p>" + subject + "</p>" + "\n" + "{{ myimg }}",
+            body_images={"myimg": {"content": image_data, "subtype": mime_type}}
+        )

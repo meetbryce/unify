@@ -116,7 +116,21 @@ class UnifyKernel(Kernel):
                     print(content)
                     self.send_response(self.iopub_socket, 'display_data', content)
                 elif object is not None:
-                    self._send_string("Unrecognized internal result object")
+                    # iPython has some crazy rules to use _repr_XX methods to render the object. Implement some of
+                    # those here
+                    if hasattr(object, '_repr_mimebundle_'):
+                        data = object._repr_mimebundle_()
+                        if isinstance(data, (tuple,list)):
+                            data = data[0]
+                        logger.critical("Chart data keys are: {}".format(str(data.keys())))
+                        content = {
+                            'source': 'kernel',
+                            'data': data,
+                            'metadata' : {}
+                        }
+                        self.send_response(self.iopub_socket, 'display_data', content)
+                    else:
+                        self._send_string("Unrecognized internal result object: " + str(object))
 
             return {'status': 'ok',
                     # The base class increments the execution count
