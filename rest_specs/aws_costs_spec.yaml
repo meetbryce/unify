@@ -87,12 +87,17 @@ tables:
     params:
       start_date: sql@(select cast(cast((now() - interval 6 month) as date) as varchar))
       end_date: sql@(select cast(cast(now() as date) as varchar))
+      purchase: ["On Demand Instances", "Savings Plans", "Spot Instances", "Standard Reserved Instances"]
     refresh:
       strategy: updates
       params:
         start_date: ${timestamp_day}
-    key_columns: ["Keys", "ResultsByTime_TimePeriod_Start"]
+    key_columns: ["Keys", "ResultsByTime_TimePeriod_Start", "purchase"]
     post:
+      Filter:
+        Dimensions:
+          Key: PURCHASE_TYPE
+          Values: ["${purchase}"]
       TimePeriod: 
         Start: ${start_date}
         End: ${end_date}
@@ -104,6 +109,7 @@ tables:
         - BlendedCost
         - UnblendedCost
       NextPageToken: ${NextPageToken}
+    copy_params_to_output: [purchase]
 views:
   - name: costs
     from: costs_by_service
@@ -112,6 +118,7 @@ views:
       clickhouse: |
         SELECT
           arrayElement(cast(Keys as Array(String)),1) as service, 
+          purchase,
           cast(Metrics_BlendedCost_Amount as Float) as blended,
           cast(Metrics_UnblendedCost_Amount as Float) as unblended,
           cast(ResultsByTime_TimePeriod_Start as Date) as start,
@@ -121,6 +128,7 @@ views:
       duckdb: |
         SELECT
           regexp_replace(Keys, '[''\[\]]*', '', 'g') as service,
+          purchase,
           cast(Metrics_BlendedCost_Amount as Float) as blended,
           cast(Metrics_UnblendedCost_Amount as Float) as unblended,
           cast(ResultsByTime_TimePeriod_Start as Date) as start,

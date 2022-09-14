@@ -4,13 +4,6 @@ base_url: https://api.valueserp.com
 auth:
   type: NONE
 tables:
-  - name: help_
-    resource_path: <inline>
-    columns:
-      - name: msg
-    values:
-      - msg: |
-          Google SERP search site
   - name: serps
     resource_path: /search?q={query}
     params:

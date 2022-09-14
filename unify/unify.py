@@ -608,10 +608,21 @@ class TableLoader:
         """ Replaces non-qualified table references in a view query with qualified ones.
             Returns the corrected query.
         """
-        if not isinstance(from_list, list):
-            from_list = [from_list]
-        froms = ",".join([(schema + "." + t) for t in from_list])
-        return sqlglot.parse_one(query, read=dialect).from_(froms, append=False).sql()
+
+        # Following *almost* works, except type capitalization still breaks on some queries
+        # if not isinstance(from_list, list):
+        #     from_list = [from_list]
+        # froms = ",".join([(schema + "." + t) for t in from_list])
+        # sql = sqlglot.parse_one(query, read=dialect).from_(froms, append=False).sql(dialect=dialect)
+        # print("*******: ", sql)
+        # return sql
+       
+        query += " "
+        for table_root in sqlglot.parse_one(query).find_all(sqlglot.exp.Table):
+            table = schema + "." + table_root.name.split(".")[0]
+            query = re.sub("[\s,]+" + table_root.name + "[\s]+", f" {table} ", query)
+
+        return query
 
     def create_views(self, schema, table):
         # (Re)create any views defined that depend on the the indicated table
@@ -793,14 +804,18 @@ class ParserVisitor(Visitor):
         self._the_command = 'create_chart'
         self._the_command_args['chart_name'] = find_node_return_child('chart_name', tree)
         self._the_command_args['chart_type'] = find_node_return_child('chart_type', tree)
-        self._the_command_args['chart_source'] = \
-            find_node_return_children(['chart_source', 'table_schema_ref'], tree)
-        self._the_command_args['chart_where'] = find_subtree('create_chart_where', tree)
+        src = find_node_return_children(['chart_source', 'table_ref'], tree)
+        if src:
+            self._the_command_args['chart_source'] = src[0]
+        else:
+            self._the_command_args['chart_source'] = None
+            
+        where_clause = find_subtree('create_chart_where', tree)
         # collect chart params
-        key = value = None
         params = {}
-        if self._the_command_args['chart_where']:
-            for child in self._the_command_args['chart_where'].children:
+        if where_clause:
+            key = value = None
+            for child in where_clause.children:
                 key = key or find_node_return_child("chart_param", child)
                 value = value or find_node_return_child("param_value", child)
                 if value is not None:
@@ -1528,7 +1543,7 @@ class CommandInterpreter:
         self.loader.truncate_table(table_schema_ref)
         self.print("Table cleared: ", table_schema_ref)
 
-    def old_create_chart(
+    def old_create_chart_with_matplot(
         self, 
         chart_name=None, 
         chart_type=None, 
@@ -1565,35 +1580,51 @@ class CommandInterpreter:
         chart_name=None, 
         chart_type=None, 
         chart_source=None, 
-        chart_where=None,
         chart_params: dict={}):
         # Note of these renderers worked for both Jupyterlab and email
         # --> mimetype, notebook, html
         altair.renderers.enable('png')
 
         if "x" not in chart_params:
-            source = pd.DataFrame({
+            self._last_result = pd.DataFrame({
                 'a': ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'],
                 'b': [28, 55, 43, 91, 81, 53, 19, 87, 52]
             })
+            chart_type = "bar_chart"
+            chart_params["x"] = 'a'
+            chart_params["y"] = 'b'           
 
-            self.last_chart = altair.Chart(source).mark_bar().encode(
-                x='a',
-                y='b'
-            )
-            return self.last_chart
-            #raise RuntimeError("Missing 'x' column parameter for chart X axis")
-        df = self._last_result
-        if df is None:
-            raise RuntimeError("No query result available")
+        if chart_source:
+            df = self._execute_duck(f"select * from {chart_source}")
+        else:
+            df = self._last_result
+
+        if df is None or df.shape[0] == 0:
+            raise RuntimeError("No recent query, or query returned no rows")
 
         title = chart_params.pop('title', '')
 
-        self.last_chart = altair.Chart(df).mark_bar(). \
-            encode(**chart_params). \
-            properties(title=title, height=600, width=800)
+        chart_methods = {
+            'bar_chart': 'mark_bar',
+            'pie_chart': 'marc_arc',
+            'hbar_chart': 'mark_bar',
+            'line_chart': 'mark_line',
+            'area_chart': 'mark_area'
+        }
+        # To make a horizontal bar chart we have to annotate the X axis value as the
+        # "quantitative" value like: x="total:Q" rather than the "ordinal" value as "date:O".
+        if chart_type not in chart_methods:
+            raise RuntimeError(f"Uknown chart type '{chart_type}'")
 
-        return self.last_chart
+        #chart_params["tooltip"] = {"content":"data"}
+        
+        chart = altair.Chart(df)
+        chart = getattr(chart, chart_methods[chart_type])(tooltip=True). \
+            encode(**chart_params). \
+            properties(title=title, height=400, width=600)
+
+        self.last_chart = chart
+        return chart
 
 class UnifyRepl:
     def __init__(self, interpreter: CommandInterpreter, wide_display=False):

@@ -145,7 +145,7 @@ TABLE: WORD
 SCHEMA: WORD
 
 create_chart_where: "where" (WS chart_param WS? "=" WS? param_value) (WS "and" WS chart_param WS? "=" WS? param_value)*
-create_chart: "create chart" WS chart_name? WS? ("from" chart_source)? "as" chart_type WS? create_chart_where?
+create_chart: "create chart" WS? chart_name? WS? ("from" chart_source)? ("as" chart_type WS)? create_chart_where?
 
 chart_name: WORD
 chart_param: X_PARAM
@@ -164,7 +164,7 @@ COLOR_PARAM: "color"
 
 param_value: WORD | SINGLE_QUOTED_STRING
 column_ref: WORD
-chart_source: "$"? table_schema_ref
+chart_source: "$"? table_ref
 chart_type: PIE_CHART 
             | BAR_CHART
             | HBAR_CHART

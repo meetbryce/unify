@@ -38,7 +38,9 @@ The RESTAdapter supports different strategies for paging through multiple result
 
     pagerToken - Each page includes a "next page" token which should be supplied as a parameter
     to subsquent fetches. The token is defined by a path (`pager_token_path`) into the result doc.
-    You should indicate the `token_param` and the `count_param` to use in requests.
+    You should indicate the `token_param` and the `count_param` to use in requests. If you need
+    to pass the page token in the POST body, then specify any parameter name for `token_param`
+    and then reference that value using ${param} in the `post` dictionary.
 
 Paging options can be specified at the level of the adapter spec, or specified individually
 on a table spec. Example:
@@ -70,7 +72,7 @@ All adapters support this interface, defined in `Adapter`:
     name - return the name of the service
     resolve_auth - apply the local connection settings to the authentication configuration
     validate - validate the authentication to the service
-    list_tables - return the list of 'potential' table definitions for the service
+    list_tables - return the list of 'available' table definitions for the service
     lookupTable(tableName) - return the table spec for the table with the given name
     supports_commands - returns True if the Adapter implements its own special commands
     run_command - execute a command targeted at the Adapter
@@ -140,3 +142,16 @@ REST API, using`{timestamp}` to reference the value. For example:
 If the system support webhooks for broadcasting change events, then Unify can subscribe
 to webhooks to be notified of changes to any records in the source system.
 
+## Dynamic tables
+
+By default Unify expects to be able to extract all data from an API resource and
+cache it to the local database, then apply the update strategy to retrieve updates later.
+
+However, it can be useful to support a 'dynamic' table definition where we allow
+the API to potentially return different results each time it is called. In this case
+we don't want to cache the results, but rather invoke the API live every time
+the table is referenced.
+
+One use case could be a "Google search" adapter, which returns the results of a
+Google search query. It's infeasible to retrieve "all" results, so instead we
+need to call the API every time a query is made.

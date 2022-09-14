@@ -89,6 +89,9 @@ def test_chart_commands(visitor, parser):
     v = visitor
     p = parser
     # create chart
+
+    verify_parse(v, p, "create_chart", query="create chart")
+
     verify_parse(v, p, "create_chart", query="create chart as bar_chart where x = col1 and y = col2")
     verify_parse(v, p, "create_chart", 
         query="create chart chr1 from github.users as pie_chart where " +
@@ -100,6 +103,8 @@ def test_chart_commands(visitor, parser):
 
     verify_parse(v, p, "create_chart", query="create chart as bar_chart where x = col1 and stacked = true",
                 args={"chart_params": {"stacked": "true", "x": "col1"}})
+
+    verify_parse(v, p, "create_chart", "create chart from AWS__actualized as bar_chart where x = 'monthdate(end_date):O' and y = total and color = svc_name")
 
 def test_export_commands(visitor, parser):
     # grammar: select_for_writing: "select" ANY ">>" adapter_ref file_ref writing_args?
@@ -231,11 +236,10 @@ def test_select_parsing(visitor, parser):
         }
     )
 
-    verify_parse(v, p,
-        "select_query",
-        "select cast(now() as date)",
-        args= {
-            "col_list": ["cast(now() as date)"]
-        }
-    )
-    
+    # verify_parse(v, p,
+    #     "select_query",
+    #     "select cast(now() as date)",
+    #     args= {
+    #         "col_list": ["cast(now() as date)"]
+    #     }
+    # )
