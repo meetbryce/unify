@@ -43,7 +43,7 @@ def run_notebook(notebook_id: str):
         ep.preprocess(notebook, {'metadata': {'path': "."}})
         logger.info("Notebook done")
     except Exception as e:
-        logger.error("Error executing notebook: {}".format(notebook))
+        logger.error("Error executing notebook: {}".format(notebook_id))
         logger.error(e)
 
 def reload_schedules():
@@ -84,12 +84,12 @@ def run_schedules(notebook_list = []):
         if sched['repeater'] == 'day':
             schedule.every().day.at(str(run_at_time.time())).do(
                 run_notebook, 
-                notebook=notebook
+                notebook_id=notebook
             )
         elif sched['repeater'] == 'week':
             getattr(schedule.every(), run_at_time.day_name().lower()).at(str(run_at_time.time())).do(
                 run_notebook, 
-                notebook=notebook
+                notebook_id=notebook
             )
         elif sched['repeater'] == 'month':
             # See if today is same day of the month as starting date, and if so then
@@ -100,10 +100,13 @@ def run_schedules(notebook_list = []):
     print("\n".join([str(j) for j in schedule.get_jobs()]))
 
 def schedule_loop():
-    while True:
-        logger.info("Waking...")
-        schedule.run_pending()
-        time.sleep(30)
+    try:
+        while True:
+            logger.info("Waking...")
+            schedule.run_pending()
+            time.sleep(30)
+    except:
+        logger.critical("Unhandled exception", exc_info=True)
 
 if __name__ == '__main__':
     if len(sys.argv) > 1:
