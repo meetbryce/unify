@@ -8,6 +8,7 @@ import nbformat
 from nbconvert.preprocessors import ExecutePreprocessor
 import schedule
 import pandas as pd
+import fasteners
 
 from .unify import CommandInterpreter
 
@@ -108,5 +109,10 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         run_immediately(sys.argv[1:])
     else:
-        run_schedules(sys.argv[1:])
-        schedule_loop()
+        lock = fasteners.InterProcessLock('/tmp/scheduler.lock')
+        if lock.acquire(timeout=2):
+            run_schedules(sys.argv[1:])
+            schedule_loop()
+            lock.release()
+        else:
+            print("Cannot acquire the process lock")
