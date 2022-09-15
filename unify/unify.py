@@ -663,6 +663,7 @@ class TableLoader:
     def refresh_table(self, table_ref):
         self.tables[table_ref].refresh_table(tableLoader=self)
 
+    # ** FIXME: Rewrite with SQLGlot **
     def query_table(self, schema: str, query: str):
         # Our parser wasn't smart enough:
         # parser_visitor = ParserVisitor()
@@ -684,7 +685,7 @@ class TableLoader:
         where_clause = ""
         for idx in range(1, len(parsed.tokens)):
             token = parsed.tokens[idx]
-            if isinstance(token, sqlparse.sql.IdentifierList):
+            if isinstance(token, (sqlparse.sql.IdentifierList, sqlparse.sql.Identifier)):
                 if not past_cols:
                     col_list = re.split(r"\s*,\s*", token.value)
                     past_cols = True
@@ -809,7 +810,7 @@ class ParserVisitor(Visitor):
             self._the_command_args['chart_source'] = src[0]
         else:
             self._the_command_args['chart_source'] = None
-            
+
         where_clause = find_subtree('create_chart_where', tree)
         # collect chart params
         params = {}

@@ -554,7 +554,7 @@ class RESTTable(TableDef):
         # param dictionaries with each value
 
         sent_values = False
-        for pname, value in self.params.items():
+        for pname, value in params.items():
             if not isinstance(value, str) and isinstance(value, Iterable):
                 sent_values = True
                 param_cols = re.split(r"\s*,\s*", pname)
@@ -595,7 +595,12 @@ class RESTTable(TableDef):
         while page < safety_max_pages:
             api_params = orig_api_params.copy() # Fresh copy each page
 
-            url = (self.spec.base_url + self.query_path).format(**api_params)
+            try:
+                url = (self.spec.base_url + self.query_path).format(**api_params)
+            except KeyError as e:
+                url = self.spec.base_url + self.query_path
+                raise RuntimeError(f"Cannot query API resource '{url}' because missing API param from: {api_params}. {e}")
+
             api_params.update(pager.get_request_params())
             
             if self.post:
