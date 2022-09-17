@@ -14,7 +14,6 @@ from collections.abc import Iterable
 from collections import namedtuple
 
 import requests
-import pandas as pd
 from jsonpath_ng import parse
 
 from .storage_manager import StorageManager
@@ -193,7 +192,9 @@ class PagerTokenPager(PagingHelper):
     def next_page(self, last_page_size: int, json_result: Union[dict, list]) -> bool:
         for match in self.token_expr.find(json_result):
             self.current_token = match.value
-            return last_page_size >= self.page_size
+            # FIXME: We should return True as long as a next token came back. This allows
+            # us to get short pages without stopping.
+            return self.current_token is not None
         return False
 
 class OutputLogger:
@@ -232,7 +233,7 @@ class UnifyLogger:
 AdapterQueryResult = namedtuple(
     'AdapterQueryResult', 
     ['json','size_return','merge_cols'],
-    defaults={'merge_cols':None}
+    defaults={None}
 )
 
 class TableDef:
@@ -240,6 +241,7 @@ class TableDef:
         self._name = name
         self._select_list = []
         self._result_body_path = None
+        self.result_meta_paths = None
         self._key = None
         self._queryDateFormat = None #Use some ISO default
         self._params: dict = {}
@@ -342,6 +344,7 @@ class RESTTable(TableDef):
         # deprecated
         'query_resource': str,
         'columns': list,
+        'key_column': str
     }
 
     def __init__(self, spec, dictvals):
@@ -812,12 +815,15 @@ class Adapter:
     def create_output_table(self, file_name, output_logger:OutputLogger, overwrite=False, opts={}):
         raise RuntimeError(f"Adapter {self.name} does not support writing")
 
-    def write_page(self, output_handle, page: pd.DataFrame, output_logger:OutputLogger, append=False):
+    def write_page(self, output_handle, page, output_logger:OutputLogger, append=False):
         raise RuntimeError(f"Adapter {self.name} does not support writing")
 
     def close_output_table(self, output_handle):
         raise RuntimeError(f"Adapter {self.name} does not support writing")
-        
+
+    def list_views(self) -> List[RESTView]:
+        return []
+
 
 class RESTAdapter(Adapter):
     def __init__(self, spec, storage: StorageManager=None):

@@ -96,7 +96,7 @@ def test_chart_commands(visitor, parser):
     verify_parse(v, p, "create_chart", 
         query="create chart chr1 from github.users as pie_chart where " +
                 "x = col1 and y = col2 and x_axis_label = green",
-                args={'chart_source': ['github', 'users'], 'chart_name':"chr1", 'chart_type':"pie_chart"})
+                args={'chart_source': 'github.users', 'chart_name':"chr1", 'chart_type':"pie_chart"})
 
     verify_parse(v, p, "create_chart", query="create chart as pie_chart where title = 'Awesome chart'",
                 args={"chart_params": {"title": "Awesome chart"}})

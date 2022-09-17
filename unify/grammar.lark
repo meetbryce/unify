@@ -28,6 +28,8 @@ command: show_tables
          | run_info
          | delete_schedule
          | help
+         | ls_command
+         | import_command
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
 
@@ -98,6 +100,12 @@ run_schedule: "run" WS "schedule"
 run_info: "run" WS "info" schedule_ref
 
 delete_schedule: "run" WS "delete" schedule_ref
+
+ls_command: "ls" (WS file_path)?
+
+import_command: "import" WS file_path
+
+file_path: ANY
 
 schedule_ref: SINGLE_QUOTED_STRING
 

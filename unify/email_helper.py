@@ -5,11 +5,8 @@ import smtplib
 from email.parser import Parser
 from email.mime.image import MIMEImage
 
-import pandas as pd
-from redmail import EmailSender
 from nb2mail import MailExporter
 import nbformat
-from nbconvert.preprocessors import ExecutePreprocessor
 
 class EmailHelper:
     def __init__(self):
@@ -33,17 +30,25 @@ class EmailHelper:
             self.from_address = os.environ['EMAIL_SENDER']
         else:
             self.from_address = 'unify@example.com'
+        self._sender = None
 
-        self.sender: EmailSender = EmailSender(
-            host=os.environ['EMAIL_HOST'],
-            port=os.environ['EMAIL_PORT'],
-            username=os.environ['EMAIL_USERNAME'],
-            password=os.environ['EMAIL_PASSWORD'],
-            cls_smtp=smtplib.SMTP_SSL,
-            use_starttls=False
-        )
+    def get_sender(self):
+        from redmail import EmailSender
+
+        if self._sender is None:
+            self._sender: EmailSender = EmailSender(
+                host=os.environ['EMAIL_HOST'],
+                port=os.environ['EMAIL_PORT'],
+                username=os.environ['EMAIL_USERNAME'],
+                password=os.environ['EMAIL_PASSWORD'],
+                cls_smtp=smtplib.SMTP_SSL,
+                use_starttls=False
+            )
+        return self._sender
             
     def send_notebook(self, notebook_path, recipients: list, subject: str=None):
+        from nbconvert.preprocessors import ExecutePreprocessor
+
         mail_exporter = MailExporter(template_name="mail")
         notebook = nbformat.reads(open(notebook_path).read(), as_version=4)
         # Now execute the notebook to generate up to date output results (run live queries, etc...)
@@ -77,7 +82,7 @@ class EmailHelper:
         for payloads in nb_email.get_payload()[1:]:
             images.append(nb_email.get_payload()[1].get_payload(decode=True))
 
-        self.sender.send(
+        self.get_sender().send(
             subject=subject,
             sender=self.from_address,
             receivers=recipients,
@@ -85,9 +90,9 @@ class EmailHelper:
                 body_images=dict(zip(image_tags, images))
         )
 
-    def send_table(self, data_frame: pd.DataFrame, file_name:str, recipients: list, subject: str=None):
+    def send_table(self, data_frame, file_name:str, recipients: list, subject: str=None):
         if data_frame.shape[0] < 100:           
-            self.sender.send(
+            self.get_sender().send(
                 subject=subject,
                 sender=self.from_address,
                 receivers=recipients,
@@ -98,7 +103,7 @@ class EmailHelper:
                 }
             )
         else:
-            self.sender.send(
+            self.get_sender().send(
                 subject=subject,
                 sender=self.from_address,
                 receivers=recipients,
@@ -122,7 +127,7 @@ class EmailHelper:
             image_data = data[mime_type]
             break
 
-        self.sender.send(
+        self.get_sender().send(
             subject=subject,
             sender=self.from_address,
             receivers=recipients,

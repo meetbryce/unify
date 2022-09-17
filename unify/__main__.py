@@ -2,6 +2,9 @@ import sys
 import pandas as pd
 from .unify import CommandInterpreter, UnifyRepl
 
+import cProfile
+import re
+
 if __name__ == '__main__':
     if '-silent' in sys.argv:
         silent = True

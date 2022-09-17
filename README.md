@@ -155,3 +155,11 @@ Make sure to setup the environment with:
       - AWS costs by service
       - Datadog
       - Papertrail
+
+## Running Metabase
+
+Metabase supports Clickhouse, so you can run Metabase and connect it directly to the CH db.
+Running Metabase directly from the jar is easy as long as you get the right (OpenJDK) version.
+
+Install `clickhouse.metabase-driver.jar` in the plugins directory and that will let you 
+add the Clickhouse connection.

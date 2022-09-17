@@ -68,7 +68,7 @@ class UnifyKernel(Kernel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.unify_runner = CommandInterpreter()
-        self.autocomplete_parser = AutocompleteParser(self.unify_runner.parser)
+        self.autocomplete_parser = AutocompleteParser(self.unify_runner._get_parser())
 
     def _send_string(self, msg):
         stream_content = {'name': 'stdout', 'text': msg}

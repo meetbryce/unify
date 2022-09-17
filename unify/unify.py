@@ -27,9 +27,6 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 import sqlparse
 from typing import Dict
 import sqlglot
-# CHARTING
-import matplotlib.pyplot as plt
-import altair
 
 import pandas as pd
 import pyarrow as pa
@@ -43,7 +40,6 @@ logger = logging.getLogger(__name__)
 # DuckDB
 import duckdb
 from setuptools import Command
-from .email_helper import EmailHelper
 
 from .rest_schema import (
     Adapter, 
@@ -73,6 +69,7 @@ from .parsing_utils import (
     collect_strings,
     collect_child_string_list
 )
+from .filesystem import FileSystem
 
 # Verify DB settings
 if 'DATABASE_BACKEND' not in os.environ or os.environ['DATABASE_BACKEND'] not in ['duckdb','clickhouse']:
@@ -805,11 +802,11 @@ class ParserVisitor(Visitor):
         self._the_command = 'create_chart'
         self._the_command_args['chart_name'] = find_node_return_child('chart_name', tree)
         self._the_command_args['chart_type'] = find_node_return_child('chart_type', tree)
-        src = find_node_return_children(['chart_source', 'table_ref'], tree)
-        if src:
-            self._the_command_args['chart_source'] = src[0]
-        else:
-            self._the_command_args['chart_source'] = None
+        self._the_command_args['chart_source'] = collect_child_text(
+            "chart_source", 
+            tree, 
+            full_code=self._full_code
+        )
 
         where_clause = find_subtree('create_chart_where', tree)
         # collect chart params
@@ -882,6 +879,9 @@ class ParserVisitor(Visitor):
 
     def insert_statement(self, tree):
         self._the_command = 'insert_statement'
+
+    def ls_command(self, tree):
+        self._the_command = 'ls_command'
 
     def peek_table(self, tree):
         self._the_command = 'peek_table'
@@ -984,21 +984,34 @@ class CommandInterpreter:
     _last_result: pd.DataFrame = None
 
     def __init__(self, silence_errors=False):
-        path = os.path.join(os.path.dirname(__file__), "grammar.lark")
-        self.parser = Lark(open(path).read(), propagate_positions=True)
+        self.parser = None # defer loading grammar until we need it
         self.parser_visitor = ParserVisitor()
         self.loader = TableLoader(silence_errors, lark_parser=self.parser)
         self.adapters: dict[str, Adapter] = self.loader.adapters
         self.logger: OutputLogger = None
         self.session_vars: dict[str, object] = {}
-        self.email_helper: EmailHelper = EmailHelper()
+        self._email_helper = None
         self.duck: DBWrapper = None
         self.last_chart = None
+        self.file_system = FileSystem(os.path.expanduser("~/unify/files"))
         # Some commands we only support in interactive sessions. In non-interactive cases (background execution)
         # these commands will be no-ops.
         self.commands_needing_interaction = [
             'run_notebook_command'
         ]
+
+    def _get_parser(self):
+        if self.parser is None:
+            path = os.path.join(os.path.dirname(__file__), "grammar.lark")
+            self.parser = Lark(open(path).read(), propagate_positions=True)
+        return self.parser
+
+    def _get_email_helper(self):
+        from .email_helper import EmailHelper
+
+        if self._email_helper is None:
+            self._email_helper = EmailHelper()
+        return self._email_helper
 
     def _list_schemas(self, match_prefix=None):
         with dbmgr() as duck:
@@ -1115,7 +1128,7 @@ class CommandInterpreter:
                 self.input_func = input_func
                 self.logger: OutputLogger = OutputLogger()
                 try:
-                    parse_tree = self.parser.parse(self._cmd)
+                    parse_tree = self._get_parser().parse(self._cmd)
                     command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
 
                     if not interactive and command in self.commands_needing_interaction:
@@ -1228,13 +1241,13 @@ class CommandInterpreter:
                 self.print(f"Emailing {notebook} to {recipients}")
                 if subject is None:
                     subject = f"{notebook} notebook - Unify"
-                self.email_helper.send_notebook(notebook_path, recipients, subject)
+                self._get_email_helper().send_notebook(notebook_path, recipients, subject)
             else:
                 self.print("Error, could not determine notebook name")
         elif email_object == "chart":
             if self.last_chart:                
                 self.print(f"Emailing last chart to {recipients}")
-                self.email_helper.send_chart(self.last_chart, recipients, subject)
+                self._get_email_helper().send_chart(self.last_chart, recipients, subject)
             else:
                 self.print("Error no recent chart available")
         else:
@@ -1246,7 +1259,7 @@ class CommandInterpreter:
                 subject = f"Unify - {email_object}"
             self.print(f"Emailing {email_object} to {recipients}")
             fname = email_object.replace(".", "_") + ".csv"
-            self.email_helper.send_table(df, fname, recipients, subject)
+            self._get_email_helper().send_table(df, fname, recipients, subject)
 
     def export_table(self, adapter_ref, table_ref, file_ref, write_option=None):
         """ export <table> <adapter> <file> [append|overwrite] - export a table to a file """
@@ -1582,8 +1595,11 @@ class CommandInterpreter:
         chart_type=None, 
         chart_source=None, 
         chart_params: dict={}):
+        import altair  # defer this so we dont pay this cost at startup
+
         # Note of these renderers worked for both Jupyterlab and email
         # --> mimetype, notebook, html
+
         altair.renderers.enable('png')
 
         if "x" not in chart_params:
@@ -1627,6 +1643,42 @@ class CommandInterpreter:
         self.last_chart = chart
         return chart
 
+    #########
+    ### FILE system commands
+    #########
+    def ls_command(self, path=None):
+        for mount in self.file_system.list_mounts():
+            self.print(mount)
+
+    def rewrite_file_table_function(self, query: str):
+        """
+            Searches for FILE() table function references in the query, and rewrites them to 
+            work properly on the indicated db backend. 
+        """
+        expression_tree = sqlglot.parse_one(query)
+
+        def transformer(node):
+            if isinstance(node, sqlglot.exp.Func) and node.name.lower() == "file":
+                path = node.args['expressions'][0].text('this')
+                if len(node.args['expressions']) > 1:
+                    format = node.args['expressions'][1].text('this')
+                elif "." in path:
+                    format = path.rsplit(".")[-1]
+                format = format.lower()
+                if format not in ['csv','parquest','xls']:
+                    raise RuntimeError(f"Invalid file format {format} for '{path}'")
+
+                if format == 'csv':
+                    format = 'CSVWithNames'
+                real_path = self.file_system.get_system_local_path(path)
+
+                return sqlglot.parse_one(f"file('{path}','{format}')")
+            return node
+
+        transformed_tree = expression_tree.transform(transformer)
+        return transformed_tree.sql()
+
+
 class UnifyRepl:
     def __init__(self, interpreter: CommandInterpreter, wide_display=False):
         self.interpreter = interpreter
@@ -1663,6 +1715,8 @@ class UnifyRepl:
                                 pydoc.pager(df.to_string(**fmt_opts))
                             else:
                                 print(df.to_string(**fmt_opts))
+                    elif 'altair' in str(type(df)): # instead of isinstance(altair.Chart) we can avoid loading altari at the start
+                        df.show()
                     elif df is not None:
                         print(df)
                 except RuntimeError as e:

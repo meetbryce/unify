@@ -250,7 +250,15 @@ def test_aws_cost_api():
 	response = requests.post(endpoint, headers=headers, auth=auth, json=body)
 	pprint(response.json())
 
+import pstats
+from pstats import SortKey
+
+def profile():
+	p = pstats.Stats('stats')
+	p.sort_stats(SortKey.CUMULATIVE).print_stats(30)
+
 #test_aws_cost_api()
-test_redmail_image()
+#test_redmail_image()
+profile()
 
 
