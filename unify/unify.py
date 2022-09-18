@@ -69,7 +69,7 @@ from .parsing_utils import (
     collect_strings,
     collect_child_string_list
 )
-from .filesystem import FileSystem
+from .file_adapter import LocalFileAdapter
 
 # Verify DB settings
 if 'DATABASE_BACKEND' not in os.environ or os.environ['DATABASE_BACKEND'] not in ['duckdb','clickhouse']:
@@ -221,7 +221,8 @@ class BaseTableScan(Thread):
                 df[column] = df[column].apply(lambda x: str(x))
             # FIXME: sample 10 values and if more than 50% are numeric than convert to numeric
             # convert numeric: df[column] = df[column].apply(lambda x: pd.to_numeric(x, errors = 'ignore'))
-            testval = df[column][0]
+            
+            testval = df[column].iloc[0]
             if hasattr(testval, 'count') and \
                 (testval.count("/") == 2 or testval.count(":") >= 2):
                 try:
@@ -316,11 +317,14 @@ class BaseTableScan(Thread):
                 if not isinstance(metas, list):
                     metas = [metas]
                 metas = [p.split(".") for p in metas]
-            df = pd.json_normalize(
-                json_page, 
-                record_path=record_path, 
-                meta=metas,
-                sep='_')
+            if isinstance(json_page, pd.DataFrame):
+                df = json_page
+            else:
+                df = pd.json_normalize(
+                    json_page, 
+                    record_path=record_path, 
+                    meta=metas,
+                    sep='_')
             # adapters can provide extra data to merge into the result table. See
             # the `copy_params_to_output` property.
             if query_result.merge_cols:
@@ -381,7 +385,7 @@ class InitialTableLoad(BaseTableScan):
 
     def _flush_rows_to_db(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
         ## Default version works when loading a new table
-        print(f"Saving page {page} with {next_df.shape[1]} columns")
+        print(f"Saving page {page} with {next_df.shape[1]} columns and {next_df.shape[0]} rows")
         if page <= flush_count:
             # First set of pages, so create the table
             self.create_table_with_first_page(duck, next_df, tableMgr.schema, tableMgr.table_spec.name)
@@ -502,7 +506,7 @@ class TableExporter(Thread):
                 r = duck.execute_df(f"select * from {self.table}")
 
             # FIXME: Use DF chunking and multiple pages
-            self.adapter.write_page(self.output_handle, r, output_logger, append=self.append)
+            self.adapter.write_page(self.output_handle, r, output_logger, append=self.append, page_num=1)
 
             self.adapter.close_output_table(self.output_handle)
 
@@ -571,6 +575,13 @@ class TableLoader:
             self.adapters: dict[str, Adapter] = dict(
                 [(conn.schema_name, conn.adapter) for conn in self.connections]
             )
+            schema = 'files'
+            self.adapters[schema] = LocalFileAdapter(
+                {'name':schema},
+                root_path=os.path.expanduser("~/unify/files"),
+                storage=UnifyDBStorageManager(schema, duck)
+            )
+            duck.create_schema('files')
             # Connections defines the set of schemas we will create in the database.
             # For each connection/schema then we will define the tables as defined
             # in the REST spec for the target system.
@@ -870,12 +881,21 @@ class ParserVisitor(Visitor):
         self._the_command = "export_table"
         self._the_command_args['table_ref'] = collect_child_text("table_ref", tree, full_code=self._full_code)
         self._the_command_args['adapter_ref'] = find_node_return_child("adapter_ref", tree)
-        self._the_command_args['file_ref'] = find_node_return_child("file_ref", tree).strip("'")
+        fileref = find_node_return_child("file_ref", tree)
+        if fileref:
+            self._the_command_args['file_ref'] = fileref.strip("'")
+        else:
+            self._the_command_args['file_ref'] = self._the_command_args['adapter_ref'].strip("'")
+            self._the_command_args['adapter_ref'] = None
         self._the_command_args['write_option'] = find_node_return_child("write_option", tree)
 
     def help(self, tree):
         self._the_command = 'help'
         self._the_command_args['help_choice'] = collect_child_strings('HELP_CHOICE', tree)
+
+    def import_command(self, tree):
+        self._the_command = 'import_command'
+        self._the_command_args['file_path'] = collect_child_text("file_path", tree, full_code=self._full_code)
 
     def insert_statement(self, tree):
         self._the_command = 'insert_statement'
@@ -993,7 +1013,6 @@ class CommandInterpreter:
         self._email_helper = None
         self.duck: DBWrapper = None
         self.last_chart = None
-        self.file_system = FileSystem(os.path.expanduser("~/unify/files"))
         # Some commands we only support in interactive sessions. In non-interactive cases (background execution)
         # these commands will be no-ops.
         self.commands_needing_interaction = [
@@ -1217,7 +1236,18 @@ class CommandInterpreter:
         msg = helps[help_choice]
         for l in msg.splitlines():
             self.print(l.strip())
-    
+
+    def import_command(self, file_path):
+        # See if any of our adapters want to import the indicated file
+        for schema, adapter in self.adapters.items():
+            if adapter.can_import_file(file_path):
+                adapter.logger = self.logger
+                table_root = adapter.import_file(file_path) # might want to run this in the background
+                table = schema + "." + table_root
+                lines, result = self.run_command(f"select * from {table} limit 10")
+                self.print(f"Imported file to table: {table}")
+                return result
+             
     def drop_table(self, table_ref):
         """ drop <table> - removes the table from the database """
         val = self.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
@@ -1268,19 +1298,24 @@ class CommandInterpreter:
             result = self.duck.execute(f"select {file_ref}").fetchone()[0]
             file_ref = result
 
-        if adapter_ref in self.adapters:
-            adapter = self.adapters[adapter_ref]
-            exporter = TableExporter(
-                table=table_ref, 
-                adapter=adapter, 
-                target_file=file_ref,
-                allow_overwrite=(write_option == "overwrite"),
-                allow_append=(write_option == "append")
-            )
-            exporter.run(self.logger)
-            self.print(f"Exported query result to '{file_ref}'")
+        if adapter_ref:
+            if adapter_ref in self.adapters:
+                adapter = self.adapters[adapter_ref]
+            else:
+                raise RuntimeError(f"Uknown adapter '{adapter_ref}'")
         else:
-            self.print(f"Error, uknown adapter '{adapter_ref}'")
+            # assume a file export
+            adapter = self.adapters['files']
+
+        exporter = TableExporter(
+            table=table_ref, 
+            adapter=adapter, 
+            target_file=file_ref,
+            allow_overwrite=(write_option == "overwrite"),
+            allow_append=(write_option == "append")
+        )
+        exporter.run(self.logger)
+        self.print(f"Exported query result to '{file_ref}'")
 
     def peek_table(self, table_ref, line_count=20, build_stats=True, debug=False):
         # Get column weights and widths.
@@ -1647,8 +1682,8 @@ class CommandInterpreter:
     ### FILE system commands
     #########
     def ls_command(self, path=None):
-        for mount in self.file_system.list_mounts():
-            self.print(mount)
+        for file in self.adapters['files'].list_files(path):
+            self.print(file)
 
     def rewrite_file_table_function(self, query: str):
         """

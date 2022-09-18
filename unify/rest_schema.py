@@ -749,6 +749,17 @@ class Adapter:
         self.auth: dict = {}
         self.storage: StorageManager = storage
 
+    def convert_string_to_table_name(self, title: str):
+        title = title.lower()
+        title = re.sub("\s+", "_", title)
+        if re.match("^\d+", title):
+            # Can't start with numbers
+            title = "tab" + title
+        title = re.sub(r"[^\w]+", "", title) # remove special characters
+        if len(title) < 7:
+            title = "table_" + title
+        return title
+
     def validate(self) -> bool:
         return True
 
@@ -756,7 +767,7 @@ class Adapter:
         pass
 
     def lookupTable(self, tableName: str) -> TableDef:
-        return next(t for t in self.tables if t.name == tableName)
+        return next(t for t in self.list_tables() if t.name == tableName)
 
     def resolve_auth(self, connection_name: AnyStr, connection_opts: Dict):
         # The adapter spec has an auth clause (self.auth) that can refer to "Connection options". 
@@ -810,6 +821,16 @@ class Adapter:
             return output_logger
         else:
             return None
+
+    # Importing data
+    def can_import_file(self, file_uri: str):
+        """ Return true if this adapter nows how to import the indicated file_uri """
+        return False
+
+    def import_file(self, file_uri: str, options: dict={}):
+        """" Import data from the indicated file. Returns the name of the table created from the import
+             or raises an error if there was one. """
+        pass
 
     # Exporting data
     def create_output_table(self, file_name, output_logger:OutputLogger, overwrite=False, opts={}):

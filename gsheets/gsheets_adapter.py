@@ -3,6 +3,7 @@ import io
 import os
 import json
 import logging
+import re
 import sys
 import traceback
 
@@ -454,12 +455,29 @@ is a good option if the sheet data is changing frequenly.
                 return output_logger
             return None
 
+    # Importing data
+    def can_import_file(self, file_uri: str):
+        return file_uri.lower().startswith("https://docs.google.com/spreadsheets")
+
+    def import_file(self, file_uri: str, options: dict={}):
+        # attempts to import a Google sheet into a new table.
+        m = re.search(r"\/d\/([^\/]+)", file_uri)
+        if m:
+            sheetId = m.group(1)
+            # Will fail if we don't have access to this sheet
+            info = self.client.getSheetInfo(sheetId)
+            title = info['properties']['title']
+            table_name = self.convert_string_to_table_name(title)
+            tab = info['sheets'][0]['properties']['title']
+            self.create_table(table_name, sheetId, tab)
+            return table_name
+
     # Exporting data
     def create_output_table(self, file_name, output_logger: OutputLogger, overwrite=False, opts={}):
         # FIXME: handle tabs
         return self.client.create_new_sheet(file_name, overwrite=overwrite) # returns the sheetId
 
-    def write_page(self, output_handle, page: pd.DataFrame, output_logger: OutputLogger, append=False):
+    def write_page(self, output_handle, page: pd.DataFrame, output_logger: OutputLogger, append=False, page_num=1):
         sheetId = output_handle
         updated_rows = self.client.write_data_to_sheet(sheetId=sheetId, page=page, append=append)
         if updated_rows:

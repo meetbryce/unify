@@ -45,11 +45,11 @@ select_query: "select" WS col_list WS "from" WS table_list (WS where_clause)? (W
 
 select_for_writing: select_query ">>" adapter_ref file_ref writing_args?
 
-adapter_ref: WORD
+adapter_ref: DOTTED_WORD | SINGLE_QUOTED_STRING
 file_ref: SINGLE_QUOTED_STRING | PAREN_EXPR
 writing_args: ANY
 
-export_table: "export" WS table_ref WS "to" adapter_ref file_ref (write_option)?
+export_table: "export" WS table_ref WS "to" adapter_ref file_ref? (write_option)?
 
 write_option: OVERWRITE | APPEND
 OVERWRITE: "overwrite"
@@ -208,6 +208,7 @@ TAB             : SPACE+
 FROM            : "from" | "FROM"
 NAME            : ALPHANUM+
 WORD            : ALPHANUM+
+DOTTED_WORD     : WORD ("." WORD)*
 PATTERN         : /[\*\%A-Za-z0-9_]+/
 NUMBER          : DIGIT+
 WS              : /[ \t\f\r\n]/+

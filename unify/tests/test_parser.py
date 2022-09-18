@@ -129,6 +129,12 @@ def test_export_commands(visitor, parser):
     verify_parse(v, p, "export_table", "export coders to gsheets ('Coders' || current_date || '.txt') append",
             args={"write_option": "append", "file_ref": "('Coders' || current_date || '.txt')"})
 
+    verify_parse(v, p, "export_table", "export coders to coders.csv",
+            args={"adapter_ref": None, "file_ref": "coders.csv"})
+
+    verify_parse(v, p, "export_table", "export coders to 'subdir/coders.csv'",
+            args={"adapter_ref": None, "file_ref": "subdir/coders.csv"})
+
 def test_autocomplete_parser(visitor, parser):
     # Test parser snippets use for auto-completion
     def verify_parse(rule, query):
