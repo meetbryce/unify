@@ -1,11 +1,32 @@
 # Files
 
-Unify attempts to provide a "unified" file system which co-exists alongside the integrated database.
+Unify provides powerful `import` and `export` commands which make it easy to work with
+data in files. 
 
-This file system is available to all Unify commands. It has a physical backing in the Unify server
-space, but other filesystems can be "mounted" into it.
+Examples:
 
-These include:
+    import https://docs.google.com/spreadsheets/d/16YgB5XykiMBMXQfHk8lI9hYilJ2ctn6madVAJoKt12Q/edit
+
+Imports a Google Sheet.
+
+    import order.csv
+
+Imports a CSV file.
+
+    export github.pulls as 'pulls.csv'
+
+Exports the indicated table to a csv file.
+
+
+## Use of adapters
+
+File import and export are implemented by Adapters which implement the `create_output_table` and
+the `import_file` methods. The Adapter is responsible for reading/writing the files and converting
+between DataFrames for saving in the database.
+
+The special `LocalFileAdapter` implements reading and writing to files on the server filesystem.
+
+Other sources of files are supported by other adapters:
 
 ### S3
 
@@ -16,65 +37,19 @@ Unify service, and Unify data can be easily written out to S3.
 
 You can mount one or more folders from Google Drive into the file system.
 
-### Local files
-
-Unify provides a local application which mirrors local files into the file system. It allows you
-to mount a folder from your local system into the Unify file system, and to read and write files
-in the folder. This allows an easy path for importing file data into Unify, or for exporting
-Unify data back to your local system.
-
-## Using files
-
-(See here for help: https://stackoverflow.com/questions/33713084/download-link-for-google-spreadsheets-csv-export-with-multiple-sheets)
-
-The simplest way to import a file is to use the `import` command and a URL:
-
-    > import https://somecoolhost.com/data.csv
-
-The system will attempt to download the file and infer its data format, then it will import the
-data into a local table under the files schema:
-
-    ...created 'files.data_csv' table
-
-This also works with Google Sheets URLs:
-
-    > https://docs.google.com/spreadsheets/d/1sfkehaHQ2IOGNVOZQjyDF_6mCGO0ZEBru5WBsQU6_D8/edit#gid=0
-
-If a GSheets connection is available we will try to download the file using the API and the table
-will be created in the gsheets schema. If that fails then we will fall back to using the "Chart tools
-protocol" and attempt to download the sheet with no authentication. This will only work if the sheet
-has been made publicly accessible.
-
-### The FILE function
-
-We generalize access to files using the special `FILE` table function. You can read or write
-data from a "file table":
-
-Reading files:
-
-    select * from FILE('test_data.csv')
-    insert into orders select id, product, amount from FILE('/inbox/orders.parquet')
-
-Writing out to files:
-
-    insert into FILE('lastest_prs', 'csv') select * from github.pulls where created_at = today()
-
-You can specify the file format with the second argument to the function. If omitted then the
-function will attempt to guess the right file format based on the file name extension or the
-file contents.
-
 ### Listing files
 
-We support the `ls` command similar to a Unix prompt:
+We support `show files` to show available files
 
-    ls           # lists all files in the root directory. This will show all the
-                 # mounted file system folders
-    ls '/inbox'  # lists files in the /inbox directory
-    ls *.csv     # uses file globbing to list matching files
+    show files
+    
+By default this shows files from the LocalFile adapter.
 
-and the `rm` command for deleting files matching a file name or pattern
+Use:
 
-    rm /inbox/*.csv
+    show files <adapter>
+
+to show a file listing from another adapter.
 
 ## Mounting file systems
 

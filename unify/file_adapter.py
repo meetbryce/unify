@@ -1,4 +1,5 @@
 from logging import root
+import inspect
 import os
 from pathlib import Path
 import subprocess
@@ -18,12 +19,18 @@ class LocalFileTableSpec(TableDef):
     
     def query_resource(self, tableLoader, logger: UnifyLogger):
         path = Path(self.file_uri)
-        with getattr(pd, self.reader_name)(path, chunksize=5000) as reader:
-            for chunk in reader:
-                chunk.dropna(axis='rows', how='all', inplace=True)
-                chunk.dropna(axis='columns', how='all', inplace=True)
-                size_return = []
-                yield AdapterQueryResult(json=chunk, size_return=size_return)
+
+        size_return = []
+        method = getattr(pd, self.reader_name)
+        if 'chunksize' in inspect.signature(method).parameters:
+            with method(path, chunksize=5000) as reader:
+                for chunk in reader:
+                    chunk.dropna(axis='rows', how='all', inplace=True)
+                    chunk.dropna(axis='columns', how='all', inplace=True)
+                    yield AdapterQueryResult(json=chunk, size_return=size_return)
+        else:
+            df = method(path)
+            yield AdapterQueryResult(json=df, size_return=size_return)
 
 
 class LocalFileAdapter(Adapter):
@@ -84,15 +91,15 @@ class LocalFileAdapter(Adapter):
         mime = None
         if res[0] is None:
             # Fall back to using 'file' system command
-            res = subprocess.check_output(["file", "-b", "--mime-type", file_uri])
-            mime = res.decode("utf8").strip()
+            res = subprocess.check_output(["file", "-b", file_uri])
+            mime = res.decode("utf8").strip().lower()
         else:
             mime = res[0]
-        if mime == 'text/csv':
+        if 'csv' in mime:
             return pd.read_csv
-        elif 'spreadsheetml' in mime:
+        elif 'spreadsheetml' in mime or 'excel' in mime:
             return pd.read_excel
-        elif mime.endswith('xml'):
+        elif 'xml' in mime:
             return pd.read_xml
         elif 'parquet' in mime:
             return pd.read_parquet
@@ -104,7 +111,15 @@ class LocalFileAdapter(Adapter):
         return self.root_path.joinpath(file_name)
 
     def write_page(self, output_handle, page: pd.DataFrame, output_logger: OutputLogger, append=False, page_num=1):
-        page.to_csv(output_handle, header=(page_num==1), mode='a',index=False)
+        path = output_handle
+        res = mimetypes.guess_type(path)
+        if res[0] is not None and 'spreadsheetml' in res[0]:
+            page.to_excel(path, index=False)
+        elif str(path).lower().endswith(".parquet"):
+            page.to_parquet(path, index=False)
+        else:
+            # csv chosen or fall back to csv
+            page.to_csv(output_handle, header=(page_num==1), mode='a',index=False)
 
     def close_output_table(self, output_handle):
         # Sheets REST API is stateless

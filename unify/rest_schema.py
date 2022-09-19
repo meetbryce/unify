@@ -845,7 +845,9 @@ class Adapter:
     def list_views(self) -> List[RESTView]:
         return []
 
-
+    def drop_table(self, table_root: str):
+        pass
+    
 class RESTAdapter(Adapter):
     def __init__(self, spec, storage: StorageManager=None):
         super().__init__(spec['name'], storage)

@@ -900,8 +900,8 @@ class ParserVisitor(Visitor):
     def insert_statement(self, tree):
         self._the_command = 'insert_statement'
 
-    def ls_command(self, tree):
-        self._the_command = 'ls_command'
+    def show_files(self, tree):
+        self._the_command = 'show_files'
 
     def peek_table(self, tree):
         self._the_command = 'peek_table'
@@ -1238,6 +1238,7 @@ class CommandInterpreter:
             self.print(l.strip())
 
     def import_command(self, file_path):
+        """ import URL | file path - imports a file or spreadsheet as a new table """
         # See if any of our adapters want to import the indicated file
         for schema, adapter in self.adapters.items():
             if adapter.can_import_file(file_path):
@@ -1251,6 +1252,9 @@ class CommandInterpreter:
     def drop_table(self, table_ref):
         """ drop <table> - removes the table from the database """
         val = self.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
+        if "." in table_ref:
+            schema, table_root = table_ref.split(".")
+            self.adapters[schema].drop_table(table_root)
         if val == "y":
             return self._execute_duck(self._cmd)
 
@@ -1681,7 +1685,7 @@ class CommandInterpreter:
     #########
     ### FILE system commands
     #########
-    def ls_command(self, path=None):
+    def show_files(self, path=None):
         for file in self.adapters['files'].list_files(path):
             self.print(file)
 

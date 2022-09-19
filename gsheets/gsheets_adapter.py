@@ -6,6 +6,7 @@ import logging
 import re
 import sys
 import traceback
+import urllib
 
 # vendor
 from lark import Lark
@@ -436,6 +437,10 @@ is a good option if the sheet data is changing frequenly.
         # Todo: trigger a query which will load the table
         self.logger.print("Table created")
 
+    def drop_table(self, table_root: str):
+        self.storage.delete_object('tables', table_root)
+        self.tables = None
+
     def supports_commands(self) -> bool:
         return True
 
@@ -461,15 +466,27 @@ is a good option if the sheet data is changing frequenly.
 
     def import_file(self, file_uri: str, options: dict={}):
         # attempts to import a Google sheet into a new table.
+
         m = re.search(r"\/d\/([^\/]+)", file_uri)
         if m:
             sheetId = m.group(1)
+            parts = urllib.parse.urlparse(file_uri)
+            tab_id = None
+            if parts.fragment and re.search(r"gid=\d+", parts.fragment):
+                tab_id = int(re.search(r"gid=(\d+)", parts.fragment).group(1))
+
             # Will fail if we don't have access to this sheet
             info = self.client.getSheetInfo(sheetId)
             title = info['properties']['title']
+            tab_name = None
+            for tab in info['sheets']:
+                if tab_id is None or tab['properties']['sheetId'] == tab_id:
+                    tab_name = tab['properties']['title']
+                    break
+            if tab_id is not None and tab_id > 0:
+                title += "_" + tab_name # qualify table name for tabs other than the first
             table_name = self.convert_string_to_table_name(title)
-            tab = info['sheets'][0]['properties']['title']
-            self.create_table(table_name, sheetId, tab)
+            self.create_table(table_name, sheetId, tab_name)
             return table_name
 
     # Exporting data

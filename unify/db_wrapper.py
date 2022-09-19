@@ -13,6 +13,7 @@ import duckdb
 #import clickhouse_connect
 from clickhouse_driver import Client
 import clickhouse_driver
+import sqlglot
 
 from .schemata import Queries
 from .storage_manager import StorageManager
@@ -93,6 +94,12 @@ class DBWrapper:
     def dialect(self):
         return "postgres"
 
+    def extract_missing_table(self, query, e):
+        for table_ref in sqlglot.parse_one(query).find_all(sqlglot.exp.Table):
+            if table_ref.name in query:
+                return table_ref.sql()
+        return '<>'
+
 DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_HOME, exist_ok=True)
 
@@ -113,17 +120,8 @@ class DuckDBWrapper(DBWrapper):
         try:
             return DuckDBWrapper.DUCK_CONN.execute(query, args)
         except RuntimeError as e:
-            m = re.search(r"Table with name (\S+) does not exist", str(e))
-            if m:
-                table_root = m.group(1)
-                m = re.search("(\w+)\."+table_root, str(e))
-                if m:
-                    schema = m.group(1)
-                else:
-                    schema = ""
-                raise TableMissingException(schema + "." + table_root)
-            else:
-                raise
+            if re.search(r"Table.+ does not exist", str(e)):
+                raise TableMissingException(self.extract_missing_table(query, e))
 
     def execute_df(self, query: str, args=[]) -> pd.DataFrame:
         return self.execute(query, args).df()
