@@ -20,6 +20,19 @@ Use the `create chart` command to build a chart.
 
     create chart [from <var or table>] as <chart type> where x = <col> and y = <col> [...more options]
 
+### Adding a trendline
+
+Use the `trendline` parameter to add a trendline to the chart. It can take a value of 'average', 'mean',
+'rolling' or a fixed value:
+
+    create chart as bar_chart where y = total and trendline=average
+
+Shows the average value of "total" as a trendline.
+
+    create chart as bar_chart where y = total and trendline=50
+
+Shows a fixed value line at "50" on the y axis.
+
 ### Creating stacked charts
 
 You can use multiple `create chart` commands to create separate charts that will appear in

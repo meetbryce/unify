@@ -832,6 +832,9 @@ class Adapter:
              or raises an error if there was one. """
         pass
 
+    def peek_file(self, file_uri: str, line_count: int, logger: OutputLogger):
+        logger.print("Subclass must implement peek_file command")
+
     # Exporting data
     def create_output_table(self, file_name, output_logger:OutputLogger, overwrite=False, opts={}):
         raise RuntimeError(f"Adapter {self.name} does not support writing")

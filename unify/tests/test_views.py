@@ -22,7 +22,7 @@ def db():
     yield dbmgr()
 
 def test_tableloader(connections, db):
-    with requests_mock.Mocker() as mock:
+    with requests_mock.Mocker(real_http=True) as mock:
         MockSvc.setup_mocksvc_api(mock)
 
         loader = TableLoader(given_connections=connections)

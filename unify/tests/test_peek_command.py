@@ -12,7 +12,7 @@ def test_updates_strategy():
     table = "mocksvc.repos1100"
     c = CommandInterpreter()
     
-    with requests_mock.Mocker() as mock:
+    with requests_mock.Mocker(real_http=True) as mock:
         MockSvc.setup_mocksvc_api(mock)
 
         c.run_command(f"drop table if exists {table}")

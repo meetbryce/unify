@@ -1,3 +1,4 @@
+from distutils.cmd import Command
 from email.parser import Parser
 import inspect
 from inspect import isfunction
@@ -37,10 +38,6 @@ from timeit import default_timer as timer
 logger = logging.getLogger(__name__)
 #logging.basicConfig(level=logging.DEBUG)
 
-# DuckDB
-import duckdb
-from setuptools import Command
-
 from .rest_schema import (
     Adapter, 
     Connection, 
@@ -55,7 +52,8 @@ from .db_wrapper import (
     DBWrapper, 
     DuckDBWrapper, 
     TableMissingException,
-    UnifyDBStorageManager
+    TableHandle,
+    UnifyDBStorageManager,
 )
 
 from .storage_manager import StorageManager
@@ -76,7 +74,6 @@ if 'DATABASE_BACKEND' not in os.environ or os.environ['DATABASE_BACKEND'] not in
     raise RuntimeError("Must set DATABASE_BACKEND to 'duckdb' or 'clickhouse'")
 
 dbmgr: DBWrapper = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
-       
 
 def load_connections_config():
     trylist = [
@@ -278,12 +275,12 @@ class BaseTableScan(Thread):
         self.storage_mgr.delete_log_objects("tablescans", self.tableMgr.name)
 
     def create_table_with_first_page(self, duck: DBWrapper, next_df, schema, table_root):
-        table = schema + "." + table_root
+        table = TableHandle(table_root, schema)
         if duck.table_exists(table):
             # table already exists, so assume we are updating
             duck.append_dataframe_to_table(next_df, table)
         else:
-            duck.write_dataframe_as_table(next_df, schema, table_root)
+            duck.write_dataframe_as_table(next_df, table)
 
     def get_query_mgr(self):
         return self.tableMgr.table_spec
@@ -392,8 +389,7 @@ class InitialTableLoad(BaseTableScan):
         else:
             duck.append_dataframe_to_table(
                 next_df, 
-                tableMgr.schema, 
-                tableMgr.table_spec.name
+                TableHandle(tableMgr.table_spec.name, tableMgr.schema)
             )
 
 class TableUpdateScan(BaseTableScan):
@@ -433,7 +429,7 @@ class TableUpdateScan(BaseTableScan):
             # Use parent class to download data from the target API (calling _flush_rows along the way)
             super().perform_scan(duck)
             # Now swap the new table into place
-            duck.replace_table(self._target_table, self.tableMgr.name)
+            duck.replace_table(TableHandle(self._target_table), TableHandle(self.tableMgr.name))
         else:
             self._target_table_root = self.tableMgr.table_spec.name
             self._target_table = self.tableMgr.schema + "." + self._target_table_root
@@ -456,14 +452,13 @@ class TableUpdateScan(BaseTableScan):
             else:
                 duck.append_dataframe_to_table(
                     next_df, 
-                    self.tableMgr.schema, 
-                    self._target_table_root
+                    TableHandle(self._target_table_root, self.tableMgr.schema)
                 )
             return
 
         # To update a table we have to both remove existing copies of any rows
         # we downloaded and align our downloaded columns with the existing table.
-        cols = duck.get_table_columns(self._target_table)
+        cols = duck.get_table_columns(TableHandle(self._target_table))
         # filter and order to the right columns
         next_df = next_df[cols]
         print(f"Saving update page {page} with {next_df.shape[0]} rows and {next_df.shape[1]} columns")
@@ -472,12 +467,12 @@ class TableUpdateScan(BaseTableScan):
         keys = next_df[tableMgr.table_spec.key]  #.values.tolist()
         keys_table = duck.create_memory_table("__keys", pd.DataFrame(keys))
 
-        duck.delete_rows(self._target_table, 
+        duck.delete_rows(TableHandle(self._target_table), 
             where_clause = f"{tableMgr.table_spec.key} IN (SELECT * FROM {keys_table})")
         duck.drop_memory_table("__keys")
 
         # Now append the new records             
-        duck.append_dataframe_to_table(next_df, tableMgr.schema, self._target_table_root)
+        duck.append_dataframe_to_table(next_df, TableHandle(self._target_table_root, tableMgr.schema))
 
 
 class TableExporter(Thread):
@@ -628,7 +623,7 @@ class TableLoader:
         query += " "
         for table_root in sqlglot.parse_one(query).find_all(sqlglot.exp.Table):
             table = schema + "." + table_root.name.split(".")[0]
-            query = re.sub("[\s,]+" + table_root.name + "[\s]+", f" {table} ", query)
+            query = re.sub(r"[\s,]+" + table_root.name + r"[\s]+", f" {table} ", query)
 
         return query
 
@@ -821,6 +816,7 @@ class ParserVisitor(Visitor):
 
         where_clause = find_subtree('create_chart_where', tree)
         # collect chart params
+
         params = {}
         if where_clause:
             key = value = None
@@ -895,18 +891,28 @@ class ParserVisitor(Visitor):
 
     def import_command(self, tree):
         self._the_command = 'import_command'
-        self._the_command_args['file_path'] = collect_child_text("file_path", tree, full_code=self._full_code)
+        self._the_command_args['file_path'] = collect_child_text("file_path", tree, full_code=self._full_code).strip("'")
+        opts = find_node_return_children("options", tree)
+        if opts:
+            opts = re.split(r"\s+", opts[0])
+            self._the_command_args['options'] = opts
 
     def insert_statement(self, tree):
         self._the_command = 'insert_statement'
 
     def show_files(self, tree):
         self._the_command = 'show_files'
+        self._the_command_args['schema_ref'] = find_node_return_child("schema_ref", tree)
+        filter = collect_child_strings("match_expr", tree)
+        if filter:
+            self._the_command_args['match_expr'] = filter.strip()
 
     def peek_table(self, tree):
         self._the_command = 'peek_table'
-        self._the_command_args['table_ref'] = \
-            collect_child_text("table_ref", tree, full_code=self._full_code)
+        self._the_command_args['qualifier'] = \
+            collect_child_text("qualifier", tree, full_code=self._full_code)
+        self._the_command_args['peek_object'] = \
+            collect_child_text("peek_object", tree, full_code=self._full_code)
         count = find_node_return_child("line_count", tree)
         if count:
             self._the_command_args['line_count'] = int(count)
@@ -994,6 +1000,48 @@ class ParserVisitor(Visitor):
     def show_variables(self, tree):
         self._the_command = "show_variables"
 
+class CommandContext:
+    def __init__(self, command: str, input_func=None, get_notebook_func=None, interactive: bool=True):
+        self.has_run = False
+        self.command = command
+        self.input_func = input_func
+        self.get_notebook_func = get_notebook_func
+        self.interactive = interactive
+        self.logger: OutputLogger = OutputLogger()
+        self.print_buffer = []
+        self.parser_visitor = ParserVisitor()
+        self.result = None
+        self.interp_command = None
+        self.sqlparse = None
+        self.sql_parse_error = None
+        self.lark_parse_error = None
+
+    def mark_ran(self):
+        self.has_run = True
+
+    def parse_command(self, parser):
+        parse_tree = parser.parse(self.command)
+        self.interp_command = self.parser_visitor.perform_new_visit(parse_tree, full_code=self.command)
+
+    def parse_sql(self):
+        try:
+            self.sqlparse = sqlglot.parse_one(self.command)
+        except sqlglot.errors.ParseError as e:
+            self.sql_parse_error = e
+
+    def starts_with_bang(self):
+        return self.command.startswith("!")
+
+    def add_notebook_path_to_args(self):
+        nb_path = self.get_notebook_func() if self.get_notebook_func else None
+        if 'notebook_path' not in self.parser_visitor._the_command_args:
+            self.parser_visitor._the_command_args['notebook_path'] = nb_path
+
+    def should_run_after_db_closed(self):
+        return self.interp_command == 'email_command' and \
+            self.parser_visitor._the_command_args.get('email_object') == 'notebook'
+
+
 class CommandInterpreter:
     """
         The interpreter for Unify. You call `run_command` with the code you want to execute
@@ -1005,10 +1053,9 @@ class CommandInterpreter:
 
     def __init__(self, silence_errors=False):
         self.parser = None # defer loading grammar until we need it
-        self.parser_visitor = ParserVisitor()
         self.loader = TableLoader(silence_errors, lark_parser=self.parser)
         self.adapters: dict[str, Adapter] = self.loader.adapters
-        self.logger: OutputLogger = None
+        self.context: CommandContext = None
         self.session_vars: dict[str, object] = {}
         self._email_helper = None
         self.duck: DBWrapper = None
@@ -1018,6 +1065,95 @@ class CommandInterpreter:
         self.commands_needing_interaction = [
             'run_notebook_command'
         ]
+
+    def run_command(
+        self, 
+        cmd, 
+        input_func=input, 
+        get_notebook_func=None, 
+        interactive: bool=True) -> tuple[list, pd.DataFrame]:
+
+        context = CommandContext(cmd, input_func, get_notebook_func, interactive)
+        self.context = context
+
+        pipeline = [
+            self.run_command_direct_to_db,
+            self.substitute_variables,
+            self.run_adapter_commands,
+            self.lark_parse_command,
+            self.skip_non_interactive,
+            self.run_interp_commands
+        ]
+        with dbmgr() as duck:
+            self.duck = duck
+            for stage in pipeline:
+                if context.has_run:
+                    break
+                stage(context)
+        if not context.has_run:
+            self.run_commands_after_db_closed(context)
+        self.clean_df_result(context)
+        self.print_df_header(context)
+        self._last_result = context.result
+        return (context.logger.get_output(), context.result)
+
+    def lark_parse_command(self, context: CommandContext):
+        try:
+            context.parse_command(self._get_parser())
+        except lark.exceptions.LarkError as e:
+            # Let any parsing exceptions send the command down to the db
+            context.lark_parse_error = e
+
+    def skip_non_interactive(self, context: CommandContext):
+        if not context.interactive and context.interp_command in self.commands_needing_interaction:
+            self.print(f"Skipping command: {context.interp_command}")
+            context.mark_ran()
+
+    def rewrite_query_for_db(self, context: CommandContext):
+        if context.sqlparse:
+            new_query = self.duck.rewrite_query(context.sqlparse)
+            if new_query:
+                context.command = new_query
+
+    def print_df_header(self, context: CommandContext):
+        if isinstance(context.result, pd.DataFrame):
+            # print the row count
+            self.print("{} row{}".format(context.result.shape[0], "s" if context.result.shape[0] != 1 else ""))
+
+    def run_command_direct_to_db(self, context: CommandContext):
+        if context.starts_with_bang():
+            context.result = self._execute_duck(context.command[1:])
+            context.mark_ran()
+
+    def run_adapter_commands(self, context: CommandContext):
+        output: OutputLogger = self.pre_handle_command(context.command)
+        if output is not None:
+            context.result = output.get_df
+            context.logger = output
+
+    def run_interp_commands(self, context: CommandContext):
+        if context.interp_command:
+            method = getattr(self, context.interp_command)
+            if 'notebook_path' in inspect.signature(method).parameters:
+                context.add_notebook_path_to_args()
+
+            if not context.should_run_after_db_closed():
+                context.result = getattr(self, context.interp_command)(
+                    **context.parser_visitor._the_command_args
+                )
+        else:
+            # Interp parser failed, but just fall back to the db
+            context.result = self._execute_duck(context.command)
+            context.mark_ran()
+
+    def run_commands_after_db_closed(self, context: CommandContext):
+        if context.should_run_after_db_closed():
+            context.result = getattr(self, context.interp_command)(**context.parser_visitor._the_command_args)
+
+    def clean_df_result(self, context):
+        if isinstance(context.result, pd.DataFrame):
+            if 'count_star()' in context.result.columns:
+                context.result.rename(columns={'count_star()': 'count'}, inplace=True)
 
     def _get_parser(self):
         if self.parser is None:
@@ -1071,9 +1207,9 @@ class CommandInterpreter:
                 handler: Adapter = self.adapters[first_word]
                 return handler.run_command(rest_of_command, logger)
 
-    def substitute_variables(self, code):
-        if re.match(r"\s*\$[\w_0-9]+\s*$", code):
-            return code # simple request to show the variable value
+    def substitute_variables(self, context: CommandContext):
+        if re.match(r"\s*\$[\w_0-9]+\s*$", context.command):
+            return context.command # simple request to show the variable value
 
         def lookup_var(match):
             var_name = match.group(1)
@@ -1091,20 +1227,19 @@ class CommandInterpreter:
                     return str(self.session_vars[var_name])
             else:
                 return "$" + var_name
-                #raise RuntimeError(f"Unknown variable reference '{var_name}'")
 
-        match = re.match(r"\s*(\$[\w_0-9]+)\s*=(.*)", code, re.DOTALL)
+        match = re.match(r"\s*(\$[\w_0-9]+)\s*=(.*)", context.command, re.DOTALL)
         if match:
             # var assignment, only interpolate the right hand side
-            return match.group(1) + "=" + self.substitute_variables(match.group(2))
+            rhs = CommandContext(match.group(2))
+            context.command = match.group(1) + "=" + self.substitute_variables(rhs)
         else:
             # interpolate the whole command
-            return re.sub(r"\$([\w_0-9]+)", lookup_var, code)
+            context.command = re.sub(r"\$([\w_0-9]+)", lookup_var, context.command)
 
-    def _command_needs_db_closed(self, command, parser_visitor: ParserVisitor) -> bool:
-        return command == 'email_command' and parser_visitor._the_command_args.get('email_object') == 'notebook'
 
-    def run_command(
+
+    def old_run_command(
         self, 
         cmd, 
         input_func=input, 
@@ -1122,18 +1257,19 @@ class CommandInterpreter:
         # The Email function may need the notebook path. In this case the `get_notebook_func`
         # should be supplied by the kernel to return the notebook path.
 
-        def clean_df(object):
-            if isinstance(object, pd.DataFrame):
-                self._last_result = object
-                if 'count_star()' in object.columns:
-                    object.rename(columns={'count_star()': 'count'}, inplace=True)
-
         # This is a hack for the email command, which will execute a notebook which needs exclusive
         # access to the database, so we defer to running the command until after we close the db.
         run_command_after_closing_db = None
         try:
             with dbmgr() as duck:
                 self.duck = duck
+                self.logger: OutputLogger = OutputLogger()
+                self.print_buffer = []
+
+                if cmd.startswith("!"):
+                    # pass directly to the db
+                    result = self._execute_duck(cmd[1:])
+                    return (self.logger.get_output(), result)
 
                 cmd = self.substitute_variables(cmd)
                 # Allow Adapters to process their special commands
@@ -1141,11 +1277,9 @@ class CommandInterpreter:
                 if output is not None:
                     return (output.get_output(), output.get_df())
 
-                self.print_buffer = []
                 self._cmd = cmd
                 result = None
                 self.input_func = input_func
-                self.logger: OutputLogger = OutputLogger()
                 try:
                     parse_tree = self._get_parser().parse(self._cmd)
                     command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
@@ -1183,11 +1317,13 @@ class CommandInterpreter:
                 # FIXME: use a namedtuple
                 return (self.logger.get_output(), result)
 
-    def _execute_duck(self, query, header=True):
+    def _execute_duck(self, query: typing.Union[str, CommandContext]) -> pd.DataFrame:
+        if isinstance(query, CommandContext):
+            query = query.command
         return self.duck.execute_df(query)
 
     def print(self, *args):
-        self.logger.print(*args)
+        self.context.logger.print(*args)
 
     def get_input(self, prompt: str):
         return self.input_func(prompt)
@@ -1237,13 +1373,13 @@ class CommandInterpreter:
         for l in msg.splitlines():
             self.print(l.strip())
 
-    def import_command(self, file_path):
+    def import_command(self, file_path: str, options: list=[]):
         """ import URL | file path - imports a file or spreadsheet as a new table """
         # See if any of our adapters want to import the indicated file
         for schema, adapter in self.adapters.items():
             if adapter.can_import_file(file_path):
                 adapter.logger = self.logger
-                table_root = adapter.import_file(file_path) # might want to run this in the background
+                table_root = adapter.import_file(file_path, options=options) # might want to run this in the background
                 table = schema + "." + table_root
                 lines, result = self.run_command(f"select * from {table} limit 10")
                 self.print(f"Imported file to table: {table}")
@@ -1256,7 +1392,7 @@ class CommandInterpreter:
             schema, table_root = table_ref.split(".")
             self.adapters[schema].drop_table(table_root)
         if val == "y":
-            return self._execute_duck(self._cmd)
+            return self._execute_duck(self.context.command)
 
     def drop_schema(self, schema_ref, cascade: bool):
         """ drop <schema> [cascade] - removes the entire schema from the database """
@@ -1321,17 +1457,25 @@ class CommandInterpreter:
         exporter.run(self.logger)
         self.print(f"Exported query result to '{file_ref}'")
 
-    def peek_table(self, table_ref, line_count=20, build_stats=True, debug=False):
+    def peek_table(self, qualifier, peek_object, line_count=20, build_stats=True, debug=False):
         # Get column weights and widths.
-        schema, table_root = table_ref.split(".")
+        if qualifier == 'file':
+            # Peek at file instead of table
+            for schema, adapter in self.adapters.items():
+                file_path = peek_object.strip("'")
+                if adapter.can_import_file(file_path):
+                    return adapter.peek_file(file_path, line_count, self.logger)
+            return
+
+        schema, table_root = peek_object.split(".")
         store: UnifyDBStorageManager = UnifyDBStorageManager("meta", self.duck)
         cols = [ColumnIntel(name, attrs) for name, attrs in store.get_column_intels(schema, table_root)]
         if len(cols) == 0:
             if build_stats:
-                self._analyze_columns(table_ref)
-                return self.peek_table(table_ref, line_count=line_count, build_stats=False)
+                self._analyze_columns(peek_object)
+                return self.peek_table(peek_object, line_count=line_count, build_stats=False)
             else:
-                self.print(f"Can't peek at {table_ref} because no column stats are available.")
+                self.print(f"Can't peek at {peek_object} because no column stats are available.")
                 return
 
         cols = sorted(cols, key=lambda col: col.column_weight, reverse=True)
@@ -1378,7 +1522,7 @@ class CommandInterpreter:
             total_width += max(column_width, len(display_name))
 
         col_list = ", ".join([f"{pair[0]} as \"{pair[1]}\"" for pair in use_cols])
-        sql = f"select {col_list} from {table_ref} limit {line_count}"
+        sql = f"select {col_list} from {peek_object} limit {line_count}"
         print(sql)
         return self._execute_duck(sql)
 
@@ -1483,7 +1627,7 @@ class CommandInterpreter:
 
     def show_schemas(self):
         """ show schemas - list schemas in the datbase """
-        return self._execute_duck(Queries.list_schemas)
+        return self.duck.list_schemas()
 
     def show_tables(self, schema_ref=None):
         """ show tables [from <schema> [like '<expr>']] - list all tables or those from a schema """
@@ -1526,19 +1670,19 @@ class CommandInterpreter:
 
     def create_statement(self):
         """ create table <table> ... """
-        return self._execute_duck(self._cmd)
+        return self._execute_duck(self.context.command)
 
     def create_view_statement(self):
         """ create view <view> ... """
-        return self._execute_duck(self._cmd)
+        return self._execute_duck(self.context.command)
 
     def insert_statement(self):
         """ insert into <table> ... """
-        return self._execute_duck(self._cmd)
+        return self._execute_duck(self.context.command)
 
     def delete_statement(self):
         """ delete from <table> [where ...] """
-        return self._execute_duck(self._cmd)
+        return self._execute_duck(self.context.command)
 
     def load_adapter_data(self, schema_name, table_name):
         if self.loader.materialize_table(schema_name, table_name):
@@ -1551,7 +1695,7 @@ class CommandInterpreter:
     def select_query(self, fail_if_missing=False, **kwargs):
         """ select <columns> from <table> [where ...] [order by ...] [limit ...] [offset ...] """
         try:
-            return self._execute_duck(self._cmd)
+            return self._execute_duck(self.context.command)
 
         except TableMissingException as e:
             if fail_if_missing:
@@ -1641,7 +1785,16 @@ class CommandInterpreter:
 
         altair.renderers.enable('png')
 
-        if "x" not in chart_params:
+        if len(chart_params.keys()) == 0:
+            source = pd.DataFrame({"category": [1, 2, 3, 4, 5, 6], "value": [4, 6, 10, 3, 7, 8]})
+
+            print(source)
+            chart = altair.Chart(source).mark_arc().encode(
+                theta="value", #altair.Theta(field="value", type="quantitative"),
+                color="category" #altair.Color(field="category", type="nominal"),
+            )
+            return chart
+
             self._last_result = pd.DataFrame({
                 'a': ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'],
                 'b': [28, 55, 43, 91, 81, 53, 19, 87, 52]
@@ -1654,15 +1807,18 @@ class CommandInterpreter:
             df = self._execute_duck(f"select * from {chart_source}")
         else:
             df = self._last_result
+        print(df)
 
         if df is None or df.shape[0] == 0:
             raise RuntimeError("No recent query, or query returned no rows")
 
         title = chart_params.pop('title', '')
 
+        trendline = chart_params.pop('trendline', None)
+
         chart_methods = {
             'bar_chart': 'mark_bar',
-            'pie_chart': 'marc_arc',
+            'pie_chart': 'mark_arc',
             'hbar_chart': 'mark_bar',
             'line_chart': 'mark_line',
             'area_chart': 'mark_area'
@@ -1674,10 +1830,23 @@ class CommandInterpreter:
 
         #chart_params["tooltip"] = {"content":"data"}
         
+        print(chart_params)
         chart = altair.Chart(df)
         chart = getattr(chart, chart_methods[chart_type])(tooltip=True). \
             encode(**chart_params). \
             properties(title=title, height=400, width=600)
+
+        if trendline and 'y' in chart_params:
+            if trendline == 'average':
+                trendline="average({}):Q".format(chart_params['y'])
+            elif trendline == 'mean':                
+                trendline="mean({}):Q".format(chart_params['y'])
+            else:
+                val = float(trendline)
+                df['_trend'] = val
+                trendline = "_trend"
+            trend = altair.Chart(df).mark_line(color='red').encode(x=chart_params['x'], y=trendline)
+            chart = chart + trend
 
         self.last_chart = chart
         return chart
@@ -1685,8 +1854,18 @@ class CommandInterpreter:
     #########
     ### FILE system commands
     #########
-    def show_files(self, path=None):
-        for file in self.adapters['files'].list_files(path):
+    def show_files(self, schema_ref=None, match_expr=None):
+        """ 
+            show files [from <connection>] [like '<pattern>'] - Lists files on the file system or from the indicated connection 
+        """
+        if schema_ref is None:
+            schema_ref = 'files'
+
+        if schema_ref not in self.adapters:
+            raise RuntimeError(f"Uknown schema '{schema_ref}'")
+
+        self.adapters[schema_ref].logger = self.context.logger
+        for file in self.adapters[schema_ref].list_files(match_expr):
             self.print(file)
 
     def rewrite_file_table_function(self, query: str):
@@ -1756,6 +1935,7 @@ class UnifyRepl:
                                 print(df.to_string(**fmt_opts))
                     elif 'altair' in str(type(df)): # instead of isinstance(altair.Chart) we can avoid loading altari at the start
                         df.show()
+                        sys.exit(0)
                     elif df is not None:
                         print(df)
                 except RuntimeError as e:

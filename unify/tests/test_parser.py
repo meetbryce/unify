@@ -15,6 +15,10 @@ def parser():
         propagate_positions=True
     )
 
+@pytest.fixture
+def gsheets_url():
+    return 'https://docs.google.com/spreadsheets/d/16YgB5XykiMBMXQfHk8lI9hYilJ2ctn6madVAJoKt12Q/edit#gid=1609197558'
+
 def verify_parse(visitor, parser, rule, query, args = {}):
     ast = parser.parse(query)
     assert visitor.perform_new_visit(ast, full_code=query) == rule
@@ -50,6 +54,17 @@ def test_show_commands(visitor, parser):
     verify_parse(v, p, "describe", query="describe github.orgs", args={'table_ref':"github.orgs"})
 
     verify_parse(v, p, "show_variables", query="show variables")
+
+    verify_parse(v, p, "show_files", query="show files")
+
+    verify_parse(v, p, "show_files", query="show files from gsheets",
+                args={'schema_ref':"gsheets"})
+
+    verify_parse(v, p, "show_files", query="show files from gsheets like '%Money'",
+                args={'schema_ref':"gsheets", "match_expr": "%Money"})
+
+    verify_parse(v, p, "show_files", query="show files like '*.csv'",
+                args={"match_expr": "*.csv"})
 
 def test_select(visitor, parser):
     v = visitor
@@ -135,6 +150,20 @@ def test_export_commands(visitor, parser):
     verify_parse(v, p, "export_table", "export coders to 'subdir/coders.csv'",
             args={"adapter_ref": None, "file_ref": "subdir/coders.csv"})
 
+def test_import_command(visitor, parser, gsheets_url):
+    v = visitor
+    p = parser
+
+    verify_parse(v, p, "import_command", "import 'projects.csv'",
+            args={"file_path": "projects.csv"})
+
+    verify_parse(v, p, "import_command", f"import {gsheets_url}",
+            args={"file_path": gsheets_url})
+
+    verify_parse(v, p, "import_command", "import 'projects.csv' skip 10",
+            args={"file_path": "projects.csv", "options": ['skip', '10']})
+    
+
 def test_autocomplete_parser(visitor, parser):
     # Test parser snippets use for auto-completion
     def verify_parse(rule, query):
@@ -203,19 +232,25 @@ def test_run_every_command(visitor, parser):
     verify_parse(v, p, "delete_schedule", "run delete 'a12838'",
         args={"schedule_id": "a12838"})
 
-def test_peek_command(visitor, parser):
+def test_peek_command(visitor, parser, gsheets_url):
     v = visitor
     p = parser
 
     verify_parse(v, p, "peek_table", "peek github.pulls",
-        args={"table_ref": "github.pulls"})
+        args={"peek_object": "github.pulls"})
     verify_parse(v, p, "peek_table", "peek at jira.issues",
-        args={"table_ref": "jira.issues"})
+        args={"peek_object": "jira.issues"})
     verify_parse(v, p, "peek_table", "peek pulls",
-        args={"table_ref": "pulls"})
+        args={"peek_object": "pulls"})
 
     verify_parse(v, p, "peek_table", "peek github.my_pulls 10",
-        args={"table_ref": "github.my_pulls", "line_count":10})
+        args={"peek_object": "github.my_pulls", "line_count":10})
+
+    verify_parse(v, p, "peek_table", "peek file 'projects.csv'",
+        args={"qualifier": "file", "peek_object": "'projects.csv'"})
+
+    verify_parse(v, p, "peek_table", f"peek file {gsheets_url}",
+        args={"qualifier": "file", "peek_object": gsheets_url})
 
 def test_select_parsing(visitor, parser):
     # Mostly we just pass select queries through to the underlying database, but the RESTAdapter allows populating

@@ -8,8 +8,10 @@ import pyarrow as pa
 import requests
 import time
 import yaml
+import uuid
 import logging
 from pprint import pprint
+from datetime import datetime
 
 if False:
 	print(__file__)
@@ -257,8 +259,109 @@ def profile():
 	p = pstats.Stats('stats')
 	p.sort_stats(SortKey.CUMULATIVE).print_stats(30)
 
+def test_duck_sqlalchemy():
+	from sqlalchemy import Column, Integer, Sequence, String, DateTime, create_engine
+	from sqlalchemy.ext.declarative import declarative_base
+	from sqlalchemy.orm.session import Session
+
+	Base = declarative_base()
+
+
+	seq = Sequence("fakemodel_id_sequence")
+	class FakeModel(Base):  # type: ignore
+		__tablename__ = "fake"
+
+		id = Column(Integer, seq, server_default=seq.next_value(), primary_key=True)
+		name = Column(String)
+		date = Column(DateTime)
+
+
+	eng = create_engine('duckdb:////tmp/tesst.db')
+	Base.metadata.create_all(eng)
+	session = Session(bind=eng)
+
+	m = FakeModel(name="Frank")
+	m.date = datetime.utcnow()
+	session.add(m)
+	session.commit()
+
+	records = session.query(FakeModel).all()
+	print([f.__dict__ for f in records])
+
+def test_ch_tunnel():
+	import sshtunnel as sshtunnel
+	from clickhouse_driver import connect
+
+	server = sshtunnel.SSHTunnelForwarder(
+		('unifyserver16', 22),
+		ssh_username="xx",
+		ssh_password="xx",
+		remote_bind_address=('localhost', 9000))
+		
+	server.start()
+
+	local_port = server.local_bind_port
+	print(local_port)
+
+	pw = 'xx'
+	#conn = connect(f'clickhouse://default:{pw}@localhost:{local_port}/default')
+	conn = connect(host='localhost', port=local_port, database='default', user='default', password=pw)
+
+	cursor = conn.cursor()
+	cursor.execute('SHOW TABLES')
+	print(cursor.fetchall())	
+
+def test_clicklhouse_sqlalchemy():
+	from sqlalchemy import Column, Integer, Sequence, String, DateTime, create_engine
+	from sqlalchemy.ext.declarative import declarative_base
+	from sqlalchemy.orm.session import Session
+	
+	from clickhouse_sqlalchemy import engines
+
+	Base = declarative_base()
+
+
+	seq = Sequence("fakemodel_id_sequence")
+	def uniq_id():
+		return str(uuid.uuid4())
+
+	class FakeModel(Base):  # type: ignore
+		__tablename__ = "fake"
+
+		id = Column(String, default=uniq_id, primary_key=True)
+		name = Column(String)
+		date = Column(DateTime)
+
+		__table_args__ = (
+        	engines.MergeTree(primary_key='id'),
+			{"schema": "unify_schema"}
+    	)
+
+	#uri = 'clickhouse://default:@localhost/default'
+	uri = 'clickhouse://default:@localhost/default'
+
+	eng = create_engine(uri)
+	Base.metadata.create_all(eng)
+	session = Session(bind=eng)
+
+	m = FakeModel(name="Frank")
+	m.date = datetime.utcnow()
+	m2 = FakeModel(name="Jane")
+	m.date = datetime.utcnow()
+	session.add(m)
+	session.add(m2)
+	session.commit()
+
+	records = session.query(FakeModel).all()
+	print([f.__dict__ for f in records])
+
+		
 #test_aws_cost_api()
 #test_redmail_image()
-profile()
+#profile()
+#test_ch_tunnel()
+
+test_clicklhouse_sqlalchemy()
+
 
 

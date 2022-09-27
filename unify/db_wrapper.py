@@ -6,14 +6,24 @@ import os
 import pickle
 import re
 import time
+import typing
+import uuid
+from venv import create
 
 import pandas as pd
 import pyarrow as pa
 import duckdb
-#import clickhouse_connect
 from clickhouse_driver import Client
 import clickhouse_driver
 import sqlglot
+import enum
+from sqlalchemy import Enum
+from sqlalchemy import Column, Integer, Sequence, String, DateTime, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm.session import Session
+from sqlalchemy import UniqueConstraint
+from clickhouse_sqlalchemy import engines as clickhouse_engines
+
 
 from .schemata import Queries
 from .storage_manager import StorageManager
@@ -26,6 +36,7 @@ class MyFilter:
         return True
 
 logger.addFilter(MyFilter())
+UNIFY_META_SCHEMA = 'unify_schema'
 
 class TableMissingException(RuntimeError):
     def __init__(self, table: str):
@@ -34,6 +45,42 @@ class TableMissingException(RuntimeError):
 
 class QuerySyntaxException(RuntimeError):
     pass
+
+class TableHandle:
+    """ Manages a schema qualified or unqualified table reference, and supports the
+        'user' side table string vs the 'real' db side table string.
+    """
+    def __init__(self, table_root: str, schema: str=None):
+        if schema is not None:
+            self._schema = schema
+            self._table = table_root
+            if "." in table_root:
+                raise RuntimeError(f"Cannot provide qualified table {table_root} and schema {schema}")
+        else:
+            if "." not in table_root:
+                raise RuntimeError(f"Unqualified table {table_root} provided but no schema")
+            self._schema, self._table = table_root.split(".")
+
+    def table_root(self):
+        return self._table
+
+    def schema(self):
+        return self._schema
+
+    def real_table_root(self):
+        return self._table
+
+    def real_schema(self):
+        return self._schema
+
+    def real_table(self):
+        return self.real_schema() + "." + self.real_table_root()
+
+    def __str__(self) -> str:
+        return self.schema() + "." + self.table_root()
+
+    def __repr__(self) -> str:
+        return "TableHandle(" + str(self) + ")"
 
 class DBWrapper:
     def execute(self, query: str, args: list = []) -> pd.DataFrame:
@@ -57,18 +104,21 @@ class DBWrapper:
         """ Create an in-memory table from the given dataframe. Used for processing lightweight results."""
         pass
 
-    def table_exists(self, table) -> bool:
+    def rewrite_query(self, query: sqlglot.expressions.Expression) -> str:
+        # Allows the db adapter to rewrite an incoming sql query
         pass
 
-    def write_dataframe_as_table(self, value: pd.DataFrame, schema: str, table_root: str):
+    def table_exists(self, table: TableHandle) -> bool:
         pass
 
-    def append_dataframe_to_table(self, value: pd.DataFrame, schema: str, table_root: str):
+    def write_dataframe_as_table(self, value: pd.DataFrame, table: TableHandle):
+        pass
+
+    def append_dataframe_to_table(self, value: pd.DataFrame, table: TableHandle):
         pass
 
     def get_table_columns(self, table):
         # Returns the column names for the table in their insert order
-        breakpoint()
         rows = self.execute_df("describe " + table)
         rows
         return rows["column_name"].values.tolist()
@@ -100,6 +150,13 @@ class DBWrapper:
                 return table_ref.sql()
         return '<>'
 
+    def list_schemas(self):
+        return self.execute(Queries.list_schemas)
+
+    @classmethod
+    def get_sqlalchemy_table_args(cls, primary_key=None, schema=None):
+        return {"schema": schema}
+
 DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_HOME, exist_ok=True)
 
@@ -122,6 +179,8 @@ class DuckDBWrapper(DBWrapper):
         except RuntimeError as e:
             if re.search(r"Table.+ does not exist", str(e)):
                 raise TableMissingException(self.extract_missing_table(query, e))
+            else:
+                raise
 
     def execute_df(self, query: str, args=[]) -> pd.DataFrame:
         return self.execute(query, args).df()
@@ -142,7 +201,7 @@ class DuckDBWrapper(DBWrapper):
     def create_schema(self, schema):
         return self.execute(f"create schema if not exists {schema}")
 
-    def create_table(self, table: str, columns: dict):
+    def create_table(self, table: TableHandle, columns: dict):
         new_cols = {}
         for name, type in columns.items():
             if name.startswith("*"):
@@ -166,7 +225,7 @@ class DuckDBWrapper(DBWrapper):
     def drop_memory_table(self, table_root: str):
         DuckDBWrapper.DUCK_CONN.unregister(table_root)
 
-    def write_dataframe_as_table(self, value: pd.DataFrame, schema: str, table_root: str):
+    def write_dataframe_as_table(self, value: pd.DataFrame, table: TableHandle):
         DuckDBWrapper.DUCK_CONN.register('df1', value)
         # create the table AND flush current row_buffer values to the db            
         DuckDBWrapper.DUCK_CONN.execute(f"create or replace table {schema}.{table_root} as select * from df1")
@@ -188,14 +247,12 @@ class DuckDBWrapper(DBWrapper):
             else:
                 raise
 
-    def replace_table(self, source_table: str, dest_table: str):
+    def replace_table(self, source_table: TableHandle, dest_table: TableHandle):
         # Duck doesn't like the target name to be qualified
-        dest_table_root = self.get_table_root(dest_table)
-
         self.execute(f"""
         BEGIN;
         DROP TABLE IF EXISTS {dest_table};
-        ALTER TABLE {source_table} RENAME TO {dest_table_root};
+        ALTER TABLE {source_table} RENAME TO {dest_table.real_table_root()};
         COMMIT;
         """)
 
@@ -262,6 +319,33 @@ def monkeypatch_clickhouse_driver():
 
 monkeypatch_clickhouse_driver()
 
+PROCTECTED_SCHEMAS = ['information_schema','default']
+
+class CHTableHandle(TableHandle):
+    SCHEMA_SEP = '____'
+
+    def __init__(self, table_handle: TableHandle, tenant_id):
+        super().__init__(table_handle.table_root(), table_handle.schema())
+        self._tenant_schema = f"tenant_{tenant_id}"
+
+    def real_table_root(self):        
+        if super().schema() in PROCTECTED_SCHEMAS:
+            return super().real_table_root()
+        return self.schema() + CHTableHandle.SCHEMA_SEP + self.table_root()
+
+    def real_schema(self):
+        if super().schema() in PROCTECTED_SCHEMAS:
+            return super().schema()
+        return self._tenant_schema
+
+    def __str__(self) -> str:
+        return self.real_schema() + "." + self.real_table_root()
+
+class CHTableMissing(TableMissingException):
+    def __init__(self, msg):
+        table = msg.split(".")[1].replace(CHTableHandle.SCHEMA_SEP, ".")
+        super().__init__(table)
+
 class ClickhouseWrapper(DBWrapper):
     SHARED_CLIENT = None
 
@@ -287,19 +371,63 @@ class ClickhouseWrapper(DBWrapper):
             password=os.environ['DATABASE_PASSWORD'],
             settings=settings
         )
+        self.tenant_id = os.environ['DATABASE_USER']
+        # Make sure the unify_schema database is created
+        self.client.execute(f"CREATE DATABASE IF NOT EXISTS {UNIFY_META_SCHEMA}")
+        # FIXME: Remove 'meta' schema and replace with use of unify_schema
+        self.client.execute(f"CREATE DATABASE IF NOT EXISTS meta")
+
+        # And make sure that the current tenant's dedicated schema exists
+        self.tenant_db = f"tenant_{self.tenant_id}"
+        self.client.execute(f"CREATE DATABASE IF NOT EXISTS {self.tenant_db}")
+        self.engine = create_orm_tables(self.client.connection)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # let context manager going out of scope release the client
         self.client.disconnect()
 
+    @classmethod
+    def get_sqlalchemy_table_args(cls, primary_key=None, schema=None):
+        return (
+            clickhouse_engines.MergeTree(primary_key=primary_key),
+            {"schema": schema}
+        )
+
+    def rewrite_query(self, query: typing.Union[sqlglot.expressions.Expression,str]=None) -> str:
+        # Rewrite table references to use prefixes instead of schema names
+        if isinstance(query, str):
+            try:
+                query = sqlglot.parse_one(query)
+            except:
+                return query
+
+        def transformer(node):
+            if isinstance(node, sqlglot.exp.Table):
+                parts = str(node).split(".")
+                if parts[0] in ['information_schema','default']:
+                    return node
+                new_table = self.tenant_db + "." + parts[0] + CHTableHandle.SCHEMA_SEP + parts[1]
+                return sqlglot.parse_one(new_table)
+            return node
+
+        newsql = query.transform(transformer).sql()
+        print(f"REWROTE '{query}' as '{newsql}'")
+        return newsql
+
     def current_date_expr(self):
         return "today()"
 
-    def table_exists(self, table) -> bool:
-        return self.client.execute(f"EXISTS {table}")[0] == 1
+    def table_exists(self, table: TableHandle) -> bool:
+        real_table = CHTableHandle(table, tenant_id=self.tenant_id)
+        return self.client.execute(f"EXISTS {real_table}")[0] == 1
 
-    def execute(self, query: str, args=[]):
+    def execute_raw(self, query: str, args=[]):
+        return self.execute(query, args=args, native=True)
+
+    def execute(self, query: str, args=[], native=False):
+        if not native:
+            query = self.rewrite_query(query)
         if query.strip().lower().startswith("insert"):
             return self._execute_insert(query, args)
         if args:
@@ -311,7 +439,8 @@ class ClickhouseWrapper(DBWrapper):
         except clickhouse_driver.errors.ServerException as e:
             m = re.search(r"Table (\S+) doesn't exist.", str(e))
             if m:
-                raise TableMissingException(m.group(1))
+                # convert back to user land version
+                raise CHTableMissing(m.group(1))
             else:
                 logger.critical(str(e) + "\n" + f"While executing: {query}")
                 raise
@@ -343,14 +472,16 @@ class ClickhouseWrapper(DBWrapper):
         #df=pd.DataFrame(result,columns=[tuple[0] for tuple in columns])
         #return df.to_json(orient='records')
 
-    def execute_df(self, query: str) -> pd.DataFrame:
+    def execute_df(self, query: str, native=False) -> pd.DataFrame:
+        if not native:
+            query = self.rewrite_query(query)
         try:
             return self.client.query_dataframe(query)
         except clickhouse_driver.errors.ServerException as e:
             if e.code == 60:
                 m = re.search(r"Table (\S+) doesn't exist.", str(e))
                 if m:
-                    raise TableMissingException(m.group(1))
+                    raise CHTableMissing(m.group(1))
             elif e.code == 62:
                 m = re.search(r"Syntax error[^.]+.", e.message)
                 if m:
@@ -362,27 +493,44 @@ class ClickhouseWrapper(DBWrapper):
 
     def get_table_columns(self, table):
         # Returns the column names for the table in their insert order
-        rows = self.execute_df("describe " + table)
+        rows = self.execute_df("describe " + str(CHTableHandle(table, tenant_id=self.tenant_id)), native=True)
         return rows["name"].values.tolist()
 
     def get_short_date_cast(self, column):
         return f"formatDateTime(CAST(\"{column}\" AS TIMESTAMP), '%m/%d/%y %H:%M')"
 
-    def delete_rows(self, table, filter_values: dict=None, where_clause: str=None):
+    def delete_rows(self, table: TableHandle, filter_values: dict=None, where_clause: str=None):
+        table = CHTableHandle(table, tenant_id=self.tenant_id)
         if filter_values:
             query = f"alter table {table} delete where " + " and ".join([f"{key} = ?" for key in filter_values.keys()])
             query = self._substitute_args(query, filter_values.values())
         elif where_clause:
             query = f"alter table {table} delete where {where_clause}"
-        res = self.execute(query).fetchall()
+        res = self.execute(query, native=True).fetchall()
         # Ugh. Seems deletes have some delay to show up...
         time.sleep(0.1)
 
     def create_schema(self, schema):
-        query = f"CREATE DATABASE IF NOT EXISTS {schema}"
-        return self.client.execute(query)
+        # Clickhouse only supports one level of database.table nesting. To support multi-tenant therefore
+        # we create a single database for the tenant and put all Unify "schemas" and tables in that
+        # database. Table names are prefixed by the Unify schema name, and we will rewrite queries
+        # to use the right table prefixes.
 
-    def create_table(self, table: str, columns: dict):
+        # Thus our 'create schema' just registers the schema in the schemata, which in effect
+        # "creates the schema" as far as the caller is concerned
+        s = Schemata(name=schema, type=SchemataType.schema)
+
+        session = Session(bind=self.engine)
+        session.query(Schemata).filter(Schemata.name == schema).delete()
+        session.add(s)
+        session.commit()
+
+    def list_schemas(self):
+        return self.execute_df("select name from unify_schema.schemata where type = 'schema'", native=True)
+
+    def create_table(self, table: TableHandle, columns: dict):
+        real_table = CHTableHandle(table, tenant_id=self.tenant_id)
+
         new_cols = {}
         primary_key = ''
         ordering = ''
@@ -399,29 +547,35 @@ class ClickhouseWrapper(DBWrapper):
             new_cols[name] = type
 
         table_ddl = \
-            f"create table if not exists {table} (" + ",".join(["{} {}".format(n, t) for n, t in new_cols.items()]) + ")" + \
+            f"create table if not exists {real_table} (" + ",".join(["{} {}".format(n, t) for n, t in new_cols.items()]) + ")" + \
                 f" ENGINE = MergeTree() {primary_key} {ordering}"
         self.execute(table_ddl)
 
-    def replace_table(self, source_table: str, dest_table: str):
-        self.execute(f"EXCHANGE TABLES {source_table} AND {dest_table}")
-        self.execute(f"DROP TABLE {source_table}")
+    def replace_table(self, source_table: TableHandle, dest_table: TableHandle):
+        real_src = CHTableHandle(source_table, tenant_id=self.tenant_id)
+        real_dest = CHTableHandle(dest_table, tenant_id=self.tenant_id)
+
+        self.execute_raw(f"EXCHANGE TABLES {real_src} AND {real_dest}")
+        self.execute_raw(f"DROP TABLE {real_src}")
 
     def create_memory_table(self, table_root: str, df: pd.DataFrame):
         """ Create an in-memory table from the given dataframe. Used for processing lightweight results."""
         if "." in table_root:
             raise RuntimeError("Memory tables cannot specify a schema")
-        self.write_dataframe_as_table(df, "default", table_root, table_engine="Memory")
-        return "default." + table_root
+        table = TableHandle(table_root, "default")
+        self.write_dataframe_as_table(df, table, table_engine="Memory")
+        return str(table)
 
     def drop_memory_table(self, table_root: str):
         self.execute(f"DROP TABLE IF EXISTS default.{table_root}")
 
-    def drop_schema(self, schema, cascade: bool=False):
-        sql = f"drop database {schema}"
+    def drop_schema(self, schema, cascade: bool=False):        
         if cascade:
-            sql += " cascade"
-        return self.execute(sql)
+            # delete tables in the schema
+            pass
+        session = Session(bind=self.engine)
+        session.query(Schemata).filter(Schemata.name == schema).delete()
+        session.commit()
 
     def _infer_df_columns(self, df: pd.DataFrame):
         schema = pa.Schema.from_pandas(df)
@@ -447,17 +601,20 @@ class ClickhouseWrapper(DBWrapper):
                 raise RuntimeError(f"Unknown type for dataframe column {col}: ", f.type)
         return col_specs, schema.names[0]
 
-    def write_dataframe_as_table(self, value: pd.DataFrame, schema: str, table_root: str, table_engine: str="MergeTree"):
+    def write_dataframe_as_table(self, value: pd.DataFrame, table: TableHandle, table_engine: str="MergeTree"):
+        # FIXME: Use sqlglot to contruct this create statement
+        # FIXME: replace spaces in column names
+        table = CHTableHandle(table, tenant_id=self.tenant_id)
         col_specs, primary_key = self._infer_df_columns(value)
         if primary_key:
-            primary_key = f"PRIMARY KEY {primary_key}"
+            primary_key = f"PRIMARY KEY \"{primary_key}\""
         if table_engine == "Memory":
             primary_key = ""
 
-        self.client.execute(f"drop table if exists {schema}.{table_root}")
+        self.client.execute(f"drop table if exists {table}")
 
-        sql = f"create table {schema}.{table_root} (" + \
-            ", ".join([f"{col} {ctype}" for col, ctype in col_specs.items()]) + \
+        sql = f"create table {table} (" + \
+            ", ".join([f"\"{col}\" {ctype}" for col, ctype in col_specs.items()]) + \
                 f") Engine={table_engine}() {primary_key}"
         logger.debug(sql)
         self.client.execute(sql)
@@ -465,12 +622,12 @@ class ClickhouseWrapper(DBWrapper):
         logger.debug("Writing dataframe to table")
         if value.shape[0] > 0:
             self.client.insert_dataframe(
-                f"INSERT INTO {schema}.{table_root} VALUES", 
+                f"INSERT INTO {table} VALUES", 
                 value, 
                 settings={'use_numpy': True}
             )
 
-    def append_dataframe_to_table(self, value: pd.DataFrame, schema: str, table_root: str):
+    def append_dataframe_to_table(self, value: pd.DataFrame, table: TableHandle):
         # There is a problem where a REST API returns a boolean column, but the first page 
         # of results is all nulls. In that case the type inference will have failed and we
         # will have defaulted to type the column as a string. We need to detect this case
@@ -478,19 +635,23 @@ class ClickhouseWrapper(DBWrapper):
         # the former.
 
         # Use pyarrow for convenience, but type info probably already exists on the dataframe
+        real_table = CHTableHandle(table, tenant_id=self.tenant_id)
         df_schema = pa.Schema.from_pandas(value)
         for col in df_schema.names:
             f = df_schema.field(col)
             if pa.types.is_boolean(f.type):
                 # See if the table column is a string
-                r = self.execute(Queries.list_columns.format(schema, table_root, col)).result
+                r = self.execute(
+                    Queries.list_columns.format(real_table.real_schema(), real_table.real_table_root(), col),
+                    native=True
+                ).result
                 if len(r) > 0 and r[0][1].lower() == "string":
                     # Corece bool values to string
                     value[col] = value[col].astype(str)
                     logger.critical("Coercing bool column {} to string".format(col))
 
         self.client.insert_dataframe(
-            f"INSERT INTO {schema}.{table_root} VALUES", 
+            f"INSERT INTO {real_table} VALUES", 
             value, 
             settings={'use_numpy': True}
         )
@@ -514,17 +675,17 @@ class UnifyDBStorageManager(StorageManager):
 
     def ensure_col_table(self, duck, name) -> dict:
         table = self.adapter_schema + "_" + name
-        duck.create_table("meta." + table, self.TABLE_SCHEMA)
+        duck.create_table(TableHandle(table, "meta"), self.TABLE_SCHEMA)
         return table
 
     def ensure_log_table(self, duck, name) -> dict:
         table = self.adapter_schema + "_" + name
-        duck.create_table("meta." + table, self.LOG_TABLE_SCHEMA)
+        duck.create_table(TableHandle("meta." + table), self.LOG_TABLE_SCHEMA)
         return table
 
     def create_var_storage_table(self, duck):
         table = "system__vars"
-        duck.create_table("meta." + table, {'*name': 'VARCHAR', 'value': 'BLOB'})
+        duck.create_table(TableHandle("meta." + table), {'*name': 'VARCHAR', 'value': 'BLOB'})
         return table
 
     def put_var(self, name, value):
@@ -586,7 +747,7 @@ class UnifyDBStorageManager(StorageManager):
 
     @lru_cache(maxsize=500)
     def ensure_column_intel_table(self):
-        table = "meta.column_intels"
+        table = TableHandle("meta.column_intels")
         self.duck.create_table(table, self.COLUMN_INTEL_TABLE_SCHEMA)
         return table
 
@@ -624,3 +785,38 @@ class UnifyDBStorageManager(StorageManager):
                 self.duck.execute(f"select id, blob from meta.{table}").fetchall()
         ]
 
+
+## ORM classes for unify_schema 
+
+Base = declarative_base()
+
+def uniq_id():
+    return str(uuid.uuid4())
+
+class SchemataType(enum.Enum):
+    adapter = 1
+    connection = 2
+    schema = 3
+
+DBMGR_CLASS: DBWrapper = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
+
+class Schemata(Base):  # type: ignore
+    __tablename__ = "schemata"
+
+    id = Column(String, default=uniq_id, primary_key=True)
+    name = Column(String)
+    type = Column(Enum(SchemataType))
+    type_or_spec = Column(String)
+    created = Column(DateTime, default=datetime.utcnow())
+    comment = Column(String)
+    
+    __table_args__ = DBMGR_CLASS.get_sqlalchemy_table_args(primary_key='id', schema=UNIFY_META_SCHEMA)
+
+def create_orm_tables(connection):
+    uri = 'clickhouse://' + \
+        os.environ['DATABASE_USER'] + ':' +\
+        os.environ['DATABASE_PASSWORD'] + '@' + \
+        os.environ['DATABASE_HOST'] + '/default'
+    engine = create_engine(uri)
+    Base.metadata.create_all(engine)
+    return engine

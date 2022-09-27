@@ -20,7 +20,7 @@ def connections():
     return connections
 
 def test_tableloader(connections):
-    with requests_mock.Mocker() as mock:
+    with requests_mock.Mocker(real_http=True) as mock:
         MockSvc.setup_mocksvc_api(mock)
 
         loader = TableLoader(given_connections=connections)
@@ -57,7 +57,7 @@ def test_tableloader(connections):
 def test_updates_strategy(connections):
     table = "repos1100"
     try:
-        with requests_mock.Mocker() as mock:
+        with requests_mock.Mocker(real_http=True) as mock:
             MockSvc.setup_mocksvc_api(mock)
 
             loader = TableLoader(given_connections=connections)
@@ -96,7 +96,7 @@ def test_updates_strategy(connections):
 def test_reload_strategy(connections):
     table = "repos100"
     try:
-        with requests_mock.Mocker() as mock:
+        with requests_mock.Mocker(real_http=True) as mock:
             MockSvc.setup_mocksvc_api(mock)
 
             loader = TableLoader(given_connections=connections)

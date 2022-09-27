@@ -37,7 +37,9 @@ show_schemas: "show" WS "schemas"
 
 show_variables: "show" WS "variables"
 
-show_files: "show" WS "files"
+show_files: "show" WS "files" (WS "from" WS schema_ref)? (WS "like" WS match_expr)?
+
+match_expr: "'" PATTERN "'"
 
 show_columns: "show columns" (WS FROM WS table_ref WS? column_filter?)?
 
@@ -83,7 +85,11 @@ refresh_table: "refresh table" WS table_ref
 
 reload_table: "reload table" WS table_ref
 
-peek_table: "peek" WS ("at" WS)? table_ref line_count?
+peek_table: "peek" WS qualifier? WS? peek_object line_count?
+
+peek_object: table_ref | SINGLE_QUOTED_STRING | URL
+
+qualifier: ("at" | "file")
 
 line_count: NUMBER
 
@@ -103,9 +109,11 @@ run_info: "run" WS "info" schedule_ref
 
 delete_schedule: "run" WS "delete" schedule_ref
 
-import_command: "import" WS file_path
+import_command: "import" WS file_path (options)?
 
-file_path: ANY
+options: ANY
+
+file_path: SINGLE_QUOTED_STRING | /\S+/
 
 schedule_ref: SINGLE_QUOTED_STRING
 
@@ -162,6 +170,8 @@ chart_param: X_PARAM
              | X_AXIS_LABEL
              | STACKED_PARAM
              | COLOR_PARAM
+             | THETA
+             | TRENDLINE
              
 X_PARAM: "x"
 Y_PARAM: "y"
@@ -169,8 +179,10 @@ TITLE_PARAM: "title"
 X_AXIS_LABEL: "x_axis_label"
 STACKED_PARAM: "stacked"
 COLOR_PARAM: "color"
+THETA: "theta"
+TRENDLINE: "trendline"
 
-param_value: WORD | SINGLE_QUOTED_STRING
+param_value: WORD | LITERAL
 column_ref: WORD
 chart_source: "$"? table_ref
 chart_type: PIE_CHART 
@@ -202,15 +214,15 @@ ALPHANUM        : ALPHA [ ALPHA | DIGIT ]*
 MIXED_ALPHA     : (ALPHA | DIGIT)+
 SINGLE_QUOTED_STRING  : /'[^']*'/
 PAREN_EXPR      : "(" /[^)]+/ ")"
-
+URL             : /http[s]?:\S+/
 SPACE           : " "
 TAB             : SPACE+
 FROM            : "from" | "FROM"
 NAME            : ALPHANUM+
 WORD            : ALPHANUM+
 DOTTED_WORD     : WORD ("." WORD)*
-PATTERN         : /[\*\%A-Za-z0-9_]+/
-NUMBER          : DIGIT+
+PATTERN         : /[\.\*\%A-Za-z0-9_\s]+/
+NUMBER          : /-*[\d\.]+/
 WS              : /[ \t\f\r\n]/+
 
 %ignore WS
