@@ -2,12 +2,12 @@
 
 Unify cribs from the standard SQL db mechanism of the `information_schema` system tables.
 
-We create in the target database a `unify_schema` catalog with tables that reflect
+We create in the target database an `information_schema` catalog with tables that reflect
 configuration information about the Unify database.
 
 `schemata` table
 
-Lists the adapters and  connections defined in the system.
+Lists schemas defined in the tenant database and annoates the adapter information for them.
 
 type      | name                | type_or_spec    | comment
 ---------- --------------------- -----------------  ---------------------------------------------
@@ -36,4 +36,9 @@ This table stores critical metadata about each Unify managed table. This informa
 
 Unify maintains table metadata even for tables and views that are NOT created by
 adapters. Any `SELECT .. INTO` or `CREATE VIEW` operation will update a record
-in `unify_schema.tables` that tracks the population event for the table.
+in `information_schema.tables` that tracks the population event for the table.
+
+## Implementation
+
+The information schema is maintained by SQLAlchemy classes that are configured
+

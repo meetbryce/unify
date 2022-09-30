@@ -1,3 +1,5 @@
+from __future__ import annotations
+import contextlib
 from datetime import datetime, timedelta
 from functools import lru_cache
 import logging
@@ -7,6 +9,7 @@ import pickle
 import re
 import time
 import typing
+from typing import Union, Any
 import uuid
 from venv import create
 
@@ -82,8 +85,14 @@ class TableHandle:
     def __repr__(self) -> str:
         return "TableHandle(" + str(self) + ")"
 
-class DBWrapper:
-    def execute(self, query: str, args: list = []) -> pd.DataFrame:
+class DBWrapper(contextlib.AbstractContextManager):
+    def __enter__(self) -> DBWrapper:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def execute(self, query: str, args: Union[list, tuple] = []) -> pd.DataFrame:
         return None
 
     def _substitute_args(self, query: str, args: tuple):
@@ -99,6 +108,9 @@ class DBWrapper:
 
     def current_date_expr(self):
         return "current_date"
+
+    def create_schema(self, schema: str) -> Any:
+        pass
 
     def create_memory_table(self, table: str, df: pd.DataFrame):
         """ Create an in-memory table from the given dataframe. Used for processing lightweight results."""
@@ -120,10 +132,12 @@ class DBWrapper:
     def get_table_columns(self, table):
         # Returns the column names for the table in their insert order
         rows = self.execute_df("describe " + table)
-        rows
         return rows["column_name"].values.tolist()
 
-    def delete_rows(self, table, filter_values: dict, where_clause: str=None):
+    def list_columns(self, table: TableHandle, match: str=None) -> pd.DataFrame:
+        return self.execute_df(f"describe {table}")
+
+    def delete_rows(self, table: TableHandle, filter_values: dict, where_clause: str=None):
         pass
 
     def get_table_root(self, table):
@@ -147,11 +161,17 @@ class DBWrapper:
     def extract_missing_table(self, query, e):
         for table_ref in sqlglot.parse_one(query).find_all(sqlglot.exp.Table):
             if table_ref.name in query:
-                return table_ref.sql()
+                return table_ref.sql('clickhouse')
         return '<>'
 
     def list_schemas(self):
         return self.execute(Queries.list_schemas)
+
+    def list_tables(self, schema=None) -> pd.DataFrame:
+        if schema is None:
+            return self.execute(Queries.list_tables)
+        else:
+            return self.execute(Queries.list_tables_filtered.format(schema))
 
     @classmethod
     def get_sqlalchemy_table_args(cls, primary_key=None, schema=None):
@@ -161,7 +181,7 @@ DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_HOME, exist_ok=True)
 
 class DuckDBWrapper(DBWrapper):
-    DUCK_CONN = None
+    DUCK_CONN: duckdb.DuckDBPyConnection = None
     REF_COUNTER = 0
 
     """ A cheap hack around DuckDB only usable in a single process. We just open/close
@@ -175,7 +195,7 @@ class DuckDBWrapper(DBWrapper):
 
     def execute(self, query: str, args=[]):
         try:
-            return DuckDBWrapper.DUCK_CONN.execute(query, args)
+            return DuckDBWrapper.DUCK_CONN.execute(query, args).df()
         except RuntimeError as e:
             if re.search(r"Table.+ does not exist", str(e)):
                 raise TableMissingException(self.extract_missing_table(query, e))
@@ -183,14 +203,14 @@ class DuckDBWrapper(DBWrapper):
                 raise
 
     def execute_df(self, query: str, args=[]) -> pd.DataFrame:
-        return self.execute(query, args).df()
+        return self.execute(query, args)  # type: ignore
 
     def get_table_columns(self, table):
         # Returns the column names for the table in their insert order
         rows = self.execute_df("describe " + table)
         return rows["column_name"].values.tolist()
 
-    def delete_rows(self, table, filter_values: dict=None, where_clause: str=None):
+    def delete_rows(self, table: TableHandle, filter_values: dict=None, where_clause: str=None):
         if filter_values:
             query = f"delete from {table} where " + " and ".join([f"{key} = ?" for key in filter_values.keys()])
             query = self._substitute_args(query, filter_values.values())
@@ -198,7 +218,7 @@ class DuckDBWrapper(DBWrapper):
             query = f"delete from {table} where {where_clause}"
         self.execute(query)
 
-    def create_schema(self, schema):
+    def create_schema(self, schema) -> duckdb.DuckDBPyConnection:
         return self.execute(f"create schema if not exists {schema}")
 
     def create_table(self, table: TableHandle, columns: dict):
@@ -228,7 +248,7 @@ class DuckDBWrapper(DBWrapper):
     def write_dataframe_as_table(self, value: pd.DataFrame, table: TableHandle):
         DuckDBWrapper.DUCK_CONN.register('df1', value)
         # create the table AND flush current row_buffer values to the db            
-        DuckDBWrapper.DUCK_CONN.execute(f"create or replace table {schema}.{table_root} as select * from df1")
+        DuckDBWrapper.DUCK_CONN.execute(f"create or replace table {table} as select * from df1")
         DuckDBWrapper.DUCK_CONN.unregister("df1")
 
     def append_dataframe_to_table(self, value: pd.DataFrame, schema: str, table_root: str):
@@ -262,7 +282,7 @@ class DuckDBWrapper(DBWrapper):
     def is_closed(self) -> bool:
         return DuckDBWrapper.DUCK_CONN is None
 
-    def __enter__(self):
+    def __enter__(self) -> DBWrapper:
         DuckDBWrapper.REF_COUNTER += 1
         if DuckDBWrapper.DUCK_CONN is None:
             DuckDBWrapper.DUCK_CONN = duckdb.connect(os.path.join(DATA_HOME, "duckdata"), read_only=False)
@@ -399,8 +419,10 @@ class ClickhouseWrapper(DBWrapper):
         if isinstance(query, str):
             try:
                 query = sqlglot.parse_one(query)
-            except:
-                return query
+            except Exception as e:
+                msg = f"sqlglot parsing failed: {e}"
+                print(msg)
+                return f"/* {msg} */ {query}"
 
         def transformer(node):
             if isinstance(node, sqlglot.exp.Table):
@@ -411,8 +433,8 @@ class ClickhouseWrapper(DBWrapper):
                 return sqlglot.parse_one(new_table)
             return node
 
-        newsql = query.transform(transformer).sql()
-        print(f"REWROTE '{query}' as '{newsql}'")
+        newsql = query.transform(transformer).sql('clickhouse')
+        #print(f"REWROTE '{query}' as '{newsql}'")
         return newsql
 
     def current_date_expr(self):
@@ -486,6 +508,9 @@ class ClickhouseWrapper(DBWrapper):
                 m = re.search(r"Syntax error[^.]+.", e.message)
                 if m:
                     raise QuerySyntaxException(m.group(0))
+            elif "<Empty trace>" in e.message:
+                e.message += " (while executing: " + query + ")"
+                raise e
             m = re.search(r"(^.*)Stack trace:", e.message)
             if m:
                 e.message = m.group(1)
@@ -527,6 +552,21 @@ class ClickhouseWrapper(DBWrapper):
 
     def list_schemas(self):
         return self.execute_df("select name from unify_schema.schemata where type = 'schema'", native=True)
+
+    def list_tables(self, schema=None) -> pd.DataFrame:
+        sql = "show tables from " + self.tenant_db
+        if schema:
+            sql += f" like '{schema}___%'"
+        df = self.execute_df(sql, native=True)
+        if not df.empty:
+            col = df.columns[0]
+            df[col] = df[col].map(lambda x: x.replace(CHTableHandle.SCHEMA_SEP, "."))
+        return df
+
+    def list_columns(self, table: TableHandle, match: str=None) -> pd.DataFrame:
+        table = CHTableHandle(table, tenant_id=self.tenant_id)
+        # FIXME: Handle 'match' - may need our tenant-specific information_schema table
+        return self.execute_df(f"describe {table}", native=True)
 
     def create_table(self, table: TableHandle, columns: dict):
         real_table = CHTableHandle(table, tenant_id=self.tenant_id)
@@ -579,6 +619,7 @@ class ClickhouseWrapper(DBWrapper):
 
     def _infer_df_columns(self, df: pd.DataFrame):
         schema = pa.Schema.from_pandas(df)
+
         col_specs = {}
         for col in schema.names:
             f = schema.field(col)
@@ -636,6 +677,10 @@ class ClickhouseWrapper(DBWrapper):
 
         # Use pyarrow for convenience, but type info probably already exists on the dataframe
         real_table = CHTableHandle(table, tenant_id=self.tenant_id)
+
+        # FIXME: When are append a DF to an existing table it is possible that the types won't
+        # match. So we need to query the types from the table and make sure to coerce the DF
+        # to those types. For now we have only handled a special case for booleans.
         df_schema = pa.Schema.from_pandas(value)
         for col in df_schema.names:
             f = df_schema.field(col)
@@ -670,11 +715,11 @@ class UnifyDBStorageManager(StorageManager):
 
     def __init__(self, adapter_schema: str, duck):
         self.adapter_schema = adapter_schema
-        self.duck = duck
+        self.duck : DBWrapper = duck
         self.duck.create_schema("meta")
 
-    def ensure_col_table(self, duck, name) -> dict:
-        table = self.adapter_schema + "_" + name
+    def ensure_col_table(self, duck, name) -> str:
+        table: str = self.adapter_schema + "_" + name
         duck.create_table(TableHandle(table, "meta"), self.TABLE_SCHEMA)
         return table
 
@@ -690,7 +735,7 @@ class UnifyDBStorageManager(StorageManager):
 
     def put_var(self, name, value):
         table = self.create_var_storage_table(self.duck)
-        self.duck.delete_rows("meta." + table, {"name": name})
+        self.duck.delete_rows(TableHandle("meta." + table), {"name": name})
         if isinstance(value, pd.DataFrame):
             name = name.lower() + self.VAR_NAME_SENTINAL
             self.duck.write_dataframe_as_table(value, "meta", name)
@@ -722,7 +767,7 @@ class UnifyDBStorageManager(StorageManager):
 
     def put_object(self, collection: str, id: str, values: dict) -> None:
         table = self.ensure_col_table(self.duck, collection)
-        self.duck.delete_rows("meta." + table, {"id": id})
+        self.duck.delete_rows(TableHandle("meta." + table), {"id": id})
         self.duck.execute(f"insert into meta.{table} (id, blob) values (?, ?)", [id, json.dumps(values)])
 
     def log_object(self, collection: str, id: str, values: dict) -> None:
@@ -772,7 +817,7 @@ class UnifyDBStorageManager(StorageManager):
 
     def delete_object(self, collection: str, id: str) -> bool:
         table = "meta." + self.ensure_col_table(self.duck, collection)
-        r = self.duck.delete_rows(table, {'id': id})
+        r = self.duck.delete_rows(TableHandle(table), {'id': id})
         print("Delete resulted in: ", r)
 
     def delete_log_objects(self, collection: str, id: str):
@@ -781,8 +826,8 @@ class UnifyDBStorageManager(StorageManager):
     def list_objects(self, collection: str) -> list[tuple]:
         table = self.ensure_col_table(self.duck, collection)
         return [
-            (key, json.loads(val)) for key, val in \
-                self.duck.execute(f"select id, blob from meta.{table}").fetchall()
+            (row['id'], json.loads(row['blob'])) for row in \
+                self.duck.execute_df(f"select id, blob from meta.{table}").to_records()
         ]
 
 

@@ -145,12 +145,15 @@ class BaseTableScan(Thread):
         into the local database. This class holds common logic across inital table
         load plus table update operations.
     """
-    def __init__(self, tableMgr=None, tableLoader=None, select: list = None):
+    def __init__(self, tableMgr=None, tableLoader=None, select: list = None, strip_prefixes: list = None):
         Thread.__init__(self)
         self.tableMgr: TableMgr = tableMgr
         self.tableLoader = tableLoader
         self.table_ref = tableMgr.schema + "." + tableMgr.table_spec.name
         self.select = select
+        # FIXME: We should generalize a pattern for adapters to transform table results rather than
+        # passing specific parameters like this
+        self.strip_prefixes = strip_prefixes
         self.storage_mgr: UnifyDBStorageManager = None
         self.analyzed_columns = []
 
@@ -214,34 +217,57 @@ class BaseTableScan(Thread):
         # strings
 
         for column in df.columns:
+            #
+            # Strip annonying prefixes from column names
+            #
+            if self.strip_prefixes:
+                for prefix in self.strip_prefixes:
+                    if column.startswith(prefix):
+                        newc = column[len(prefix):]
+                        df.rename(columns={column: newc}, inplace=True)
+                        column = newc
+            #
+            # 'mixed-' types indicates pandas found multiple types. We should logic
+            # to corece to the "best" type, but for now we just convert to string
+            #
             if pd.api.types.infer_dtype(df[column]).startswith("mixed"):
                 df[column] = df[column].apply(lambda x: str(x))
-            # FIXME: sample 10 values and if more than 50% are numeric than convert to numeric
-            # convert numeric: df[column] = df[column].apply(lambda x: pd.to_numeric(x, errors = 'ignore'))
             
-            testval = df[column].iloc[0]
-            if hasattr(testval, 'count') and \
-                (testval.count("/") == 2 or testval.count(":") >= 2):
-                try:
-                    df[column] = pd.to_datetime(df[column], errors="coerce")
-                    df[column].replace({np.nan: None}, inplace = True)
-                except:
-                    pass
+            # 
+            # datetime parsing
+            # We look for things that look like dates and try to parse them into datetime types
+            #
+
+            testcol = df[column].dropna(axis='index')
+            testvals = testcol.sample(min(10,testcol.size)).values
+            # See if any values look like dates
+            for testval in testvals:
+                if hasattr(testval, 'count') and \
+                    (testval.count("/") == 2 or testval.count(":") >= 2 or testval.count("-") >= 2):
+                    try:
+                        df[column] = pd.to_datetime(df[column], errors="coerce")
+                        df[column].replace({np.nan: None}, inplace = True)
+                    except:
+                        pass
+                    break
 
         schema = pa.Schema.from_pandas(df)
 
         for col in schema.names:
             f = schema.field(col)
+            # Drop embedded lists of objects. We should serialize to json instead
             if pa.types.is_list(f.type) and \
                 (f.type.value_type == pa.null() or not pa.types.is_primitive(f.type.value_type)):
                 # Remove the column
-                #print("Dropping non-primitive or null column from df: ", f.name)
                 df.drop(columns=f.name, inplace=True)
                 continue
 
             if f.name in cols_to_drop:
                 df.drop(columns=f.name, inplace=True)
 
+            # 
+            # apply 'select' table configuration property
+            #
             # Caller can optionally specify a set of columns to keep. We keep any column with
             # either an exact match, or a parent property match ("name_??").
             if self.select:
@@ -275,6 +301,9 @@ class BaseTableScan(Thread):
         self.storage_mgr.delete_log_objects("tablescans", self.tableMgr.name)
 
     def create_table_with_first_page(self, duck: DBWrapper, next_df, schema, table_root):
+        # before writing the DF to the database, we do some cleaning on columns and types.
+        self.cleanup_df_page(next_df)
+
         table = TableHandle(table_root, schema)
         if duck.table_exists(table):
             # table already exists, so assume we are updating
@@ -300,7 +329,7 @@ class BaseTableScan(Thread):
         table_cols = set()
         logger = SimpleLogger(self.tableMgr.adapter)
 
-        resource_query_mgr = self.get_query_mgr()
+        resource_query_mgr: TableDef = self.get_query_mgr()
 
         for query_result in resource_query_mgr.query_resource(self.tableLoader, logger):
             json_page = query_result.json
@@ -332,13 +361,11 @@ class BaseTableScan(Thread):
             if df.shape[0] == 0:
                 continue
 
-            self.cleanup_df_page(df)
-
             if page == 1:
                 row_buffer_df = df
             else:
                 if table_cols:
-                    # Once we set the table columns from the first flush, then we enforce that list
+                    # Once we set the table columns from the first page, then we enforce that list
                     usable = list(table_cols.intersection(df.columns.tolist()))
                     df = df[usable]
                 row_buffer_df = pd.concat([row_buffer_df, df], axis='index', ignore_index=True)
@@ -387,6 +414,7 @@ class InitialTableLoad(BaseTableScan):
             # First set of pages, so create the table
             self.create_table_with_first_page(duck, next_df, tableMgr.schema, tableMgr.table_spec.name)
         else:
+            self.cleanup_df_page(next_df)
             duck.append_dataframe_to_table(
                 next_df, 
                 TableHandle(tableMgr.table_spec.name, tableMgr.schema)
@@ -461,6 +489,7 @@ class TableUpdateScan(BaseTableScan):
         cols = duck.get_table_columns(TableHandle(self._target_table))
         # filter and order to the right columns
         next_df = next_df[cols]
+        self.cleanup_df_page(next_df)
         print(f"Saving update page {page} with {next_df.shape[0]} rows and {next_df.shape[1]} columns")
 
         # First delete any existing records
@@ -527,7 +556,12 @@ class TableMgr:
         duck.execute(f"drop table {self.name}")
 
     def _create_scanner(self, tableLoader: TableLoader):
-        return InitialTableLoad(self, tableLoader=tableLoader, select=self.table_spec.select_list)
+        return InitialTableLoad(
+            self, 
+            tableLoader=tableLoader, 
+            select=self.table_spec.select_list,
+            strip_prefixes=self.table_spec.strip_prefixes,
+        )
 
     def load_table(self, waitForScan=False, tableLoader=None):
         # Spawn a thread to query the table source
@@ -667,7 +701,7 @@ class TableLoader:
         self.tables[table_ref].refresh_table(tableLoader=self)
 
     # ** FIXME: Rewrite with SQLGlot **
-    def query_table(self, schema: str, query: str):
+    def old_query_table(self, schema: str, query: str):
         # Our parser wasn't smart enough:
         # parser_visitor = ParserVisitor()
         # parse_tree = self.lark_parser.parse(query)
@@ -731,6 +765,24 @@ class TableLoader:
         parent_query = "SELECT " + ",".join(col_list) + from_clause + where_clause
         with dbmgr() as duck:
             yield duck.execute_df(parent_query)
+
+    def query_table(self, schema: str, query: str):
+        def transformer(node):
+            if isinstance(node, sqlglot.exp.Table):
+                if "." in str(node):
+                    raise RuntimeError(f"Adapter queries cannot use qualified table names: {node}. Query: {query}")
+                table = schema + "." + str(node)
+                if not self.table_exists_in_db(table):
+                    tmgr = self.tables[table]
+                    # TODO: Might want a timeout for large parent tables
+                    tmgr.load_table(tableLoader=self, waitForScan=True)
+                return sqlglot.parse_one(schema + "." + str(node))    
+            return node
+
+        newq = sqlglot.parse_one(query, read='clickhouse').transform(transformer)
+        with dbmgr() as db:
+            parent_query = newq.sql(dialect=db.dialect())
+            yield db.execute_df(parent_query)
 
     def read_table_rows(self, table, limit=None):
         with dbmgr() as duck:
@@ -1041,6 +1093,13 @@ class CommandContext:
         return self.interp_command == 'email_command' and \
             self.parser_visitor._the_command_args.get('email_object') == 'notebook'
 
+    def get_input(self, prompt: str):
+        if self.input_func:
+            return self.input_func(prompt)
+        else:
+            raise RuntimeError("Input requested by session is non-interactive")
+
+
 
 class CommandInterpreter:
     """
@@ -1325,15 +1384,12 @@ class CommandInterpreter:
     def print(self, *args):
         self.context.logger.print(*args)
 
-    def get_input(self, prompt: str):
-        return self.input_func(prompt)
-
     ################
     ## Commands 
     #
     # All commands either "print" to the result buffer, or else they return
     # a DataFrame result (or both). It the the responsibilty of the host
-    # program to render the result. Commands should call `get_input` to
+    # program to render the result. Commands should call `context.get_input` to
     # retrieve input from the user interactively.
     ################
     def count_table(self, table_ref):
@@ -1378,7 +1434,7 @@ class CommandInterpreter:
         # See if any of our adapters want to import the indicated file
         for schema, adapter in self.adapters.items():
             if adapter.can_import_file(file_path):
-                adapter.logger = self.logger
+                adapter.logger = self.context.logger
                 table_root = adapter.import_file(file_path, options=options) # might want to run this in the background
                 table = schema + "." + table_root
                 lines, result = self.run_command(f"select * from {table} limit 10")
@@ -1387,7 +1443,7 @@ class CommandInterpreter:
              
     def drop_table(self, table_ref):
         """ drop <table> - removes the table from the database """
-        val = self.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
+        val = self.context.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
         if "." in table_ref:
             schema, table_root = table_ref.split(".")
             self.adapters[schema].drop_table(table_root)
@@ -1464,7 +1520,7 @@ class CommandInterpreter:
             for schema, adapter in self.adapters.items():
                 file_path = peek_object.strip("'")
                 if adapter.can_import_file(file_path):
-                    return adapter.peek_file(file_path, line_count, self.logger)
+                    return adapter.peek_file(file_path, line_count, self.context.logger)
             return
 
         schema, table_root = peek_object.split(".")
@@ -1632,41 +1688,40 @@ class CommandInterpreter:
     def show_tables(self, schema_ref=None):
         """ show tables [from <schema> [like '<expr>']] - list all tables or those from a schema """
         if schema_ref:
-            potential = []
+            full = []
             if schema_ref in self.adapters:
                 for tableDef in self.adapters[schema_ref].list_tables():
-                    potential.append(schema_ref + "." + tableDef.name)
+                    full.append(schema_ref + "." + tableDef.name)
 
-            actual = [r[0] for r in \
-                self.duck.execute(Queries.list_tables_filtered.format(schema_ref)).fetchall()]
-            full = set(potential) | set(actual)
-            #self.print("tables\n--------------")
-            #self.print("\n".join(list(full)))
-            return pd.DataFrame({"tables": list(full)})
+            actuals = self.duck.list_tables(schema_ref)
+            if not actuals.empty:
+                actual = [r[0] for r in actuals.to_records(index=False)]
+                full = set(full) | set(actual)
+            else:
+                actual = []
+            df = pd.DataFrame({"tables": list(full)})
+            df[['schema', 'table']] = df["tables"].apply(lambda x: pd.Series(str(x).split(".")))
+            del df['tables']
+            df.sort_values(df.columns[0], ascending = True, inplace=True)
+            df['materialized'] = ['✓' if t in actual else '☐' for t in full]
+            return df
         else:
             self.print("{:20s} {}".format("schema", "table"))
             self.print("{:20s} {}".format("---------", "----------"))
-            for r in self.duck.execute(Queries.list_all_tables).fetchall():
-                self.print("{:20s} {}".format(r[0], r[1]))
+            return self.duck.list_tables(schema_ref)
 
     def show_columns(self, table_ref, column_filter=None):
         """ show columns [from <table> [like '<expr>']] - list all columns or those from a table """
-        if table_ref:
-            if column_filter:
-                parts = table_ref.split(".")
-                column_filter = re.sub(r"\*", "%", column_filter)
-                return self._execute_duck(Queries.list_columns.format(parts[0], parts[1], column_filter))
-            else:
-                return self._execute_duck(f"describe {table_ref}")
-        else:
-            return self._execute_duck("describe")
+        return self.duck.list_columns(TableHandle(table_ref), column_filter)
 
     def describe(self, table_ref):
-        """ describe [<table>] - list all columns or those from a table """
+        """ describe [<schema>|<table>] - list all tables, tables in a schema, or columns from a table """
         if table_ref is None:
-            return self._execute_duck("describe")
+            return self.show_schemas()
+        elif table_ref is not None and "." in table_ref:
+            return self.show_columns(table_ref)
         else:
-            return self._execute_duck(f"describe {table_ref}")
+            return self.show_tables(table_ref)
 
     def create_statement(self):
         """ create table <table> ... """

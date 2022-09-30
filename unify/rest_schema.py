@@ -7,7 +7,7 @@ import string
 import sys
 from tempfile import NamedTemporaryFile
 import yaml
-from typing import List, AnyStr, Dict, Union
+from typing import List, AnyStr, Dict, Union, Iterable, Generator
 import typing
 from datetime import datetime
 from collections.abc import Iterable
@@ -286,9 +286,9 @@ class TableDef:
     def select_list(self, selects: list):
         self._select_list = selects
 
-    def query_resource(self, tableLoader, logger: UnifyLogger):
+    def query_resource(self, tableLoader, logger: UnifyLogger) -> Generator[AdapterQueryResult, None, None]:
         """ Yields AdapterQueryResults for each page of an API endpoint """
-        pass
+        return None
 
     @property
     def result_body_path(self):
@@ -319,11 +319,11 @@ class TableUpdater:
         """
         return False
 
-    def query_resource(self, tableLoader, logger: UnifyLogger):
+    def query_resource(self, tableLoader, logger: UnifyLogger) -> Generator[AdapterQueryResult, None, None]:
         """ Generator which yields AdapterQueryResults for all records updated
             since the `updates_since` timestamp.
         """
-        pass
+        return None
 
 
 class RESTTable(TableDef):
@@ -341,6 +341,7 @@ class RESTTable(TableDef):
         'copy_params_to_output': list,
         'key_columns': (list, str),
         'refresh': dict,
+        'strip_prefixes': (list, str),
         # deprecated
         'query_resource': str,
         'columns': list,
@@ -375,6 +376,9 @@ class RESTTable(TableDef):
         self.query_path = dictvals.get('resource_path', '')
         self.query_method = dictvals.get('method', 'GET')
         self.query_date_format = spec.query_date_format
+        self.strip_prefixes = dictvals.get('strip_prefixes')
+        if isinstance(self.strip_prefixes, str):
+            self.strip_prefixes = [self.strip_prefixes]
 
         self.headers = dictvals.get('headers', {})
         # List of parameters that should be merged into the output table
@@ -517,7 +521,7 @@ class RESTTable(TableDef):
     #         for page, size_return in self._query_resource(tableLoader, logger=logger):
     #             yield (page, size_return)
 
-    def query_resource(self, tableLoader, logger: UnifyLogger):
+    def query_resource(self, tableLoader, logger: UnifyLogger) -> Generator[AdapterQueryResult, None, None]:
         for params_record in self.generate_param_values(tableLoader):
             print("Params: ", params_record)
             if self.copy_params_to_output:
@@ -543,7 +547,6 @@ class RESTTable(TableDef):
         for pname, value in self.params.items():
             sql_query = self.get_sql_query_param(pname, value)
             if sql_query:
-                # FIXME: Handle multiple cols
                 for df in tableLoader.query_table(self.spec.name, sql_query):
                     if df.shape[0] == 0:
                         # no values, so remove the parameter
