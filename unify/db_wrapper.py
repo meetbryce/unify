@@ -850,18 +850,21 @@ class Schemata(Base):  # type: ignore
 
     id = Column(String, default=uniq_id, primary_key=True)
     name = Column(String)
-    type = Column(Enum(SchemataType))
+    type = Column(String, default="schema")
     type_or_spec = Column(String)
     created = Column(DateTime, default=datetime.utcnow())
     comment = Column(String)
     
     __table_args__ = DBMGR_CLASS.get_sqlalchemy_table_args(primary_key='id', schema=UNIFY_META_SCHEMA)
 
-def create_orm_tables(connection):
+def get_sqla_engine():
     uri = 'clickhouse://' + \
         os.environ['DATABASE_USER'] + ':' +\
         os.environ['DATABASE_PASSWORD'] + '@' + \
         os.environ['DATABASE_HOST'] + '/default'
     engine = create_engine(uri)
+
+def create_orm_tables():
+    engine = get_sqla_engine()
     Base.metadata.create_all(engine)
     return engine

@@ -1,4 +1,5 @@
 from tkinter import E
+from venv import create
 import duckdb
 import glob
 import pandas as pd
@@ -355,13 +356,31 @@ def test_clicklhouse_sqlalchemy():
 	records = session.query(FakeModel).all()
 	print([f.__dict__ for f in records])
 
-		
+def test_schemata():
+	from unify.db_wrapper import get_sqla_engine, Schemata
+	from sqlalchemy.orm.session import Session
+	from sqlalchemy.ext.declarative import declarative_base
+
+	Base = declarative_base()
+
+	Schemata.__table_args__['schema'] = 'tenant_scottp'
+	schema1 = Schemata(name="jira")
+
+	engine = get_sqla_engine()
+	Base.metadata.create_all(engine)
+	session = Session(bind=engine)
+
+	session.add(schema1)
+	session.commit()
+
 #test_aws_cost_api()
 #test_redmail_image()
 #profile()
 #test_ch_tunnel()
+#test_clicklhouse_sqlalchemy()
 
-test_clicklhouse_sqlalchemy()
+test_schemata()
+
 
 
 
