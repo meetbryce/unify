@@ -357,21 +357,42 @@ def test_clicklhouse_sqlalchemy():
 	print([f.__dict__ for f in records])
 
 def test_schemata():
-	from unify.db_wrapper import get_sqla_engine, Schemata
+	from unify.db_wrapper import get_sqla_engine, Schemata, UNIFY_META_SCHEMA, Base
 	from sqlalchemy.orm.session import Session
-	from sqlalchemy.ext.declarative import declarative_base
-
-	Base = declarative_base()
-
-	Schemata.__table_args__['schema'] = 'tenant_scottp'
-	schema1 = Schemata(name="jira")
 
 	engine = get_sqla_engine()
+	engine = engine.execution_options(
+    	schema_translate_map={UNIFY_META_SCHEMA: "tenant_scottp", None: "tenant_scottp"}
+	)
 	Base.metadata.create_all(engine)
+
 	session = Session(bind=engine)
 
+	schema1 = Schemata(name="jira")
 	session.add(schema1)
 	session.commit()
+
+def test_schemata2():
+	from unify import dbmgr
+	from unify.db_wrapper import Schemata
+	from sqlalchemy.orm.session import Session
+
+	with dbmgr() as db:
+		session = Session(bind=db.engine)
+		schema = Schemata(name="hubspot")
+		session.add(schema)
+		session.commit()
+
+def dump_duck():
+	def dump_tables(duck):
+		df = duck.execute("select * from information_schema.tables").df()
+		print(df)
+
+	duck = duckdb.connect('./unify/data/duckdata', read_only=False)
+	dump_tables(duck)
+
+	#duck = duckdb.connect('/tmp/duckmeta', read_only=False)
+	#dump_tables(duck)
 
 #test_aws_cost_api()
 #test_redmail_image()
@@ -379,7 +400,9 @@ def test_schemata():
 #test_ch_tunnel()
 #test_clicklhouse_sqlalchemy()
 
-test_schemata()
+#test_schemata2()
+dump_duck()
+
 
 
 

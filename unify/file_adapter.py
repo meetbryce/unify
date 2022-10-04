@@ -18,6 +18,9 @@ class LocalFileTableSpec(TableDef):
         self.reader_name = opts['reader_name']
         self.options = opts.get('options', [])
     
+    def get_table_source(self):
+        return self.file_uri
+
     def query_resource(self, tableLoader, logger: UnifyLogger):
         path = Path(self.file_uri)
 

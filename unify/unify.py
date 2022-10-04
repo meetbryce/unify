@@ -49,7 +49,7 @@ from .rest_schema import (
 )
 from .db_wrapper import (
     ClickhouseWrapper, 
-    DBWrapper, 
+    DBManager, 
     DuckDBWrapper, 
     TableMissingException,
     TableHandle,
@@ -73,7 +73,7 @@ from .file_adapter import LocalFileAdapter
 if 'DATABASE_BACKEND' not in os.environ or os.environ['DATABASE_BACKEND'] not in ['duckdb','clickhouse']:
     raise RuntimeError("Must set DATABASE_BACKEND to 'duckdb' or 'clickhouse'")
 
-dbmgr: DBWrapper = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
+dbmgr: DBManager = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
 
 def load_connections_config():
     trylist = [
@@ -300,11 +300,19 @@ class BaseTableScan(Thread):
     def clear_scan_record(self):
         self.storage_mgr.delete_log_objects("tablescans", self.tableMgr.name)
 
-    def create_table_with_first_page(self, duck: DBWrapper, next_df, schema, table_root):
+    def create_table_with_first_page(self, duck: DBManager, next_df, schema, table_root):
         # before writing the DF to the database, we do some cleaning on columns and types.
         self.cleanup_df_page(next_df)
 
-        table = TableHandle(table_root, schema)
+        source = self.tableMgr.table_spec.get_table_source()
+        if source is not None and not isinstance(source, str):
+            source = json.dumps(source)
+
+        table = TableHandle(table_root, schema, table_opts={
+                'connection': self.tableMgr.schema,
+                'description': self.tableMgr.table_spec.description,
+                'source': source
+        })
         if duck.table_exists(table):
             # table already exists, so assume we are updating
             duck.append_dataframe_to_table(next_df, table)
@@ -387,7 +395,7 @@ class BaseTableScan(Thread):
 
         print("Finished table scan for: ", self.tableMgr.name)
 
-    def _flush_rows_to_db_catch_error(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
+    def _flush_rows_to_db_catch_error(self, duck: DBManager, tableMgr, next_df, page, flush_count):
         try:
             self._flush_rows_to_db(duck, tableMgr, next_df, page, flush_count)
             if len(self.analyzed_columns) == 0:
@@ -407,7 +415,7 @@ class InitialTableLoad(BaseTableScan):
     def scan_start_handler(self):
         self.clear_analyzed_columns(self.table_ref)
 
-    def _flush_rows_to_db(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
+    def _flush_rows_to_db(self, duck: DBManager, tableMgr, next_df, page, flush_count):
         ## Default version works when loading a new table
         print(f"Saving page {page} with {next_df.shape[1]} columns and {next_df.shape[0]} rows")
         if page <= flush_count:
@@ -466,7 +474,7 @@ class TableUpdateScan(BaseTableScan):
     def get_query_mgr(self):
         return self._query_mgr
 
-    def _flush_rows_to_db(self, duck: DBWrapper, tableMgr, next_df, page, flush_count):
+    def _flush_rows_to_db(self, duck: DBManager, tableMgr, next_df, page, flush_count):
         if self._query_mgr.should_replace():
             # Loading into a temp table so just do simple load
             if page <= flush_count:
@@ -1117,7 +1125,7 @@ class CommandInterpreter:
         self.context: CommandContext = None
         self.session_vars: dict[str, object] = {}
         self._email_helper = None
-        self.duck: DBWrapper = None
+        self.duck: DBManager = None
         self.last_chart = None
         # Some commands we only support in interactive sessions. In non-interactive cases (background execution)
         # these commands will be no-ops.
@@ -1448,7 +1456,8 @@ class CommandInterpreter:
             schema, table_root = table_ref.split(".")
             self.adapters[schema].drop_table(table_root)
         if val == "y":
-            return self._execute_duck(self.context.command)
+            # TODO: Should we allow tables with no schema in the tenant schema?
+            return self.duck.drop_table(TableHandle(table_ref))
 
     def drop_schema(self, schema_ref, cascade: bool):
         """ drop <schema> [cascade] - removes the entire schema from the database """
@@ -1688,22 +1697,24 @@ class CommandInterpreter:
     def show_tables(self, schema_ref=None):
         """ show tables [from <schema> [like '<expr>']] - list all tables or those from a schema """
         if schema_ref:
-            full = []
+            records = []
             if schema_ref in self.adapters:
                 for tableDef in self.adapters[schema_ref].list_tables():
-                    full.append(schema_ref + "." + tableDef.name)
+                    records.append({
+                        "table_name": tableDef.name,
+                        "table_schema": schema_ref,
+                        "comment": tableDef.description
+                    })
 
-            actuals = self.duck.list_tables(schema_ref)
+            df: pd.DataFrame = pd.DataFrame(records)
+            actuals: pd.DataFrame = self.duck.list_tables(schema_ref)
+            actual_names = []
             if not actuals.empty:
-                actual = [r[0] for r in actuals.to_records(index=False)]
-                full = set(full) | set(actual)
-            else:
-                actual = []
-            df = pd.DataFrame({"tables": list(full)})
-            df[['schema', 'table']] = df["tables"].apply(lambda x: pd.Series(str(x).split(".")))
-            del df['tables']
-            df.sort_values(df.columns[0], ascending = True, inplace=True)
-            df['materialized'] = ['✓' if t in actual else '☐' for t in full]
+                df = pd.concat([df, actuals]).drop_duplicates('table_name').reset_index(drop=True)
+                actual_names = actuals['table_name'].tolist()
+
+            df.sort_values('table_name', ascending = True, inplace=True)
+            df['materialized'] = ['✓' if t in actual_names else '☐' for t in df['table_name']]
             return df
         else:
             self.print("{:20s} {}".format("schema", "table"))

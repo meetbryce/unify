@@ -237,7 +237,7 @@ AdapterQueryResult = namedtuple(
 )
 
 class TableDef:
-    def __init__(self, name):
+    def __init__(self, name, description=None):
         self._name = name
         self._select_list = []
         self._result_body_path = None
@@ -245,6 +245,7 @@ class TableDef:
         self._key = None
         self._queryDateFormat = None #Use some ISO default
         self._params: dict = {}
+        self.description = description
 
     @property
     def name(self):
@@ -302,6 +303,10 @@ class TableDef:
         # default is just to reload
         return ReloadStrategy(self)
 
+    def get_table_source(self):
+        # Returns a description of where we are loading data from for the table
+        return None
+
 class TableUpdater:
     def __init__(self, table_def: TableDef, updates_since: datetime=None) -> None:
         self.table_def: TableDef = table_def
@@ -329,6 +334,7 @@ class TableUpdater:
 class RESTTable(TableDef):
     VALID_KEYS = {
         'name': str,
+        'description': str,
         'resource_path': str,
         'result_body_path' : (str, list),
         'result_meta_paths': list,
@@ -349,7 +355,7 @@ class RESTTable(TableDef):
     }
 
     def __init__(self, spec, dictvals):
-        super().__init__(dictvals['name'])
+        super().__init__(dictvals['name'], dictvals.get('description'))
         fmt = string.Formatter()
         self.max_pages = 50000 # TODO: Alow adapter to override this
 

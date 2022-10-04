@@ -24,6 +24,7 @@ auth:
 tables:
   - name: orgs
     resource_path: /user/orgs
+    description: List of Github Organizations that the current user is a member of.
   - name: org_members
     resource_path: /orgs/{org}/members
     supports_paging: True

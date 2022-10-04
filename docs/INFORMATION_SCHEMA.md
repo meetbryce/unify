@@ -32,6 +32,16 @@ This table stores critical metadata about each Unify managed table. This informa
 - A help comment describing the table
 - The "source" of the table, either a file URI or a REST adapter config block
 
+`connectionscans` table
+
+This meta table keeps a history of "tablescans" (pull data from an API) performed against a 
+given connected table.
+
+id   | created    | table_name  | table_schema  | connection  | values (JSON blog)
+-----  ----------   -----------   -------------   -----------   --------------------
+guid   timestamp    pulls         github          github        json blob
+
+
 ## Non-adapter tables
 
 Unify maintains table metadata even for tables and views that are NOT created by
@@ -40,5 +50,6 @@ in `information_schema.tables` that tracks the population event for the table.
 
 ## Implementation
 
-The information schema is maintained by SQLAlchemy classes that are configured
+The information schema is maintained by SQLAlchemy classes that are configured to use the active
+tenant's schema.
 

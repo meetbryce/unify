@@ -1,11 +1,11 @@
 
 from .db_wrapper import (
     ClickhouseWrapper, 
-    DBWrapper, 
+    DBManager, 
     DuckDBWrapper
 )
 
-DBMGR_CLASS: DBWrapper = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
+DBMGR_CLASS: DBManager = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
 UNIFY_META_SCHEMA = 'unify_schema'
 
 Base = declarative_base()
