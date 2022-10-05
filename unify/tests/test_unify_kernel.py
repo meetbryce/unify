@@ -18,7 +18,7 @@ def test_autocomplete(kernel):
     check_query("show tables from ", unify._list_schemas())
     check_query("show tables from ", unify._list_schemas())
     check_query("show tables from in", unify._list_schemas("in"))
-    sch1 = unify._list_schemas()[0]
+    sch1 = unify._list_schemas()['schema_name'][0]
     
     # FIXME: Autocomplete needs new grammar definitions
     #st_tables_filtered(sch1, ""))

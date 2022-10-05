@@ -387,6 +387,8 @@ def dump_duck():
 	def dump_tables(duck):
 		df = duck.execute("select * from information_schema.tables").df()
 		print(df)
+		df = duck.execute("select * from unify_schema.information_schema____adapter_metadata").df()
+		print(df)
 
 	duck = duckdb.connect('./unify/data/duckdata', read_only=False)
 	dump_tables(duck)

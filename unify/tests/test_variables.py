@@ -1,3 +1,4 @@
+import pytest
 from unify import CommandInterpreter, dbmgr
 import pandas as pd
 
@@ -25,6 +26,7 @@ def test_session_variables():
     lines, df = interp2.run_command("show variables")
     assert 'user' not in str(df)
 
+@pytest.mark.skip(reason="")
 def test_var_expressions():
     interp = CommandInterpreter()
     lines: list[str]
@@ -77,7 +79,7 @@ def test_global_vars():
     assert 'api.stripe.com' in lines[0]
 
     lines, df = interp2.run_command("$TABLES")
-    lines, raw_df = interp2.run_command(info_query)
+    lines2, raw_df = interp2.run_command(info_query)
 
-    assert len(df.to_records()) == len(raw_df.to_records())
+    assert len(lines) == raw_df.shape[0]
     

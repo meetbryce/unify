@@ -17,10 +17,10 @@ def test_scheduler_commands():
     for row in df.to_records(index=False):
         if nb1 in str(row):
             found1 = True
-            id1 = row['schedule_id']
+            id1 = row[0]
         if nb2 in str(row):
             found2 = True
-            id2 = row['schedule_id']
+            id2 = row[0]
     assert found1
     assert found2
 

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import io
 import inspect
 import json
+import pickle
 import logging
 import math
 import os
@@ -33,6 +34,9 @@ import pandas as pd
 import pyarrow as pa
 import numpy as np
 
+from sqlalchemy.orm.session import Session
+from sqlalchemy import select
+
 from timeit import default_timer as timer
 
 logger = logging.getLogger(__name__)
@@ -54,6 +58,10 @@ from .db_wrapper import (
     TableMissingException,
     TableHandle,
     UnifyDBStorageManager,
+    ConnectionScan,
+    ColumnInfo,
+    RunSchedule,
+    SavedVar
 )
 
 from .storage_manager import StorageManager
@@ -96,49 +104,6 @@ class SimpleLogger(UnifyLogger):
     def log_table(self, table: str, level: int, *args):
         print(f"[{str(self.adapter)}: {table}] ", *args, file=sys.stderr)
 
-class ColumnIntel:
-    def __init__(self, name:str, attrs: dict) -> None:
-        self.name: str = name
-        self.attrs: dict = attrs
-
-    @property
-    def column_weight(self):
-        # Heuristic to assign greater weight to likely more "interesting" columns
-        weight = 0
-        type = self.attrs["type_str"]
-
-        # Preference shorter columns
-        width = int(self.attrs["col_width"] / 5)
-        if width <= 6:
-            weight += 6 - width
-
-        if self.attrs["key"] and width < 20:
-            weight += 10
-        if "time" in type or "date" in type:
-            weight += 5
-        elif type == "string":
-            weight += 5
-        elif type == "boolean":
-            weight -= 20
-        elif type == "integer" and width < 3:
-            weight -= 10 # short ints aren't very useful. Often are flags
-        weight += 15 - self.attrs["name_width"]
-        # Push down very long columns
-        weight -= int(width/25)
-
-        # Push down columns with very low entropy
-        if self.attrs["entropy"] < 0.1:
-            weight -= 15
-
-        if self.attrs["url"]:
-            weight -= 5
-
-        return weight
-        
-    @property
-    def width(self):
-        return self.attrs["col_width"]
-
 class BaseTableScan(Thread):
     """
         Thread class for querying a REST API, by pages, and storing the results
@@ -150,11 +115,11 @@ class BaseTableScan(Thread):
         self.tableMgr: TableMgr = tableMgr
         self.tableLoader = tableLoader
         self.table_ref = tableMgr.schema + "." + tableMgr.table_spec.name
+        self.table_handle = TableHandle(tableMgr.table_spec.name, tableMgr.schema)
         self.select = select
         # FIXME: We should generalize a pattern for adapters to transform table results rather than
         # passing specific parameters like this
         self.strip_prefixes = strip_prefixes
-        self.storage_mgr: UnifyDBStorageManager = None
         self.analyzed_columns = []
 
     def analyze_columns(self, df: pd.DataFrame):
@@ -186,23 +151,27 @@ class BaseTableScan(Thread):
             entropy = df[column].value_counts().size / (float)(df.shape[0])
             attrs["entropy"] = entropy
 
-            self.analyzed_columns.append(ColumnIntel(column, attrs))
+            self.analyzed_columns.append(ColumnInfo(
+                table_schema = self.table_handle.schema(),
+                table_name = self.table_handle.table_root(),
+                name = column,
+                attrs = attrs
+            ))
 
     def save_analyzed_columns(self):
         if os.environ.get('UNIFY_SKIP_COLUMN_INTEL'):
             return
-        cols: list[ColumnIntel] = sorted(self.analyzed_columns, key=lambda ci: ci.attrs['order'])
-        for col in cols:
-            self.storage_mgr.insert_column_intel(
-                schema=self.tableMgr.schema,
-                table_root=self.tableMgr.table_spec.name,
-                column=col.name,
-                attrs=col.attrs
-        )
+        for col in self.analyzed_columns:
+            self.session.add(col)
+        self.session.commit()
 
     def clear_analyzed_columns(self, table_ref):
-        schema, table = table_ref.split(".")
-        self.storage_mgr.delete_all_column_intel(schema=schema, subject_table=table)
+        table_handle = TableHandle(table_ref)
+        self.session.query(ColumnInfo).filter(
+            ColumnInfo.table_schema == table_handle.schema(),
+            ColumnInfo.table_name == table_handle.table_root()
+        ).delete()
+        self.session.commit()
 
     def cleanup_df_page(self, df, cols_to_drop=[]):
         # Pandas json_normalize does not have a clever way to normalize embedded lists
@@ -279,26 +248,40 @@ class BaseTableScan(Thread):
 
 
     def _set_duck(self, duck):
-        self.storage_mgr: UnifyDBStorageManager = UnifyDBStorageManager("_system_", duck)
+        self.session = Session(bind=duck.engine)
 
     def run(self):
         with dbmgr() as duck:
-            self.storage_mgr: UnifyDBStorageManager = UnifyDBStorageManager("_system_", duck)
+            self.session = Session(bind=duck.engine)
             self.perform_scan(duck)
+            self.session.close()
 
     def save_scan_record(self, values: dict):
         logger.debug("*SAVING SCAN RECORD: {}".format(values))
-        self.storage_mgr.log_object(
-            "tablescans", 
-            self.tableMgr.name,
-            values
+
+        self.session.add(
+            ConnectionScan(
+                table_name=self.table_handle.table_root(), 
+                table_schema=self.table_handle.schema(),
+                connection=self.tableMgr.schema,
+                values=values
+            )
         )
+        self.session.commit()
 
     def get_last_scan_records(self, limit = 3):
-        return self.storage_mgr.get_log_objects("tablescans", self.tableMgr.name, limit=limit)
+        scans = self.session.query(ConnectionScan).filter(
+            ConnectionScan.table_name==self.table_handle.table_root(),
+            ConnectionScan.table_schema==self.table_handle.schema()
+        ).order_by(ConnectionScan.created.desc())[0:limit]
+        return [scan.values for scan in scans]
 
     def clear_scan_record(self):
-        self.storage_mgr.delete_log_objects("tablescans", self.tableMgr.name)
+        self.session.query(ConnectionScan).filter(
+            ConnectionScan.table_name==self.table_handle.table_root(),
+            ConnectionScan.table_schema==self.table_handle.schema()
+        ).delete()
+        self.session.commit()
 
     def create_table_with_first_page(self, duck: DBManager, next_df, schema, table_root):
         # before writing the DF to the database, we do some cleaning on columns and types.
@@ -1152,6 +1135,8 @@ class CommandInterpreter:
             self.run_interp_commands
         ]
         with dbmgr() as duck:
+            duck.register_for_signal("table_drop", self.on_table_drop)
+
             self.duck = duck
             for stage in pipeline:
                 if context.has_run:
@@ -1237,10 +1222,7 @@ class CommandInterpreter:
 
     def _list_schemas(self, match_prefix=None):
         with dbmgr() as duck:
-            all = sorted(list(r[0] for r in duck.execute(Queries.list_schemas).fetchall()))
-            if match_prefix:
-                all = [s[len(match_prefix):] for s in all if s.startswith(match_prefix)]
-            return all
+            return duck.list_schemas()
         
     def _list_tables_filtered(self, schema, table=None):
         try:
@@ -1252,14 +1234,13 @@ class CommandInterpreter:
 
     def _list_schedules(self):
         with dbmgr() as duck:
-            store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", duck)
-            return [{"id":id, "schedule":blob} for id, blob in store.list_objects("schedules")]
+            with Session(bind=self.duck.engine) as session:
+                return session.query(RunSchedule).all()
             
     def _truncate_schedules(self):
         with dbmgr() as duck:
-            store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", duck)
-            for id, blob in store.list_objects("schedules"):
-                store.delete_object("schedules", id)
+            with Session(bind=self.duck.engine) as session:
+                return session.query(RunSchedule).delete()
 
     def _analyze_columns(self, table_ref: str):
         self.loader.analyze_columns(table_ref)
@@ -1299,90 +1280,11 @@ class CommandInterpreter:
         if match:
             # var assignment, only interpolate the right hand side
             rhs = CommandContext(match.group(2))
-            context.command = match.group(1) + "=" + self.substitute_variables(rhs)
+            self.substitute_variables(rhs)
+            context.command = match.group(1) + "=" + rhs.command
         else:
             # interpolate the whole command
             context.command = re.sub(r"\$([\w_0-9]+)", lookup_var, context.command)
-
-
-
-    def old_run_command(
-        self, 
-        cmd, 
-        input_func=input, 
-        get_notebook_func=None, 
-        interactive: bool=True) -> tuple[list, pd.DataFrame]:
-        # Executes a command through our interpreter and returns the results
-        # as a tuple of (output_lines, output_object) where output_line contains
-        # a list of string to print and output_object is an object which should
-        # be rendered to the user. 
-
-        # Support object types are: 
-        # - a DataFrame
-        # - A dict containing keys: "mime_type" and "data" for images
-        # 
-        # The Email function may need the notebook path. In this case the `get_notebook_func`
-        # should be supplied by the kernel to return the notebook path.
-
-        # This is a hack for the email command, which will execute a notebook which needs exclusive
-        # access to the database, so we defer to running the command until after we close the db.
-        run_command_after_closing_db = None
-        try:
-            with dbmgr() as duck:
-                self.duck = duck
-                self.logger: OutputLogger = OutputLogger()
-                self.print_buffer = []
-
-                if cmd.startswith("!"):
-                    # pass directly to the db
-                    result = self._execute_duck(cmd[1:])
-                    return (self.logger.get_output(), result)
-
-                cmd = self.substitute_variables(cmd)
-                # Allow Adapters to process their special commands
-                output: OutputLogger = self.pre_handle_command(cmd)
-                if output is not None:
-                    return (output.get_output(), output.get_df())
-
-                self._cmd = cmd
-                result = None
-                self.input_func = input_func
-                try:
-                    parse_tree = self._get_parser().parse(self._cmd)
-                    command = self.parser_visitor.perform_new_visit(parse_tree, full_code=cmd)
-
-                    if not interactive and command in self.commands_needing_interaction:
-                        self.print(f"Skipping command: {command}")
-                        command = None
-
-                    if command:    
-                        method = getattr(self, command)
-                        if 'notebook_path' in inspect.signature(method).parameters:
-                            nb_path = get_notebook_func() if get_notebook_func else None
-                            if 'notebook_path' not in self.parser_visitor._the_command_args:
-                                self.parser_visitor._the_command_args['notebook_path'] = nb_path
-
-                    if self._command_needs_db_closed(command, self.parser_visitor):
-                        run_command_after_closing_db = command
-                        command = None
-
-                    if command:
-                        result = getattr(self, command)(**self.parser_visitor._the_command_args)
-                except lark.exceptions.LarkError:
-                    # Let any parsing exceptions send the command down to the db
-                    result = self._execute_duck(self._cmd)
-                if isinstance(result, pd.DataFrame):
-                    # print the row count
-                    self.print("{} row{}".format(result.shape[0], "s" if result.shape[0] != 1 else ""))
-                clean_df(result)
-                if run_command_after_closing_db is None:
-                    return (self.logger.get_output(), result)
-        finally:
-            self.duck = None
-            if run_command_after_closing_db:
-                result = getattr(self, run_command_after_closing_db)(**self.parser_visitor._the_command_args)
-                # FIXME: use a namedtuple
-                return (self.logger.get_output(), result)
 
     def _execute_duck(self, query: typing.Union[str, CommandContext]) -> pd.DataFrame:
         if isinstance(query, CommandContext):
@@ -1522,6 +1424,14 @@ class CommandInterpreter:
         exporter.run(self.logger)
         self.print(f"Exported query result to '{file_ref}'")
 
+    def on_table_drop(self, table):
+        # remove all column info
+        with Session(bind=self.duck.engine) as session:
+            cols = session.query(ColumnInfo).filter(
+                ColumnInfo.table_name == table.table_root(),
+                ColumnInfo.table_schema == table.schema()
+            ).delete()
+
     def peek_table(self, qualifier, peek_object, line_count=20, build_stats=True, debug=False):
         # Get column weights and widths.
         if qualifier == 'file':
@@ -1533,15 +1443,18 @@ class CommandInterpreter:
             return
 
         schema, table_root = peek_object.split(".")
-        store: UnifyDBStorageManager = UnifyDBStorageManager("meta", self.duck)
-        cols = [ColumnIntel(name, attrs) for name, attrs in store.get_column_intels(schema, table_root)]
-        if len(cols) == 0:
-            if build_stats:
-                self._analyze_columns(peek_object)
-                return self.peek_table(peek_object, line_count=line_count, build_stats=False)
-            else:
-                self.print(f"Can't peek at {peek_object} because no column stats are available.")
-                return
+        with Session(bind=self.duck.engine) as session:
+            cols = session.query(ColumnInfo).filter(
+                ColumnInfo.table_name == table_root,
+                ColumnInfo.table_schema == schema
+            ).all()
+            if len(cols) == 0:
+                if build_stats:
+                    self._analyze_columns(peek_object)
+                    return self.peek_table(peek_object, line_count=line_count, build_stats=False)
+                else:
+                    self.print(f"Can't peek at {peek_object} because no column stats are available.")
+                    return
 
         cols = sorted(cols, key=lambda col: col.column_weight, reverse=True)
         # Take columns until our max width
@@ -1603,21 +1516,21 @@ class CommandInterpreter:
 
     def run_info(self, schedule_id):
         """ run info <notebook> - Shows details on the schedule for the indicated notebook """
-        store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
-        schedule = store.get_object("schedules", schedule_id)
-        if schedule:
-            self.print("Schedule: ", schedule['run_at'], " repeat: ", schedule['repeater'])
-            contents = schedule['contents']
-            body = json.loads(contents)
-            for cell in body['cells']:
-                if 'source' in cell:
-                    if isinstance(cell['source'], list):
-                        for line in cell['source']:
-                            self.print("| ", line)
-                    else:
-                        self.print("| ", cell['source'])
-        else:
-            self.print("No schedule found")
+        with Session(bind=self.duck.engine) as session:
+            schedule = session.query(RunSchedule).filter(RunSchedule.id == schedule_id).first()
+            if schedule:
+                self.print("Schedule: ", schedule.run_at, " repeat: ", schedule.repeater)
+                contents = schedule['contents']
+                body = json.loads(contents)
+                for cell in body['cells']:
+                    if 'source' in cell:
+                        if isinstance(cell['source'], list):
+                            for line in cell['source']:
+                                self.print("| ", line)
+                        else:
+                            self.print("| ", cell['source'])
+            else:
+                self.print("Schedule not found")
 
     def run_notebook_command(self, run_at_time: str, notebook_path: str, repeater: str=None):
         """ run [every day|week|month] at <date> <time> - Execute this notebook on a regular schedule """
@@ -1636,57 +1549,61 @@ class CommandInterpreter:
             raise RuntimeError(f"Cannot find notebook '{notebook_path}'")
 
         run_at_time = pd.to_datetime(run_at_time) # will assign the current date if no date
-        schedule = {"notebook": notebook_path, "run_at": str(run_at_time), 
-                    "repeater": repeater, "contents": contents}
-        
-        store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
-        # For now we are using the notebook name as the unique key. This means that a notebook
-        # can have only one schedule. In the future we may allow to create multiple schedules.
-        id = os.path.basename(notebook_path)
-        store.put_object("schedules", id, schedule)
-        notebook = os.path.basename(notebook_path)
-        self.print(f"Scheduled to run notebook {notebook}")
+        with Session(bind=self.duck.engine) as session:
+            session.add(RunSchedule(
+                id = os.path.basename(notebook_path),
+                notebook_path = notebook_path,
+                run_at = run_at_time,
+                repeater = repeater,
+                contents = contents
+            ))
+            session.commit()
+
+        self.print(f"Scheduled to run notebook {notebook_path}")
 
     def run_schedule(self):
         """ run schedule - displays the current list of scheduled tasks """
-        store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
-        items = store.list_objects("schedules")
-        items = map(lambda row: [row[0], row[1]['notebook'], row[1]['run_at'], row[1]['repeater']], items)
-        return pd.DataFrame(items, columns=["schedule_id", "notebook", "run_at", "repeat"])
+        with Session(bind=self.duck.engine) as session:
+            return pd.read_sql_query(
+                sql = select(RunSchedule),
+                con = self.duck.engine
+            )
 
     def delete_schedule(self, schedule_id):
         """ run delete <notebook> - Delete the schedule for the indicated notebook """
-        store: UnifyDBStorageManager = UnifyDBStorageManager("_system_", self.duck)
-        schedule = store.get_object("schedules", schedule_id)
-        if schedule:
-            store.delete_object("schedules", schedule_id)
-            self.print(f"Deleted schedule {schedule_id} for notebook: ", schedule['notebook'])
+        with Session(bind=self.duck.engine) as session:
+            sched = session.query(RunSchedule).filter(RunSchedule.id == schedule_id).first()
+            if sched:
+                self.print(f"Deleted schedule {schedule_id} for notebook: ", sched.notebook_path)
 
     def set_variable(self, var_ref: str, var_expression: str):
         """ $<var> = <expr> - sets a variable. Use all caps for var to set a global variable. """
         is_global = var_ref.upper() == var_ref
         if not var_expression.lower().startswith("select "):
             # Need to evaluate the scalar expression
-            val = self.duck.execute("select " + var_expression).fetchone()[0]
+            val = self.duck.execute("select " + var_expression).iloc[0][0]
             self._save_variable(var_ref, val, is_global)
             self.print(val)
         else:
             val = self.duck.execute_df(var_expression)
-            self._save_variable(var_ref, val, is_global)
+            self._save_variable(var_ref, val.iloc[0][0], is_global)
             return val
 
     def _get_variable(self, name: str):
         if name.upper() == name:
-            store: UnifyDBStorageManager =UnifyDBStorageManager(None, self.duck)
-            return store.get_var(name)
+            with Session(bind=self.duck.engine) as session:
+                savedvar = session.query(SavedVar).filter(SavedVar.name==name).first()
+                if savedvar:
+                    return savedvar.value
         else:
             return self.session_vars[name]
 
     def _save_variable(self, name: str, value, is_global: bool):
         if is_global:
-            # Save a scalar to our system table in meta
-            store: UnifyDBStorageManager =UnifyDBStorageManager(None, self.duck)
-            store.put_var(name, value)
+            with Session(bind=self.duck.engine) as session:
+                session.query(SavedVar).filter(SavedVar.name==name).delete()
+                session.add(SavedVar(name=name, value=value))
+                session.commit()
         else:
             self.session_vars[name] = value
 
@@ -1781,24 +1698,13 @@ class CommandInterpreter:
             self.print(f"Error, uknown adapter '{adapter_ref}'")
 
     def show_variable(self, var_ref):
-        if var_ref in self.session_vars:
-            self.print(self.session_vars[var_ref])
-        elif var_ref.upper() == var_ref:
-            store: UnifyDBStorageManager =UnifyDBStorageManager(None, self.duck)
-            value = store.get_var(var_ref)
-            if isinstance(value, pd.DataFrame):
-                return value
-            else:
-                self.print(value)
-        else:
-            self.print(f"Error, unknown variable '{var_ref}'")
+        self.print(self._get_variable(var_ref))
 
     def show_variables(self):
         """ show variables - list all defined variables"""
         rows = [(k, "[query result]" if isinstance(v, pd.DataFrame) else v) for k, v in self.session_vars.items()]
-        store: UnifyDBStorageManager =UnifyDBStorageManager(None, self.duck)
-        vars = [k[0][0:-len(store.VAR_NAME_SENTINAL)].upper() for k in store.list_vars()]
-        rows.extend([(k, "[query result]") for k in vars])
+        with Session(bind=self.duck.engine) as session:
+            rows.extend([(k.name, k.value) for k in session.query(SavedVar)])
         return pd.DataFrame(rows, columns=["variable", "value"])
 
     def clear_table(self, table_schema_ref=None):

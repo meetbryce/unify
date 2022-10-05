@@ -1,4 +1,5 @@
 from __future__ import annotations
+import base64
 import contextlib
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -21,10 +22,11 @@ import clickhouse_driver
 import sqlglot
 import enum
 from sqlalchemy import Enum
-from sqlalchemy import Column, String, DateTime, create_engine
+from sqlalchemy import Column, String, DateTime, PickleType, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.session import Session
 from sqlalchemy import UniqueConstraint
+from sqlalchemy.types import TypeDecorator, VARCHAR
 from clickhouse_sqlalchemy import engines as clickhouse_engines
 from signaling import Signal
 
@@ -134,6 +136,11 @@ class DBManager(contextlib.AbstractContextManager):
         self.signals["table_create"].connect(self._on_table_create)
         self.signals["table_drop"].connect(self._on_table_drop)
         self.engine: Unknown = None
+
+    def register_for_signal(self, signal, callback):
+        if signal not in self.signals:
+            raise RuntimeError(f"Unknown signal '{signal}'")
+        self.signals[signal].connect(callback)
 
     def _on_schema_create(self, schema):
         session = Session(bind=self.engine)
@@ -515,6 +522,14 @@ class ClickhouseWrapper(DBManager):
         return "clickhouse"
 
     @staticmethod
+    def get_sqla_engine():
+        uri = 'clickhouse://' + \
+            os.environ['DATABASE_USER'] + ':' +\
+            os.environ['DATABASE_PASSWORD'] + '@' + \
+            os.environ['DATABASE_HOST'] + '/default'
+        return create_engine(uri)
+
+    @staticmethod
     def _connect_to_db():
         if 'DATABASE_HOST' not in os.environ:
             raise RuntimeError("DATABASE_HOST not set")
@@ -540,7 +555,7 @@ class ClickhouseWrapper(DBManager):
         # And make sure that the current tenant's dedicated schema exists
         tenant_db = f"tenant_{ClickhouseWrapper.SINGLE_TENANT_ID}"
         ClickhouseWrapper.SHARED_CLIENT.execute(f"CREATE DATABASE IF NOT EXISTS {tenant_db}")
-        engine = get_sqla_engine()
+        engine = ClickhouseWrapper.get_sqla_engine()
         # Map of SQLA models to write to the tenant schema
         ClickhouseWrapper.SHARED_ENGINE = engine.execution_options(
     	    schema_translate_map={UNIFY_META_SCHEMA: tenant_db, None: tenant_db}
@@ -868,130 +883,53 @@ class UnifyDBStorageManager(StorageManager):
         Stores adapter metadata in DuckDB. Creates a "meta" schema, and creates
         tables named <adapter schema>_<collection name>.
     """
-    DUCK_TABLE_SCHEMA = "(id VARCHAR PRIMARY KEY, blob JSON)"
-    TABLE_SCHEMA = {'*id': 'VARCHAR', 'blob': 'JSON'}
-    LOG_TABLE_SCHEMA = {'id': 'VARCHAR', 'created': 'DATETIME', 'blob': 'JSON', '__order': ['id','created']}
-    VAR_NAME_SENTINAL = '__var__'
-    COLUMN_INTEL_TABLE_SCHEMA = {'schema_':'VARCHAR','table_':'VARCHAR','column_':'VARCHAR', 'attrs':'JSON',
-                                '__order': ['schema_', 'table_', 'column_']}
-
     def __init__(self, adapter_schema: str, duck):
         self.adapter_schema = adapter_schema
         self.duck : DBManager = duck
-        self.duck.create_schema("meta")
-
-    def ensure_col_table(self, duck, name) -> str:
-        table: str = self.adapter_schema + "_" + name
-        duck.create_table(TableHandle(table, "meta"), self.TABLE_SCHEMA)
-        return table
-
-    def ensure_log_table(self, duck, name) -> dict:
-        table = self.adapter_schema + "_" + name
-        duck.create_table(TableHandle("meta." + table), self.LOG_TABLE_SCHEMA)
-        return table
-
-    def create_var_storage_table(self, duck):
-        table = "system__vars"
-        duck.create_table(TableHandle("meta." + table), {'*name': 'VARCHAR', 'value': 'BLOB'})
-        return table
-
-    def put_var(self, name, value):
-        table = self.create_var_storage_table(self.duck)
-        self.duck.delete_rows(TableHandle("meta." + table), {"name": name})
-        if isinstance(value, pd.DataFrame):
-            name = name.lower() + self.VAR_NAME_SENTINAL
-            self.duck.write_dataframe_as_table(value, "meta", name)
-        else:
-            self.duck.execute(
-                f"insert into meta.{table} (name, value) values (?, ?)",
-                (name, pickle.dumps(value))
-            )
-
-    def list_vars(self):
-        table = self.create_var_storage_table(self.duck)
-        scalars = self.duck.execute(f"select name from meta.{table}").fetchall()
-        scalars.extend(list(
-            self.duck.execute(
-                Queries.saved_var_tables.format(self.VAR_NAME_SENTINAL)
-            ).fetchall()
-        ))
-        return scalars
-
-    def get_var(self, name):
-        table = self.create_var_storage_table(self.duck)
-        rows = self.duck.execute(f"select value from meta.{table} where name = ?", [name]).fetchall()
-        if len(rows) > 0:
-            return pickle.loads(rows[0][0])
-        else:
-            name = name.lower() + self.VAR_NAME_SENTINAL
-            return self.duck.execute_df(f"select * from meta.{name}")
-            #raise RuntimeError(f"No value stored for global variable '{name}'")
 
     def put_object(self, collection: str, id: str, values: dict) -> None:
-        table = self.ensure_col_table(self.duck, collection)
-        self.duck.delete_rows(TableHandle("meta." + table), {"id": id})
-        self.duck.execute(f"insert into meta.{table} (id, blob) values (?, ?)", [id, json.dumps(values)])
-
-    def log_object(self, collection: str, id: str, values: dict) -> None:
-        table = self.ensure_log_table(self.duck, collection)
-        created = datetime.utcnow()
-        self.duck.execute(f"insert into meta.{table} (id,created,blob) values (?, ?, ?)", [id, created, json.dumps(values)])
+        with Session(bind=self.duck.engine) as session:
+            # Good to remember that Clickhouse won't enforce unique keys!
+            session.query(AdapterMetadata).filter(
+                AdapterMetadata.id == id,
+                AdapterMetadata.collection==(self.adapter_schema + "." + collection)
+            ).delete()
+            session.commit()
+            session.add(AdapterMetadata(
+                id=id, 
+                collection=self.adapter_schema + "." + collection,
+                values = values
+            ))
+            session.commit()
 
     def get_object(self, collection: str, id: str) -> dict:
-        table = self.ensure_col_table(self.duck, collection)
-        rows = self.duck.execute(f"select id, blob from meta.{table} where id = ?", [id]).fetchall()
-        if len(rows) > 0:
-            return json.loads(rows[0][1])
-        return None
-
-    def get_log_objects(self, collection: str, id: str, limit=1) -> dict:
-        table = self.ensure_col_table(self.duck, collection)
-        rows = self.duck.execute(
-            f"select id, blob from meta.{table} where id = ? order by created desc limit {limit}", 
-            [id]
-        )
-        return [json.loads(row) for row in rows['blob']]
-
-    @lru_cache(maxsize=500)
-    def ensure_column_intel_table(self):
-        table = TableHandle("meta.column_intels")
-        self.duck.create_table(table, self.COLUMN_INTEL_TABLE_SCHEMA)
-        return table
-
-    def insert_column_intel(self, schema: str, table_root: str, column: str, attrs: dict):
-        meta_table = self.ensure_column_intel_table()
-        self.duck.execute(f"insert into {meta_table} (schema_,table_,column_,attrs) values (?, ?, ?, ?)", 
-            [schema, table_root, column, json.dumps(attrs)])
-
-    def get_column_intels(self, schema: str, table_root: str):
-        meta_table = self.ensure_column_intel_table()
-        return [
-            (col, json.loads(val)) for col, val in \
-                self.duck.execute(
-                    f"select column_, attrs from {meta_table} where schema_ = ? and table_ = ?",
-                    [schema, table_root]
-                ).fetchall()
-        ]
-
-    def delete_all_column_intel(self, schema, subject_table):
-        meta_table = self.ensure_column_intel_table()
-        self.duck.delete_rows(meta_table, {'schema_':schema, 'table_':subject_table})
+        with Session(bind=self.duck.engine) as session:
+            rec = session.query(AdapterMetadata).filter(
+                AdapterMetadata.id == id,
+                AdapterMetadata.collection==(self.adapter_schema + "." + collection)
+            ).first()
+            if rec:
+                return rec.values
 
     def delete_object(self, collection: str, id: str) -> bool:
-        table = "meta." + self.ensure_col_table(self.duck, collection)
-        r = self.duck.delete_rows(TableHandle(table), {'id': id})
-        print("Delete resulted in: ", r)
-
-    def delete_log_objects(self, collection: str, id: str):
-        self.delete_object(collection, id)
+        with Session(bind=self.duck.engine) as session:
+            session.query(AdapterMetadata).filter(
+                AdapterMetadata.id == id,
+                AdapterMetadata.collection==(self.adapter_schema + "." + collection)
+            ).execution_options(
+                settings={'mutations_sync': 1}
+            ).delete()
+            session.commit()
+            time.sleep(0.1)
 
     def list_objects(self, collection: str) -> list[tuple]:
-        table = self.ensure_col_table(self.duck, collection)
-        return [
-            (row['id'], json.loads(row['blob'])) for row in \
-                self.duck.execute_df(f"select id, blob from meta.{table}").to_records()
-        ]
-
+        with Session(bind=self.duck.engine) as session:
+            return [
+                (row.id, row.values)for row in \
+                    session.query(AdapterMetadata).filter(
+                        AdapterMetadata.collection==(self.adapter_schema + "." + collection)
+                    )
+            ]
 
 ## ORM classes for unify_schema 
 
@@ -1030,6 +968,29 @@ class SchemataTable(Base): #type ignore
     def __repr__(self) -> str:
         return f"TableSchemata({self.table_schema}.{self.table_name})"
 
+# from here: https://docs.sqlalchemy.org/en/14/core/custom_types.html#marshal-json-strings
+class JSONEncodedDict(TypeDecorator):
+    """Represents an immutable structure as a json-encoded string.
+
+    Usage::
+
+        JSONEncodedDict(255)
+
+    """
+    impl = VARCHAR
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            value = json.dumps(value)
+
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None:
+            value = json.loads(value)
+        return value
+
 class ConnectionScan(Base):
     __tablename__ = "information_schema" + CHTableHandle.SCHEMA_SEP + "connectionscans"
 
@@ -1038,29 +999,97 @@ class ConnectionScan(Base):
     table_name = Column(String)
     table_schema = Column(String)
     connection = Column(String)
-    values = Column(String)
-
-    def set_values(self, vals: dict):
-        self.values = json.dumps(vals)
-
-    def get_values(self):
-        if self.values is not None:
-            return json.loads(self.values)
-        else:
-            return {}
+    values = Column(JSONEncodedDict)
 
     __table_args__ = DBMGR_CLASS.get_sqlalchemy_table_args(primary_key='id', schema=UNIFY_META_SCHEMA)
     def __repr__(self) -> str:
         return f"ConnectionScan({self.table_schema}.{self.table_name})"
 
-def get_sqla_engine():
-    uri = 'clickhouse://' + \
-        os.environ['DATABASE_USER'] + ':' +\
-        os.environ['DATABASE_PASSWORD'] + '@' + \
-        os.environ['DATABASE_HOST'] + '/default'
-    return create_engine(uri)
+class ColumnInfo(Base):
+    __tablename__ = "information_schema" + CHTableHandle.SCHEMA_SEP + "columns"
+    __table_args__ = DBMGR_CLASS.get_sqlalchemy_table_args(primary_key='id', schema=UNIFY_META_SCHEMA)
 
-def create_orm_tables(engine):
-    engine = get_sqla_engine()
-    Base.metadata.create_all(engine)
-    return engine
+    id = Column(String, default=uniq_id, primary_key=True)
+    created = Column(DateTime, default=datetime.utcnow())
+    table_name = Column(String)
+    table_schema = Column(String)
+    name = Column(String)
+    attrs: dict = Column(JSONEncodedDict)
+
+    @property
+    def column_weight(self):
+        # Heuristic to assign greater weight to likely more "interesting" columns
+        weight = 0
+        type = self.attrs["type_str"]
+
+        # Preference shorter columns
+        width = int(self.attrs["col_width"] / 5)
+        if width <= 6:
+            weight += 6 - width
+
+        if self.attrs["key"] and width < 20:
+            weight += 10
+        if "time" in type or "date" in type:
+            weight += 5
+        elif type == "string":
+            weight += 5
+        elif type == "boolean":
+            weight -= 20
+        elif type == "integer" and width < 3:
+            weight -= 10 # short ints aren't very useful. Often are flags
+        weight += 15 - self.attrs["name_width"]
+        # Push down very long columns
+        weight -= int(width/25)
+
+        # Push down columns with very low entropy
+        if self.attrs["entropy"] < 0.1:
+            weight -= 15
+
+        if self.attrs["url"]:
+            weight -= 5
+
+        return weight
+        
+    @property
+    def width(self):
+        return self.attrs["col_width"]
+
+class RunSchedule(Base):
+    __tablename__ = "information_schema" + CHTableHandle.SCHEMA_SEP + "run_schedules"
+    __table_args__ = DBMGR_CLASS.get_sqlalchemy_table_args(primary_key='id', schema=UNIFY_META_SCHEMA)
+
+    id = Column(String, primary_key=True)
+    notebook_path = Column(String)
+    run_at = Column(DateTime)
+    repeater = Column(String)
+    contents = Column(String)
+
+class Base64Encoded(TypeDecorator):
+    impl = VARCHAR
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None:
+            value = base64.b64encode(pickle.dumps(value)).decode("ascii")
+
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None:
+            value = pickle.loads(base64.b64decode(value.encode("ascii")))
+        return value
+
+class SavedVar(Base):
+    __tablename__ = "information_schema" + CHTableHandle.SCHEMA_SEP + "variables"
+    __table_args__ = DBMGR_CLASS.get_sqlalchemy_table_args(primary_key='name', schema=UNIFY_META_SCHEMA)
+
+    name = Column(String, primary_key=True)
+    value = Column(Base64Encoded)
+
+class AdapterMetadata(Base):
+    __tablename__ = "information_schema" + CHTableHandle.SCHEMA_SEP + "adapter_metadata"
+    __table_args__ = DBMGR_CLASS.get_sqlalchemy_table_args(primary_key=['id','collection'], schema=UNIFY_META_SCHEMA)
+
+    id = Column(String, primary_key=True)
+    collection = Column(String, primary_key=True)
+    values = Column(JSONEncodedDict)

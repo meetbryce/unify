@@ -1,6 +1,6 @@
 from sqlalchemy.orm.session import Session
 
-from unify.db_wrapper import Schemata, SchemataType
+from unify.db_wrapper import Schemata
 
 from unify import dbmgr
 
@@ -8,8 +8,8 @@ def test_schemata():
     with dbmgr() as db:
         session = Session(bind=db.engine)
 
-        github = Schemata(name="github", type=SchemataType.connection, comment="Access to Github")
-        jiraa = Schemata(name="jira_adapter", type=SchemataType.adapter, comment="Access to JIRA")
+        github = Schemata(name="github", type="connection", description="Access to Github")
+        jiraa = Schemata(name="jira_adapter", type="adapter", description="Access to JIRA")
 
         session.add(github)
         session.add(jiraa)

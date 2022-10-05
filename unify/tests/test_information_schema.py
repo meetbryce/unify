@@ -77,12 +77,12 @@ def test_connection_scans(db):
 
     session = Session(bind=db.engine)
     c = ConnectionScan(table_name="pulls",table_schema="github",connection="github")
-    c.set_values(values)
+    c.values = values
     session.add(c)
 
     scan = session.query(ConnectionScan).order_by('created').first()
     print("found scan: ", scan)
-    assert c.get_values() == values
+    assert c.values == values
 
 
 
