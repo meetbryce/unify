@@ -371,7 +371,7 @@ is a good option if the sheet data is changing frequenly.
             ]
         return self.tables
 
-    def list_files(self, match_expr):
+    def list_files(self, match_expr=None):
         return [f"{sheet['name']}\t{sheet['webViewLink']}" for sheet in self.client.get_all_sheets_files(match_expr)]
 
     def get_matching_sheets(self, search_query):

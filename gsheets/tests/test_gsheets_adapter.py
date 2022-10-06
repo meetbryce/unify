@@ -41,8 +41,8 @@ def test_adapter_basic(adapter: GSheetsAdapter):
     assert outlog.get_output() == []
 
     outlog.clear()
-    adapter.list_files()
-    assert len(outlog.get_output()) > 10
+    files = adapter.list_files()
+    assert len(files) > 10
 
     outlog.clear()
     adapter.search(search_query="transactions")
