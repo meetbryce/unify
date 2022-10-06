@@ -246,6 +246,7 @@ class TableDef:
         self._queryDateFormat = None #Use some ISO default
         self._params: dict = {}
         self.description = description
+        self._strip_prefixes: Union[str,list] = []
 
     @property
     def name(self):
@@ -286,6 +287,14 @@ class TableDef:
     @select_list.setter
     def select_list(self, selects: list):
         self._select_list = selects
+
+    @property
+    def strip_prefixes(self):
+        return self._strip_prefixes
+
+    @strip_prefixes.setter
+    def strip_prefixes(self, value):
+        self._strip_prefixes = value
 
     def query_resource(self, tableLoader, logger: UnifyLogger) -> Generator[AdapterQueryResult, None, None]:
         """ Yields AdapterQueryResults for each page of an API endpoint """
@@ -758,7 +767,8 @@ class Adapter:
         self.auth: dict = {}
         self.storage: StorageManager = storage
 
-    def convert_string_to_table_name(self, title: str):
+    @staticmethod
+    def convert_string_to_table_name(title: str):
         title = title.lower()
         title = re.sub("\s+", "_", title)
         if re.match("^\d+", title):

@@ -115,7 +115,7 @@ class LocalFileAdapter(Adapter):
             raise RuntimeError(f"Cannot determine type of contents for '{file_uri}'")
 
         # Now create an empty table record which we will fill via the table scan later
-        table_name = self.convert_string_to_table_name(file_path.stem)
+        table_name = LocalFileAdapter.convert_string_to_table_name(file_path.stem)
         self.storage.put_object(
             'tables', 
             table_name,

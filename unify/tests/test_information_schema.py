@@ -23,6 +23,7 @@ def test_schemas(db: DBManager):
     assert 'myscheme1' in scs['schema_name'].tolist()
 
     db.drop_schema("myscheme1")
+    time.sleep(0.5)
     assert 'myscheme1' not in db.list_schemas()['schema_name'].tolist()
 
 def test_tables(db: DBManager):

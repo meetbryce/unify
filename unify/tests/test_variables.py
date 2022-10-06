@@ -81,5 +81,5 @@ def test_global_vars():
     lines, df = interp2.run_command("$TABLES")
     lines2, raw_df = interp2.run_command(info_query)
 
-    assert len(lines) == raw_df.shape[0]
+    assert df.shape[0] == raw_df.shape[0]
     

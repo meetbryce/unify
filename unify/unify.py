@@ -938,7 +938,7 @@ class ParserVisitor(Visitor):
         opts = find_node_return_children("options", tree)
         if opts:
             opts = re.split(r"\s+", opts[0])
-            self._the_command_args['options'] = opts
+            self._the_command_args['options'] = [o for o in opts if o]
 
     def insert_statement(self, tree):
         self._the_command = 'insert_statement'
@@ -1142,6 +1142,7 @@ class CommandInterpreter:
                 if context.has_run:
                     break
                 stage(context)
+                #print(f"After {stage}, command is: {context.command}")
         if not context.has_run:
             self.run_commands_after_db_closed(context)
         self.clean_df_result(context)
@@ -1549,9 +1550,12 @@ class CommandInterpreter:
             raise RuntimeError(f"Cannot find notebook '{notebook_path}'")
 
         run_at_time = pd.to_datetime(run_at_time) # will assign the current date if no date
+        run_id = os.path.basename(notebook_path)
         with Session(bind=self.duck.engine) as session:
+            session.query(RunSchedule).filter(RunSchedule.id == run_id).delete()
+            session.commit()
             session.add(RunSchedule(
-                id = os.path.basename(notebook_path),
+                id = run_id,
                 notebook_path = notebook_path,
                 run_at = run_at_time,
                 repeater = repeater,
@@ -1578,7 +1582,7 @@ class CommandInterpreter:
 
     def set_variable(self, var_ref: str, var_expression: str):
         """ $<var> = <expr> - sets a variable. Use all caps for var to set a global variable. """
-        is_global = var_ref.upper() == var_ref
+        is_global = (var_ref.upper() == var_ref)
         if not var_expression.lower().startswith("select "):
             # Need to evaluate the scalar expression
             val = self.duck.execute("select " + var_expression).iloc[0][0]
@@ -1586,7 +1590,7 @@ class CommandInterpreter:
             self.print(val)
         else:
             val = self.duck.execute_df(var_expression)
-            self._save_variable(var_ref, val.iloc[0][0], is_global)
+            self._save_variable(var_ref, val, is_global)
             return val
 
     def _get_variable(self, name: str):
@@ -1595,13 +1599,21 @@ class CommandInterpreter:
                 savedvar = session.query(SavedVar).filter(SavedVar.name==name).first()
                 if savedvar:
                     return savedvar.value
+                else:
+                    # Maybe it was stored as full table
+                    table_name = "var_" + LocalFileAdapter.convert_string_to_table_name(name)
+                    return self.duck.execute_df(f"select * from meta.{table_name}")
         else:
             return self.session_vars[name]
 
     def _save_variable(self, name: str, value, is_global: bool):
         if is_global:
+            if isinstance(value, pd.DataFrame):
+                table_name = "var_" + LocalFileAdapter.convert_string_to_table_name(name)
+                self.duck.write_dataframe_as_table(value, TableHandle(table_name, "meta"))
             with Session(bind=self.duck.engine) as session:
                 session.query(SavedVar).filter(SavedVar.name==name).delete()
+                session.commit()
                 session.add(SavedVar(name=name, value=value))
                 session.commit()
         else:
@@ -1629,10 +1641,13 @@ class CommandInterpreter:
             if not actuals.empty:
                 df = pd.concat([df, actuals]).drop_duplicates('table_name').reset_index(drop=True)
                 actual_names = actuals['table_name'].tolist()
-
-            df.sort_values('table_name', ascending = True, inplace=True)
-            df['materialized'] = ['✓' if t in actual_names else '☐' for t in df['table_name']]
-            return df
+            if not df.empty:
+                df.sort_values('table_name', ascending = True, inplace=True)
+                df['materialized'] = ['✓' if t in actual_names else '☐' for t in df['table_name']]
+                return df
+            else:
+                self.print("No tables")
+                return None
         else:
             self.print("{:20s} {}".format("schema", "table"))
             self.print("{:20s} {}".format("---------", "----------"))
@@ -1698,7 +1713,11 @@ class CommandInterpreter:
             self.print(f"Error, uknown adapter '{adapter_ref}'")
 
     def show_variable(self, var_ref):
-        self.print(self._get_variable(var_ref))
+        value = self._get_variable(var_ref)
+        if isinstance(value, pd.DataFrame):
+            return value
+        else:
+            self.print(value)
 
     def show_variables(self):
         """ show variables - list all defined variables"""

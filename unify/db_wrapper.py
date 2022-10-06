@@ -297,6 +297,7 @@ os.makedirs(DATA_HOME, exist_ok=True)
 
 class DuckDBWrapper(DBManager):
     DUCK_CONN: duckdb.DuckDBPyConnection = None
+    DUCK_ENGINE = None
     REF_COUNTER = 0
 
     """ A cheap hack around DuckDB only usable in a single process. We just open/close
@@ -313,14 +314,14 @@ class DuckDBWrapper(DBManager):
             use_same_connection = True
 
             if use_same_connection:
-                self.engine = create_engine("duckdb:///" + db_path)
+                DuckDBWrapper.DUCK_ENGINE = create_engine("duckdb:///" + db_path)
             else:
-                self.engine = create_engine("duckdb:///" + "/tmp/duckmeta")
-            self.engine.execute("CREATE SCHEMA IF NOT EXISTS " + UNIFY_META_SCHEMA)
-            Base.metadata.create_all(self.engine)
+                DuckDBWrapper.DUCK_ENGINE = create_engine("duckdb:///" + "/tmp/duckmeta")
+            DuckDBWrapper.DUCK_ENGINE.execute("CREATE SCHEMA IF NOT EXISTS " + UNIFY_META_SCHEMA)
+            Base.metadata.create_all(DuckDBWrapper.DUCK_ENGINE)
 
             if use_same_connection:
-                conn = self.engine.connect()
+                conn = DuckDBWrapper.DUCK_ENGINE.connect()
                 DuckDBWrapper.DUCK_CONN = conn._dbapi_connection.dbapi_connection.c
             else:
                 DuckDBWrapper.DUCK_CONN = duckdb.connect(db_path, read_only=False)
@@ -328,6 +329,8 @@ class DuckDBWrapper(DBManager):
             DuckDBWrapper.DUCK_CONN.execute("PRAGMA log_query_path='/tmp/duckdb_log'")
             # create sqla model tables in the target schema
             DuckDBWrapper.DUCK_CONN.execute(f"create schema if not exists {UNIFY_META_SCHEMA}")
+
+        self.engine = DuckDBWrapper.DUCK_ENGINE
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -355,9 +358,9 @@ class DuckDBWrapper(DBManager):
     def execute_df(self, query: str, args=[]) -> pd.DataFrame:
         return self.execute(query, args)  # type: ignore
 
-    def get_table_columns(self, table):
+    def get_table_columns(self, table: TableHandle):
         # Returns the column names for the table in their insert order
-        rows = self.execute_df("describe " + table)
+        rows = self.execute_df("describe " + str(table))
         return rows["column_name"].values.tolist()
 
     def delete_rows(self, table: TableHandle, filter_values: dict=None, where_clause: str=None):
@@ -406,11 +409,11 @@ class DuckDBWrapper(DBManager):
         DuckDBWrapper.DUCK_CONN.unregister("df1")
         self.signals["table_create"].emit(table=table)
 
-    def append_dataframe_to_table(self, value: pd.DataFrame, schema: str, table_root: str):
+    def append_dataframe_to_table(self, value: pd.DataFrame, table: TableHandle):
         # FIXME: we should probably use a context manager at the caller to ensure
         # we set and unset the search_path properly
-        DuckDBWrapper.DUCK_CONN.execute(f"set search_path='{schema}'")
-        DuckDBWrapper.DUCK_CONN.append(table_root, value)
+        DuckDBWrapper.DUCK_CONN.execute(f"set search_path='{table.schema()}'")
+        DuckDBWrapper.DUCK_CONN.append(table.table_root(), value)
 
     def table_exists(self, table):
         try:
@@ -721,7 +724,19 @@ class ClickhouseWrapper(DBManager):
         return pd.DataFrame(recs, columns=["schema_name"])
 
     def list_tables(self, schema=None) -> pd.DataFrame:
-        return super().list_tables(schema)
+        if schema == 'information_schema':
+            breakpoint()
+            # Special case because we don't reflect our custom IS tables ourselves, so fall back
+            # to the system.
+            tprefix = "information_schema" + CHTableHandle.SCHEMA_SEP
+            q = f"select * from information_schema.tables where table_schema = '{self.tenant_db}' and " + \
+                f"table_name like '{tprefix}%'"
+            df = self.execute_df(q, native=True)
+            df['table_schema'] = 'information_schema'
+            df['table_name'] = df['table_name'].apply(lambda x: x[len(tprefix):])
+            return df[['table_schema', 'table_name']]
+        else:
+            return super().list_tables(schema)
 
     def list_columns(self, table: TableHandle, match: str=None) -> pd.DataFrame:
         table = CHTableHandle(table, tenant_id=self.tenant_id)
