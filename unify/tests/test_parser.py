@@ -2,7 +2,7 @@ import os
 import lark
 import pytest
 import unify
-from unify import ParserVisitor
+from unify.interpreter import ParserVisitor
 
 @pytest.fixture
 def visitor():

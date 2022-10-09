@@ -1,4 +1,5 @@
-from unify import CommandInterpreter, dbmgr
+from unify.interpreter import CommandInterpreter
+from unify import dbmgr
 import pandas as pd
 
 def test_scheduler_commands():

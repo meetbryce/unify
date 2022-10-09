@@ -379,8 +379,10 @@ def test_schemata2():
 
 	with dbmgr() as db:
 		session = Session(bind=db.engine)
-		schema = Schemata(name="hubspot")
+		schema = Schemata(name="hubspot", type="schema", type_or_spec="", description="")
+		schema2 = Schemata(name="hubby2", type="schema", type_or_spec="")
 		session.add(schema)
+		session.add(schema2)
 		session.commit()
 
 def dump_duck():
@@ -401,9 +403,9 @@ def dump_duck():
 #profile()
 #test_ch_tunnel()
 #test_clicklhouse_sqlalchemy()
+#dump_duck()
 
-#test_schemata2()
-dump_duck()
+test_schemata2()
 
 
 

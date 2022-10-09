@@ -6,8 +6,7 @@ import pytest
 
 from gsheets.gsheets_adapter import GSheetsAdapter
 from unify.storage_manager import MemoryStorageManager
-from unify import load_connections_config
-from unify.rest_schema import OutputLogger
+from unify.adapters import Connection, OutputLogger
 
 @pytest.fixture
 def adapter():
@@ -15,7 +14,7 @@ def adapter():
         os.path.dirname(__file__), 
         "../../rest_specs/gsheets_spec.yaml"
     )))
-    conns_config = load_connections_config()
+    conns_config = Connection.load_connections_config()
     adapter = GSheetsAdapter(spec, MemoryStorageManager())
     opts = [c for c in conns_config if "gsheets" in c.keys()][0]
     adapter.resolve_auth("gsheets", opts["gsheets"]["options"])

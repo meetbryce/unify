@@ -7,7 +7,7 @@ import mimetypes
 
 import pandas as pd
 
-from unify.rest_schema import Adapter, AdapterQueryResult, OutputLogger, UnifyLogger, StorageManager, TableDef
+from .adapters import Adapter, AdapterQueryResult, OutputLogger, UnifyLogger, StorageManager, TableDef
 
 class LocalFileTableSpec(TableDef):
     # Represents a Google Sheet as a queryable Table spec to Unify.

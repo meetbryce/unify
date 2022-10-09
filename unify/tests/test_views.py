@@ -3,8 +3,9 @@ import pytest
 import requests_mock
 
 from mocksvc.mocksvc import MockSvc
-from unify import TableLoader, dbmgr
-from unify.rest_schema import Connection
+from unify.loading import TableLoader, dbmgr
+from unify.db_wrapper import dbmgr
+from unify.adapters import Connection
 
 @pytest.fixture
 def connections():

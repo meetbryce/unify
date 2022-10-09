@@ -38,27 +38,11 @@ tables:
     fields_status_.+, fields.created, fields.updated, fields_issuetype_name, fields_priority_name, \n
     fields_resolution_name"
     key_columns: id
+    strip_prefixes: fields_
   - name: myself
     resource_path: /rest/api/3/myself
-    columns:
-      - name: account_id
-        source: accountId
-      - name: display_name
-        source: displayName
-      - name: name
-      - name: time_zone
-        source: timeZone
-      - name: avatar_urls_48
-        source: avatarUrls.48x48
-      - name: active
-        type: BOOLEAN  
   - name: resolutions
     resource_path: /rest/api/3/resolution
-    columns:
-      - name: id
-      - name: name
-      - name: description
-        hidden: True
   - name: projects
     resource_path: /rest/api/3/project/search
     result_body_path: values

@@ -2,7 +2,7 @@ from sqlalchemy.orm.session import Session
 
 from unify.db_wrapper import Schemata
 
-from unify import dbmgr
+from unify.db_wrapper import dbmgr
 
 def test_schemata():
     with dbmgr() as db:

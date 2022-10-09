@@ -45,7 +45,7 @@ show_columns: "show columns" (WS FROM WS table_ref WS? column_filter?)?
 
 column_filter: "like" WS "'" PATTERN "'"
 
-select_query: "select" WS col_list WS "from" WS table_list (WS where_clause)? (WS order_clause)? (WS limit_clause)?
+select_query: "select"i WS col_list WS "from"i WS table_list (WS where_clause)? (WS order_clause)? (WS limit_clause)?
 
 select_for_writing: select_query ">>" adapter_ref file_ref writing_args?
 
@@ -151,9 +151,9 @@ schema_ref: WORD
 limit_clause: "limit" WS NUMBER
 var_ref: "$" WORD
 
-where_clause: "where" WS where_comp (["and" | "or"] WS where_comp)*
+where_clause: "where"i WS where_comp (["and"i | "or"i] WS where_comp)*
 where_comp: col_ref OPERATOR [LITERAL | col_ref]
-order_clause: "order" WS "by" WS order_col_list
+order_clause: "order"i WS "by"i WS order_col_list
 order_col_list: col_ref (WS "asc"|"desc")? WS? ("," WS? col_ref)*
 
 

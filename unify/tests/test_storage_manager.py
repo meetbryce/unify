@@ -2,7 +2,7 @@ import os
 import pytest
 import time
 
-from unify import UnifyDBStorageManager, dbmgr
+from unify.db_wrapper import UnifyDBStorageManager, dbmgr
 from unify.db_wrapper import ClickhouseWrapper, DuckDBWrapper
 
 @pytest.fixture

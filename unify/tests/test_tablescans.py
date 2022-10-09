@@ -2,10 +2,10 @@ import time
 import pytest
 import requests_mock
 
-from unify import TableLoader, dbmgr
-from unify.unify import TableMgr, BaseTableScan
+from unify.db_wrapper import dbmgr
+from unify.loading import  TableLoader, TableMgr, BaseTableScan
 from unify.db_wrapper import TableMissingException
-from unify.rest_schema import Connection
+from unify.adapters import Connection
 from mocksvc.mocksvc import MockSvc
 
 @pytest.fixture

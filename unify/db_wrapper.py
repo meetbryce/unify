@@ -25,7 +25,6 @@ from sqlalchemy import Enum
 from sqlalchemy import Column, String, DateTime, PickleType, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.session import Session
-from sqlalchemy import UniqueConstraint
 from sqlalchemy.types import TypeDecorator, VARCHAR
 from clickhouse_sqlalchemy import engines as clickhouse_engines
 from signaling import Signal
@@ -125,6 +124,10 @@ class DBManager(contextlib.AbstractContextManager):
     #
     def __init__(self) -> None:
         super().__init__()
+
+        self.DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
+        os.makedirs(self.DATA_HOME, exist_ok=True)
+
         self.signals = {
             "schema_create": Signal(args=['schema']),
             "schema_drop": Signal(args=['schema']),
@@ -292,9 +295,6 @@ class DBManager(contextlib.AbstractContextManager):
     def get_sqlalchemy_table_args(cls, primary_key=None, schema=None):
         return {"schema": schema}
 
-DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
-os.makedirs(DATA_HOME, exist_ok=True)
-
 class DuckDBWrapper(DBManager):
     DUCK_CONN: duckdb.DuckDBPyConnection = None
     DUCK_ENGINE = None
@@ -310,21 +310,14 @@ class DuckDBWrapper(DBManager):
     def __enter__(self) -> DBManager:
         DuckDBWrapper.REF_COUNTER += 1
         if DuckDBWrapper.DUCK_CONN is None:
-            db_path = os.path.join(DATA_HOME, "duckdata")
-            use_same_connection = True
+            db_path = os.path.join(self.DATA_HOME, "duckdata")
 
-            if use_same_connection:
-                DuckDBWrapper.DUCK_ENGINE = create_engine("duckdb:///" + db_path)
-            else:
-                DuckDBWrapper.DUCK_ENGINE = create_engine("duckdb:///" + "/tmp/duckmeta")
+            DuckDBWrapper.DUCK_ENGINE = create_engine("duckdb:///" + db_path)
             DuckDBWrapper.DUCK_ENGINE.execute("CREATE SCHEMA IF NOT EXISTS " + UNIFY_META_SCHEMA)
             Base.metadata.create_all(DuckDBWrapper.DUCK_ENGINE)
 
-            if use_same_connection:
-                conn = DuckDBWrapper.DUCK_ENGINE.connect()
-                DuckDBWrapper.DUCK_CONN = conn._dbapi_connection.dbapi_connection.c
-            else:
-                DuckDBWrapper.DUCK_CONN = duckdb.connect(db_path, read_only=False)
+            conn = DuckDBWrapper.DUCK_ENGINE.connect()
+            DuckDBWrapper.DUCK_CONN = conn._dbapi_connection.dbapi_connection.c
 
             DuckDBWrapper.DUCK_CONN.execute("PRAGMA log_query_path='/tmp/duckdb_log'")
             # create sqla model tables in the target schema
@@ -475,10 +468,21 @@ def patched_apply_timezones_before_write(self, items):
     ts = ts.tz_convert('UTC')
     return ts.tz_localize(None).to_numpy(self.datetime_dtype)
 
+def patched_clickhouse_write_items(self, items, buf):
+    items = [x if x else '' for x in items]
+    buf.write_strings(items or '', encoding=self.encoding)
+
 def monkeypatch_clickhouse_driver():
     NumpyDateTimeColumnBase.apply_timezones_before_write = patched_apply_timezones_before_write
+    clickhouse_driver.columns.stringcolumn.String.write_items = patched_clickhouse_write_items
 
 monkeypatch_clickhouse_driver()
+
+# patch LegacyResultCursor with this logic:
+# if hasattr(result, 'inserted_primary_key_rows'):
+#                         primary_key = result.inserted_primary_key_rows[0]
+#                     else:
+#                         primary_key = result.inserted_primary_key
 
 PROCTECTED_SCHEMAS = ['information_schema','default']
 
@@ -526,7 +530,7 @@ class ClickhouseWrapper(DBManager):
 
     @staticmethod
     def get_sqla_engine():
-        uri = 'clickhouse://' + \
+        uri = 'clickhouse+native://' + \
             os.environ['DATABASE_USER'] + ':' +\
             os.environ['DATABASE_PASSWORD'] + '@' + \
             os.environ['DATABASE_HOST'] + '/default'
@@ -541,28 +545,21 @@ class ClickhouseWrapper(DBManager):
         if 'DATABASE_PASSWORD' not in os.environ:
             raise RuntimeError("DATABASE_PASSWORD not set")
 
-        settings = {'allow_experimental_object_type': 1, 'allow_experimental_lightweight_delete': 1}
-        ClickhouseWrapper.SHARED_CLIENT = Client(
-            host=os.environ['DATABASE_HOST'], 
-            user=os.environ['DATABASE_USER'],
-            password=os.environ['DATABASE_PASSWORD'],
-            settings=settings
-        )
-        ClickhouseWrapper.SINGLE_TENANT_ID = os.environ['DATABASE_USER']
-         
-        # Make sure the unify_schema database is created
-        ClickhouseWrapper.SHARED_CLIENT.execute(f"CREATE DATABASE IF NOT EXISTS {UNIFY_META_SCHEMA}")
-        # FIXME: Remove 'meta' schema and replace with use of unify_schema
-        ClickhouseWrapper.SHARED_CLIENT.execute(f"CREATE DATABASE IF NOT EXISTS meta")
-
-        # And make sure that the current tenant's dedicated schema exists
         tenant_db = f"tenant_{ClickhouseWrapper.SINGLE_TENANT_ID}"
-        ClickhouseWrapper.SHARED_CLIENT.execute(f"CREATE DATABASE IF NOT EXISTS {tenant_db}")
-        engine = ClickhouseWrapper.get_sqla_engine()
-        # Map of SQLA models to write to the tenant schema
-        ClickhouseWrapper.SHARED_ENGINE = engine.execution_options(
+        settings = {'allow_experimental_object_type': 1, 'allow_experimental_lightweight_delete': 1}
+        # FIXME: Pass the settings in when creating the SQLAlchemy engine
+
+        ClickhouseWrapper.SINGLE_TENANT_ID = os.environ['DATABASE_USER']
+        ClickhouseWrapper.SHARED_ENGINE = ClickhouseWrapper.get_sqla_engine().execution_options(
+            # Map of SQLA model schemas to point to the tenant schema
     	    schema_translate_map={UNIFY_META_SCHEMA: tenant_db, None: tenant_db}
 	    )
+        conn = ClickhouseWrapper.SHARED_ENGINE.connect()
+        ClickhouseWrapper.SHARED_CLIENT = conn._dbapi_connection.dbapi_connection.transport
+
+        # And make sure that the current tenant's dedicated schema exists
+        ClickhouseWrapper.SHARED_CLIENT.execute(f"CREATE DATABASE IF NOT EXISTS {tenant_db}")
+
         # create sqla model tables in the target schema
         Base.metadata.create_all(ClickhouseWrapper.SHARED_ENGINE)
 
@@ -963,7 +960,7 @@ class Schemata(Base):  # type: ignore
     type = Column(String, default="schema")
     type_or_spec = Column(String)
     created = Column(DateTime, default=datetime.utcnow())
-    description = Column(String)
+    description = Column(String, nullable=True)
     
     __table_args__ = DBMGR_CLASS.get_sqlalchemy_table_args(primary_key='id', schema=UNIFY_META_SCHEMA)
 
@@ -1108,3 +1105,13 @@ class AdapterMetadata(Base):
     id = Column(String, primary_key=True)
     collection = Column(String, primary_key=True)
     values = Column(JSONEncodedDict)
+
+# 
+# ACTIVE DB CONNECTION
+#
+# Verify DB settings
+if 'DATABASE_BACKEND' not in os.environ or os.environ['DATABASE_BACKEND'] not in ['duckdb','clickhouse']:
+    raise RuntimeError("Must set DATABASE_BACKEND to 'duckdb' or 'clickhouse'")
+
+dbmgr: DBManager = ClickhouseWrapper if os.environ['DATABASE_BACKEND'] == 'clickhouse' else DuckDBWrapper
+

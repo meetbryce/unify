@@ -137,7 +137,6 @@ six==1.16.0
 sniffio==1.2.0
 soupsieve==2.3.2.post1
 sqlglot==6.0.1
-sqlparse==0.4.2
 stack-data==0.3.0
 terminado==0.15.0
 tinycss2==1.1.1

@@ -20,7 +20,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 import pandas as pd
 
 # project
-from unify.rest_schema import Adapter, AdapterQueryResult, OutputLogger, UnifyLogger, StorageManager, TableDef
+from unify.adapters import Adapter, AdapterQueryResult, OutputLogger, UnifyLogger, StorageManager, TableDef
 from unify.parsing_utils import collect_child_strings, find_node_return_child
 from unify.schemata import LoadTableRequest
 

@@ -2,8 +2,8 @@ import io
 import os
 import yaml
 
-from unify.rest_schema import Adapter, RESTAdapter, RESTTable, Connection, RESTView
-from unify import OutputLogger
+from unify.adapters import Adapter, Connection, RESTView, OutputLogger
+from unify.rest_schema import RESTAdapter, RESTTable
 
 def test_apispec_class():
     config = {
