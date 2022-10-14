@@ -310,7 +310,6 @@ class RESTTable(TableDef):
 
     def query_resource(self, tableLoader, logger: UnifyLogger) -> Generator[AdapterQueryResult, None, None]:
         for params_record in self.generate_param_values(tableLoader):
-            print("Params: ", params_record)
             if self.copy_params_to_output:
                 merge_cols = {k: params_record.get(k) for k in self.copy_params_to_output}
             else:
@@ -324,6 +323,25 @@ class RESTTable(TableDef):
             then this function just yields a single parameters dict. But if we find parameters that 
             generate multiple values, either via an embedded SQL query, or via a literal list of values,
             then we generate a parameter dict for each value.
+
+            It is possible to have multiple "multi-value" parameters. In this case they will be expanded
+            hierarchically via their order of declaration in the spec:
+            
+            params:
+              arg1: [1, 2, 3]
+              arg2: ["house", "car", "elevator"]
+
+            This will generate API calls as a union of both lists:
+
+              GET url?arg1=1&arg2=house
+              GET url?arg1=1&arg2=car
+              GET url?arg1=1&arg2=elevator
+              GET url?arg1=2&arg2=house
+              GET url?arg1=2&arg2=car
+              GET url?arg1=2&arg2=elevator
+              GET url?arg1=3&arg2=house
+              GET url?arg1=3&arg2=car
+              GET url?arg1=3&arg2=elevator
         """
         # Setup parameters. Copy the literal ones.
         params = self.params.copy()
@@ -346,6 +364,7 @@ class RESTTable(TableDef):
         # Now run through parameters and if we find one with multiple values we generate
         # param dictionaries with each value
 
+        # FIXME: This method needs to be recursive to handle multiple multi-value params
         sent_values = False
         for pname, value in params.items():
             if not isinstance(value, str) and isinstance(value, Iterable):
@@ -404,6 +423,10 @@ class RESTTable(TableDef):
                 print("POST ", url, api_params, post)
                 r = session.post(url, params=api_params, json=post)
             else:
+                if len(api_params.keys()) > 4:
+                    show_params = {k:api_params[k]for k in list(api_params.keys())[0:5]}
+                else:
+                    show_params = api_params
                 print(url, api_params)
                 r = session.get(url, params=api_params)
 

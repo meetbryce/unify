@@ -30,13 +30,14 @@ from .db_wrapper import (
     ColumnInfo,
     dbmgr,
     DBManager, 
+    DBSignals,
     TableMissingException,
     TableHandle,
     UnifyDBStorageManager,
 )
 from .adapters import Connection, OutputLogger
 from .file_adapter import LocalFileAdapter
-
+from .search import Searcher
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +158,7 @@ class BaseTableScan(Thread):
 
             if detected > (len(testvals) / 2): # more than 50% look like dates
                 try:
-                    print("Corecing date column: ", column)
+                    #print("Corecing date column: ", column)
                     df[column] = pd.to_datetime(df[column], errors="coerce")
                     df[column].replace({np.nan: None}, inplace = True)
                 except:
@@ -336,8 +337,8 @@ class BaseTableScan(Thread):
 
         # We save at the end in case we encounter an error
         self.save_scan_record({"scan_complete": scan_start})
-
         print("Finished table scan for: ", self.tableMgr.name)
+        duck.send_signal(signal=DBSignals.TABLE_LOADED, table=self.table_handle)
 
     def _flush_rows_to_db_catch_error(self, duck: DBManager, tableMgr, next_df, page, flush_count):
         try:
@@ -538,7 +539,9 @@ class TableLoader:
        3. Table exists in the local db.
     """
     def __init__(self, silence_errors=False, given_connections: list[Connection]=None):
-        with dbmgr() as duck:       
+        with dbmgr() as duck:
+            duck.register_for_signal(DBSignals.TABLE_CREATE, self.on_table_created)
+            duck.register_for_signal(DBSignals.TABLE_DROP, self.on_table_dropped)
             try:
                 if given_connections:
                     self.connections = given_connections
@@ -559,18 +562,66 @@ class TableLoader:
             schema = 'files'
             self.adapters[schema] = LocalFileAdapter(
                 {'name':schema},
-                root_path=os.path.expanduser("~/unify/files"),
+                root_path=os.path.join(os.environ['UNIFY_HOME'], "files"),
                 storage=UnifyDBStorageManager(schema, duck)
             )
             duck.create_schema('files')
+
+            self.searcher = Searcher()
+
             # Connections defines the set of schemas we will create in the database.
             # For each connection/schema then we will define the tables as defined
             # in the REST spec for the target system.
             for conn in self.connections:
                 duck.create_schema(conn.schema_name)
+                self.index_connection(conn)
                 for t in conn.adapter.list_tables():
                     tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                     self.tables[tmgr.name] = tmgr
+
+    def index_connection(self, conn: Connection):
+        # Used to bootstrap the search index on the schema/tables from an Adapter
+        # Only indexes opportunistically - if we can find the schema in the existing
+        # index then we skip.
+        if len(self.searcher.search(conn.schema_name, type="schema")) > 0:
+            return
+
+        try:
+            self.searcher.open_index()
+            self.searcher.index_object("schema", conn.schema_name, description=conn.adapter.help)
+            for t in conn.adapter.list_tables():
+                self.searcher.index_object(
+                    "table", 
+                    name=t.name, 
+                    parent=conn.schema_name, 
+                    description=t.description
+                )
+        finally:
+            self.searcher.close_index()
+
+    def on_table_created(self, dbmgr, table):
+        # Index the table columns after we load it
+        cols_df: pd.DataFrame = dbmgr.list_columns(table)
+        try:
+            self.searcher.open_index()
+            self.searcher.index_object(
+                "table", 
+                name=table.table_root(), 
+                parent=table.schema()
+            )
+            for row in cols_df.to_dict('records'):
+                self.searcher.index_object("column", row['name'], parent=table.user_name())
+        finally:
+            self.searcher.close_index()
+
+    def on_table_dropped(self, dbmgr, table):
+        print(f"Droppping table {table} from index")
+        try:
+            self.searcher.open_index()
+            self.searcher.delete_object("table", table.table_root(), table.schema())
+            self.searcher.delete_child_objects("column", parent=table.user_name())
+        finally:
+            self.searcher.close_index()
 
     def _get_table_mgr(self, table):
         if table in self.tables:
@@ -639,6 +690,7 @@ class TableLoader:
 
     def analyze_columns(self, table_ref):
         with dbmgr() as duck:
+            duck.register_for_signal(DBSignals.TABLE_LOADED, self.on_table_loaded)
             tmgr = self._get_table_mgr(table_ref)
             scanner = InitialTableLoad(tableLoader=self, tableMgr=tmgr)
             scanner._set_duck(duck)
@@ -701,25 +753,3 @@ class TableLoader:
             return True
         except TableMissingException:
             return False
-
-
-# if __name__ == '__main__':
-#     if '-silent' in sys.argv:
-#         silent = True
-#     else:
-#         silent = False
-
-#     interpreter = CommandInterpreter(silence_errors=silent)
-
-#     for i in range(len(sys.argv)):
-#         if sys.argv[i] == '-e':
-#             command = sys.argv[i+1]
-#             with pd.option_context('display.max_rows', None):
-#                 lines, df = interpreter.run_command(command)
-#                 print("\n".join(lines))
-#                 if df is not None:
-#                     print(df)
-#             sys.exit(0)
-
-#     UnifyRepl(interpreter).loop()
-

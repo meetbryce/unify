@@ -56,3 +56,9 @@ tables:
     supports_paging: True
     params:
       owner,repo,pull_number: sql@(select user_login, head_repo_name, number from pulls)
+  - name: deployments
+    query_resource: GET /repos/{owner}/{repo}/deployments
+    supports_paging: true
+    params:
+      owner,repo: sql@(select owner_login, name from repos)
+    copy_params_to_output: [repo]

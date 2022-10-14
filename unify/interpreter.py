@@ -12,10 +12,9 @@ import lark
 from lark.lark import Lark
 from lark.visitors import Visitor
 from lark.visitors import v_args
-import sqlglot
 
 from .adapters import Adapter, OutputLogger
-from .loading import TableLoader
+from .loading import TableLoader, TableExporter
 from .db_wrapper import TableHandle, TableMissingException, dbmgr, SavedVar, RunSchedule, ColumnInfo
 from .file_adapter import LocalFileAdapter
 
@@ -153,6 +152,9 @@ class ParserVisitor(Visitor):
         self._the_command = 'help'
         self._the_command_args['help_choice'] = collect_child_strings('HELP_CHOICE', tree)
 
+    def help_last(self, tree):
+        self._the_command = "help_last"
+
     def import_command(self, tree):
         self._the_command = 'import_command'
         self._the_command_args['file_path'] = collect_child_text("file_path", tree, full_code=self._full_code).strip("'")
@@ -207,6 +209,14 @@ class ParserVisitor(Visitor):
     def run_info(self, tree):
         self._the_command = 'run_info'
         self._the_command_args['schedule_id'] = find_node_return_child("schedule_ref", tree).strip("'")
+
+    def search_command(self, tree):
+        self._the_command = 'search_command'
+        query = collect_child_strings('query', tree)
+        if query:
+            query = query = query.strip("'")
+            self._the_command_args['query'] = query
+
 
     def select_query(self, tree):
         # lark: select_query: "select" WS col_list WS "from" WS table_list (WS where_clause)? (WS order_clause)? (WS limit_clause)?
@@ -264,6 +274,7 @@ class ParserVisitor(Visitor):
     def show_variables(self, tree):
         self._the_command = "show_variables"
 
+
 class CommandContext:
     def __init__(self, command: str, input_func=None, get_notebook_func=None, interactive: bool=True):
         self.has_run = False
@@ -276,9 +287,9 @@ class CommandContext:
         self.parser_visitor = ParserVisitor()
         self.result = None
         self.interp_command = None
-        self.sqlparse = None
-        self.sql_parse_error = None
         self.lark_parse_error = None
+        self.print_wide = False
+        self.recent_tables: list[TableHandle] = []
 
     def mark_ran(self):
         self.has_run = True
@@ -286,12 +297,6 @@ class CommandContext:
     def parse_command(self, parser):
         parse_tree = parser.parse(self.command)
         self.interp_command = self.parser_visitor.perform_new_visit(parse_tree, full_code=self.command)
-
-    def parse_sql(self):
-        try:
-            self.sqlparse = sqlglot.parse_one(self.command)
-        except sqlglot.errors.ParseError as e:
-            self.sql_parse_error = e
 
     def starts_with_bang(self):
         return self.command.startswith("!")
@@ -311,7 +316,8 @@ class CommandContext:
         else:
             raise RuntimeError("Input requested by session is non-interactive")
 
-
+    def set_recent_tables(self, tables: list[TableHandle]):
+        self.recent_tables.extend(tables)
 
 class CommandInterpreter:
     """
@@ -336,13 +342,17 @@ class CommandInterpreter:
         self.commands_needing_interaction = [
             'run_notebook_command'
         ]
+        self.recent_tables: list[TableHandle] = []
 
     def run_command(
         self, 
         cmd, 
         input_func=input, 
         get_notebook_func=None, 
-        interactive: bool=True) -> tuple[list, pd.DataFrame]:
+        interactive: bool=True) -> CommandContext:
+        """ Runs a command through the execution pipeline. Returns the CommandContext
+            created to manage the pipeline.
+        """
 
         context = CommandContext(cmd, input_func, get_notebook_func, interactive)
         self.context = context
@@ -350,6 +360,7 @@ class CommandInterpreter:
 
         pipeline = [
             self.check_debug_command,
+            self.check_print_wide,
             self.run_command_direct_to_db,
             self.substitute_variables,
             self.run_adapter_commands,
@@ -372,12 +383,18 @@ class CommandInterpreter:
         self.clean_df_result(context)
         self.print_df_header(context)
         self._last_result = context.result
-        return (context.logger.get_output(), context.result)
+        self.recent_tables = context.recent_tables
+        return context
 
     def check_debug_command(self, context: CommandContext):
-        if context.command.startswith("?"):
+        if context.command.startswith("?") and not context.command.startswith("??"):
             self._debug_command_pipeline = True
             context.command = context.command[1:]
+
+    def check_print_wide(self, context: CommandContext):
+        if context.command.endswith("!"):
+            context.print_wide = True
+            context.command = context.command[0:-1]
 
     def lark_parse_command(self, context: CommandContext):
         try:
@@ -412,8 +429,9 @@ class CommandInterpreter:
     def run_adapter_commands(self, context: CommandContext):
         output: OutputLogger = self.pre_handle_command(context.command)
         if output is not None:
-            context.result = output.get_df
+            context.result = output.get_df()
             context.logger = output
+            context.mark_ran()
 
     def run_interp_commands(self, context: CommandContext):
         if context.interp_command:
@@ -521,7 +539,7 @@ class CommandInterpreter:
     def _execute_duck(self, query: typing.Union[str, CommandContext]) -> pd.DataFrame:
         if isinstance(query, CommandContext):
             query = query.command
-        return self.duck.execute_df(query)
+        return self.duck.execute_df(query, context=self.context)
 
     def print(self, *args):
         self.context.logger.print(*args)
@@ -571,6 +589,13 @@ class CommandInterpreter:
         for l in msg.splitlines():
             self.print(l.strip())
 
+    def help_last(self):
+        """ ?? - shows column info for tables referenced in the most recent query """
+        for table in (self.recent_tables or []):
+            self.print(f"Table {table}:")
+            self.print(self.duck.list_columns(table).to_string(index=False))
+            self.print("\n")
+
     def import_command(self, file_path: str, options: list=[]):
         """ import URL | file path - imports a file or spreadsheet as a new table """
         # See if any of our adapters want to import the indicated file
@@ -579,19 +604,20 @@ class CommandInterpreter:
                 adapter.logger = self.context.logger
                 table_root = adapter.import_file(file_path, options=options) # might want to run this in the background
                 table = schema + "." + table_root
-                lines, result = self.run_command(f"select * from {table} limit 10")
+                context = self.run_command(f"select * from {table} limit 10")
                 self.print(f"Imported file to table: {table}")
-                return result
+                return context.result
+        self.print("File not found")
              
     def drop_table(self, table_ref):
         """ drop <table> - removes the table from the database """
-        val = self.context.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
-        if "." in table_ref:
-            schema, table_root = table_ref.split(".")
-            self.adapters[schema].drop_table(table_root)
+        if self.context.interactive:
+            val = self.context.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
+        else:
+            val = 'y'
         if val == "y":
-            # TODO: Should we allow tables with no schema in the tenant schema?
             return self.duck.drop_table(TableHandle(table_ref))
+            # note that Adpater will be signaled in the on_table_drop callback
 
     def drop_schema(self, schema_ref, cascade: bool):
         """ drop <schema> [cascade] - removes the entire schema from the database """
@@ -653,16 +679,18 @@ class CommandInterpreter:
             allow_overwrite=(write_option == "overwrite"),
             allow_append=(write_option == "append")
         )
-        exporter.run(self.logger)
+        exporter.run(self.context.logger)
         self.print(f"Exported query result to '{file_ref}'")
 
-    def on_table_drop(self, table):
+    def on_table_drop(self, dbmgr, table):
         # remove all column info
-        with Session(bind=self.duck.engine) as session:
+        with Session(bind=dbmgr.engine) as session:
             cols = session.query(ColumnInfo).filter(
                 ColumnInfo.table_name == table.table_root(),
                 ColumnInfo.table_schema == table.schema()
             ).delete()
+        if table.schema() in self.adapters:
+            self.adapters[table.schema()].drop_table(table.table_root())
 
     def peek_table(self, qualifier, peek_object, line_count=20, build_stats=True, debug=False):
         # Get column weights and widths.
@@ -821,6 +849,8 @@ class CommandInterpreter:
             self.print(val)
         else:
             val = self.duck.execute_df(var_expression)
+            if not val.empty and val.shape == (1, 1):
+                val = val.iloc[0][0]
             self._save_variable(var_ref, val, is_global)
             return val
 
@@ -1072,6 +1102,25 @@ class CommandInterpreter:
 
         self.last_chart = chart
         return chart
+
+    def search_command(self, query):
+        """ search <query> - search for schemas, tables, or columns matching your query """
+        if query[0] not in ['*','"', "'"]:
+            query = '*' + query
+        if query[-1] not in ['*','"', "'"]:
+            query += '*'
+        hits = self.loader.searcher.search(query)
+        results = pd.DataFrame(hits)
+        if results.empty:
+            return
+        for hittype in ['schema','table','column']:
+            matches: pd.DataFrame = results[results['type'] == hittype]
+            if not matches.empty:
+                cols = ['name']
+                if 'parent' in matches.columns:
+                    cols.extend(['parent'])
+                self.print(f"--------{hittype}-------")
+                self.print(matches[cols].to_string(index=False))
 
     #########
     ### FILE system commands

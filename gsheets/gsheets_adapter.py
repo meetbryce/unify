@@ -358,7 +358,7 @@ queries will pull from the sheet dynamically each time. This incurs more latency
 is a good option if the sheet data is changing frequenly. 
         """
         self.client: GSheetsClient = GSheetsClient(spec)
-        self.tables = None
+        self.tables = []
 
     def validate(self, silent=False):
         return self.client.validate(self, silent)
@@ -372,7 +372,9 @@ is a good option if the sheet data is changing frequenly.
         return self.tables
 
     def list_files(self, match_expr=None):
-        return [f"{sheet['name']}\t{sheet['webViewLink']}" for sheet in self.client.get_all_sheets_files(match_expr)]
+        return pd.DataFrame(
+            [{"name": sheet['name'], "link": sheet['webViewLink']} \
+                for sheet in self.client.get_all_sheets_files(match_expr)])
 
     def get_matching_sheets(self, search_query):
         return self.client.get_all_sheets_files(search_query)

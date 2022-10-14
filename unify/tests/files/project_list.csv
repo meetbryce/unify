@@ -1,0 +1,733 @@
+Project Key,Name,Status,Start date,Target date,Owner,Team,Contributors,Related Goals,Related Links,Tags
+TATAR-275,Create Security Policies and Procedures,On track,2022-06-10,JULY-SEPTEMBER 2022,Dan Stynchula,Security IT,"Majken Longlade
+Alessandro Gracia
+Mfon Afangideh
+JP Ciceri
+Dan Stynchula
+Jeremy Glenn Lopez",,"https://tatari.atlassian.net/browse/SEC-216
+https://tatari.atlassian.net/wiki/spaces/SEC/pages/70287687/Tatari+Information+Security+Classification+Policy","2022-q2
+security
+2022-q3"
+TATAR-144,Media Reduction Pricing (Program) [MRP],On track,2022-04-27,DECEMBER 2022,Bryce York,,"Tyrone Chouhan
+Bryce York
+Tyler Lovely
+Sean Chon
+Dhara Shah",TATAR-241 - O3 - Product - Build Self Serve,"https://tatari.atlassian.net/wiki/spaces/~61d34e70f63ac8007061014f/pages/59933263/Intuitive+Value+Integration
+https://tatari.slack.com/archives/C03D7G55R5H","2022-obj3-build-self-serve
+product-roadmap
+2022-q2
+2022-q3
+proj-media-reduction-pricing"
+TATAR-349,SRE-1339 Move Metabase Off of Heroku,On track,2022-07-11,JULY-SEPTEMBER 2022,Keegan Ferrando,SRE,"Keegan Ferrando
+Scott Idler",,,2022-q3
+TATAR-419,Account-Level Objectives (Discovery),On track,2022-08-19,SEPTEMBER 2022,Tyrone Chouhan,Product,"Jordan Gulbronson
+Tyrone Chouhan",,"https://dovetailapp.com/projects/4g1mQl2cyhVy8rublfy9MN/v/75TWFc4HHGJud9Yp5kcIM7/present
+https://tatari.atlassian.net/wiki/spaces/CX/pages/36013047/Account+Level+Objectives+Discovery+Only
+https://www.figma.com/file/xg2l2ycE3uvQZTIbVLm1AK/Account-Level-Objectives-V1.0?node-id=1111%3A132226
+https://dovetailapp.com/projects/5v6YWo1EAdaTQekRxppy7i/readme","product-roadmap
+product-design
+2022-q3
+cx"
+TATAR-357,Address linear clearance prediction volatility,Completed 🎉,2022-07-13,2022-09-09,Zishu Wang,Data Science,"Brandon Lee
+Zishu Wang
+Tim Morton","TATAR-323 - O2: DS-Automated Media Planning & Optimization Tools
+TATAR-170 - O5: Support the 95% clearance to budget goals through the launch of improved clearance models
+TATAR-331 - O4: DS-Improve Customer Perception of Measurement Accuracy",,"2022-obj3-build-self-serve
+product-roadmap
+2022-q3
+ds-weekly-update
+automated-media-planning"
+TATAR-358,Ad-ID Prechecks,Completed 🎉,2022-07-14,2022-08-26,Tyrone Chouhan,"Product Design
+MBP Client Experience","Luyao Zhang
+Tantum Nilkaew
+David Hwu
+Tyrone Chouhan",TATAR-161 - O3: Launch MLP to further reduce internal team time spent per self managed client by X% (set target goal by 6/1),,"product-roadmap
+2022-q3
+cx"
+TATAR-437,Agency & Internal UX <> Media Reduction Pricing [MRP],Pending,,2022-08-19,Jazz Howington,Product Design,"Jazz Howington
+Bryce York",,,"product-roadmap
+product-design
+2022-q3
+proj-media-reduction-pricing"
+TATAR-290,AIRD: Data Quality Alerting,On track,2022-07-13,SEPTEMBER 2022,Lin O'Driscoll,Audience Insight R&D,"Lin O'Driscoll
+Rudy Gilmore",TATAR-331 - O4: DS-Improve Customer Perception of Measurement Accuracy,https://tatari.atlassian.net/wiki/spaces/DQ/pages/43975031/Data+Alert+Use+Cases,"2022-q3
+aird"
+TATAR-131,Alerts For Data Freshness,At risk,2022-04-25,SEPTEMBER 2022,Tim Gumbley,Measurement - Core,"Tim Gumbley
+Lucas Baik",TATAR-153 - O2: Reduce data QA tickets by 50% per client,"https://tatari.atlassian.net/wiki/spaces/MDQ/pages/50561396/SLA+-+Alerts+For+Data+Freshness
+https://tatari.atlassian.net/browse/AUD-766","aud
+product-roadmap
+measurement
+2022-q2
+mea-core
+2022-q3"
+TATAR-297,Alerts for missing S3 files,Off track,2022-08-19,JULY-SEPTEMBER 2022,Tim Gumbley,Measurement - Core,"Lucas Baik
+Tim Gumbley","TATAR-166 - O4: Improve customer perception of measurement accuracy and credibility (e.g., device graph, VT measurement, device-level adjustments) as measured by survey results and reduction in tickets (baseline and target defined by 1/31)
+TATAR-153 - O2: Reduce data QA tickets by 50% per client",https://tatari.atlassian.net/browse/AUD-763,"product-roadmap
+measurement
+mea-core
+2022-q3"
+TATAR-293,Alphonso/LG Data Documentation,Completed 🎉,2022-07-13,AUGUST 2022,Lin O'Driscoll,Audience Insight R&D,Lin O'Driscoll,,,"2022-q3
+ds-product-roadmap
+aird"
+TATAR-450,Automated Traffic Review Notebook (bug fix),On track,2022-09-02,SEPTEMBER 2022,Tim Gumbley,Measurement - Core,"Lucas Baik
+Tim Gumbley",TATAR-325 - O2: DS-Reduce Manual Data Review Time by 50%,https://tatari.atlassian.net/browse/MCORE-48,"product-roadmap
+mea-core
+2022-q3
+ds-product-roadmap"
+TATAR-404,Automate web conversion metrics,Pending,,2022-08-08,Bruce Rechichar,"Solutions & Integrations ","Ray Chung
+Jordan Potthoff
+Bruce Rechichar",,https://tatari.atlassian.net/browse/SE-5,"2022-q3
+se"
+TATAR-321,Beeswax Campaign Creation Testing and Rollout,Completed 🎉,2022-07-01,2022-09-07,Ivo Kolev,Programmatic,"Ivo Kolev
+Toni Poe","TATAR-231 - O1 - Product - Grow the Business
+TATAR-146 - O1: To support programmatic growth, finish Beeswax integration (booking to measurement including retargeting)","https://tatari.atlassian.net/browse/PROG-288
+https://tatari.atlassian.net/browse/PROG-77
+https://tatari.atlassian.net/wiki/spaces/PROG/pages/34833851/Beeswax+v1.1+-+Booking+tool+ER+integration
+https://tatari.atlassian.net/wiki/spaces/PROG/pages/34931789/Beeswax+v1.0
+https://tatari.atlassian.net/browse/PROG-152","product-roadmap
+2022-q3
+prog
+2022-obj1-grow-the-business"
+TATAR-371,Clearance in Reports,On track,2022-08-12,SEPTEMBER 2022,Ty McRae,Measurement - Performance,"Farbod Safaei
+Ty McRae",TATAR-170 - O5: Support the 95% clearance to budget goals through the launch of improved clearance models,,"product-roadmap
+measurement
+2022-q3
+per"
+TATAR-193,Commission Module [MRP],On track,2022-07-14,2022-09-30,Tyrone Chouhan,MBP Client Experience,"Tyler Lovely
+Reno Brown
+Sean Chon
+Tyrone Chouhan
+David Hwu",,,"product-roadmap
+2022-q3
+cx
+proj-media-reduction-pricing"
+TATAR-431,Commission Threshold Reporting [MRP],On track,2022-08-18,2022-09-30,Tyrone Chouhan,MBP Client Experience,"Sean Chon
+Tyrone Chouhan
+Reno Brown",,,"product-roadmap
+2022-q3
+proj-media-reduction-pricing"
+TATAR-285,Comscore Local Impressions Data Integration,At risk,2022-07-06,SEPTEMBER 2022,Rudy Gilmore,Audience Insight R&D,Rudy Gilmore,TATAR-330 - O4: DS-Explore & Evaluate New Data Sources,"https://docs.google.com/spreadsheets/d/1uR-2QgA8xe3SxNDmcsN3wARJJ3zF2e5jzxSD3QKG3dQ/
+https://tatari.atlassian.net/wiki/spaces/AIRD/pages/140673248/Comscore+Local+Impressions+Integration
+https://tatari.atlassian.net/wiki/spaces/DS/pages/107085858/Comscore+local+data+notes
+https://tatari.atlassian.net/browse/RAD-16275","ds-product-candidate
+2022-q3
+aird
+ds-weekly-update"
+TATAR-291,Conversion Profiling,Paused,,OCTOBER-DECEMBER 2022,Rudy Gilmore,Audience Insight R&D,Rudy Gilmore,TATAR-330 - O4: DS-Explore & Evaluate New Data Sources,,"2022-q3
+aird
+ds-weekly-update"
+TATAR-89,Copy/Extend by Aggregate Performance,On track,2022-04-28,SEPTEMBER 2022,Elizabeth Spear,"MBP Execution
+Product Design","Noah Vito
+Alan Fay
+Jordan Gulbronson","TATAR-154 - Comfortably achieve a $36MM/year/buyer run rate (33% improvement)
+TATAR-160 - O3: Achieve consistent 25% reduction in internal team time spent per client by EOY
+TATAR-161 - O3: Launch MLP to further reduce internal team time spent per self managed client by X% (set target goal by 6/1)
+TATAR-159 - O3: Get 33 customers to adopt self serve MVP offering by EOY","https://www.figma.com/file/vip6xSULfDezZPHYl8rSEt/Copy%2FExtend-Based-on-Historical-Performance-V1.1?node-id=1501%3A1698
+https://tatari.atlassian.net/browse/MBP-4220","product-roadmap
+product-design
+2022-q2
+2022-q3"
+TATAR-286,Create GRP and TRP reports,Pending,,2022-06-22,Rudy Gilmore,,"Michael Smith
+Rudy Gilmore",,"https://docs.google.com/document/d/1BEASGVUlgD9NWGj8zGmIivcleF-ILaXqBwdyNq7BZPg/edit
+https://tatari.atlassian.net/browse/RAD-17434","2022-q3
+aird"
+TATAR-273,Demo Account Creation Investigation,Completed 🎉,2022-06-09,SEPTEMBER 2022,Tyrone Chouhan,MBP Client Experience,"Tyrone Chouhan
+Bob Lockwood
+David Hwu
+Reno Brown",TATAR-233 - O2 - Engineering - Drive Scalability,,"product-roadmap
+2022-q3
+cx"
+TATAR-319,DISCOVERY - Campaign data architecture,On track,2022-09-02,OCTOBER-DECEMBER 2022,Russ O'Reagan,Product,Russ O'Reagan,,,"aud
+product-roadmap
+measurement
+2022-q3"
+TATAR-434,DISCOVERY: Campaign Manager <> Media Reduction Pricing [MRP],Pending,,JULY-SEPTEMBER 2022,Elizabeth Spear,MBP Planning,"Elizabeth Spear
+Bryce York
+Peter Morawiec
+Reno Brown",,,"product-roadmap
+2022-q3
+proj-media-reduction-pricing"
+TATAR-320,DISCOVERY - Chart Builder Capabilities,On track,2022-08-12,SEPTEMBER 2022,Russ O'Reagan,Product,Russ O'Reagan,,,"aud
+product-roadmap
+measurement
+2022-q3"
+TATAR-372,(DISCOVERY) Industry Metrics Comparison Chart,On track,2022-08-12,SEPTEMBER 2022,Ty McRae,Measurement - Performance,"Ty McRae
+Farbod Safaei
+Jinjin Vazquez",,,"product-design
+product-roadmap
+measurement
+2022-q3
+per"
+TATAR-435,DISCOVERY: Media Intelligence <> Media Reduction Pricing [MRP],Pending,,JULY-SEPTEMBER 2022,Ginevra Fisogni,MBP Intelligence,"Charlie Qin
+Tim Morton
+Bryce York
+Ginevra Fisogni",,,"product-roadmap
+2022-q3
+proj-media-reduction-pricing"
+TATAR-42,Discovery: Programmatic Reporting,Off track,2022-07-15,JULY-SEPTEMBER 2022,Toni Poe,Programmatic,"Jordan Gulbronson
+Toni Poe","TATAR-146 - O1: To support programmatic growth, finish Beeswax integration (booking to measurement including retargeting)
+TATAR-231 - O1 - Product - Grow the Business","https://www.figma.com/file/qLgXt7jX2DCtIfHfwN51hL/Campaign-Hierarchy-V-1.0?node-id=1%3A4260
+https://dovetailapp.com/projects/4g1mQl2cyhVy8rublfy9MN/v/5Q3cKTuxQ12RWnkO5HLCvf
+https://tatari.atlassian.net/browse/PROG-155
+https://www.figma.com/file/1ermuTzZepx2jWqfPqOZle/Campaign-Competitive-Analysis?node-id=0%3A1
+https://tatari.atlassian.net/wiki/spaces/PROG/pages/39715095/Discovery%3A+Programmatic+Campaign-to-Line+Item+Support","product-roadmap
+product-design
+2022-q3
+prog
+2022-obj1-grow-the-business"
+TATAR-239,(Discovery) Surfacing Inventory Type in Reports,On track,2022-08-01,SEPTEMBER 2022,Ty McRae,Measurement - Performance,"Farbod Safaei
+Jim Lyndon
+Jinjin Vazquez
+Alex Markaryan
+Ty McRae",,,"product-roadmap
+measurement
+2022-q3
+per"
+TATAR-202,DMA Conversion Data in Streaming Reports,On track,2022-06-22,OCTOBER 2022,Ty McRae,Product Design,"Ty McRae
+Farbod Safaei
+Luyao Zhang","TATAR-147 - O1: To support growth in streaming media spend, identify parity gaps and launch 3 industry standard features to achieve $235M goal.",https://www.figma.com/file/MhGo0oGejCISoe7k6WPExg/Geographic-Conversion-Data?node-id=452%3A7037,"product-roadmap
+measurement
+2022-q3
+per"
+TATAR-337,establish 50% parity between data lake and redshift,On track,2022-09-16,NOVEMBER 2022,Owen Sanders,Data Platform,"Harshal Dalvi
+Truxten Cook
+Patrick Strittmater
+Russell Simco
+Owen Sanders
+Stan Kudrow",,,"2022-q3
+2022-q4
+q3
+dat"
+TATAR-338,"Evangelize Databricks and onboard five use cases of spark ",Paused,2022-08-01,NOVEMBER 2022,Owen Sanders,Data Platform,"Owen Sanders
+Patrick Shelby
+Ben Horn
+Harshal Dalvi
+Henry Zhang",,,"2022-q3
+2022-q4
+q3
+dat"
+TATAR-402,Extreme Reach: Real time data stream,Paused,,2022-08-08,Bruce Rechichar,"Solutions & Integrations ","Jordan Potthoff
+Bruce Rechichar
+Leah Liu",,https://tatari.atlassian.net/browse/SE-58,"2022-q3
+se"
+TATAR-436,Finance Ops <> Media Reduction Pricing [MRP],Pending,,2022-08-19,Tyrone Chouhan,Mach 8,Tyrone Chouhan,,,"product-roadmap
+2022-q3
+proj-media-reduction-pricing"
+TATAR-423,Frequency Cap Tracking,On track,2022-08-17,JULY-SEPTEMBER 2022,Rudy Gilmore,Data Science,Rudy Gilmore,,https://tatari.atlassian.net/browse/RAD-17025,"2022-q3
+aird
+ds-weekly-update"
+TATAR-43,Frequency Histogram Initial Release,Completed 🎉,2022-04-14,AUGUST 2022,Russ O'Reagan,Measurement - Audience,Russ O'Reagan,"TATAR-148 - O1: Complete core R&F reporting by Q2 in order to support growth
+TATAR-147 - O1: To support growth in streaming media spend, identify parity gaps and launch 3 industry standard features to achieve $235M goal.",,"aud
+product-roadmap
+measurement
+2022-q2
+2022-q3"
+TATAR-282,Historical RF Accuracy Tracking,On track,2022-07-15,JULY-SEPTEMBER 2022,Rudy Gilmore,Audience Insight R&D,Rudy Gilmore,TATAR-331 - O4: DS-Improve Customer Perception of Measurement Accuracy,https://tatari.atlassian.net/browse/RAD-16850,"ds-product-candidate
+2022-q3
+aird"
+TATAR-48,Impressions chart breakdown,Completed 🎉,2022-04-14,AUGUST 2022,Russ O'Reagan,Measurement - Audience,"Haris Qureshi
+Nick Gentile
+Mala Munisamy
+Russ O'Reagan","TATAR-148 - O1: Complete core R&F reporting by Q2 in order to support growth
+TATAR-151 - O2: Reduce CSM hours per client by X% by launching flexible reporting",,"aud
+product-roadmap
+measurement
+2022-q2
+2022-q3"
+TATAR-136,Impressions Reach Reconciliation,Pending,,2022-04-25,Rudy Gilmore,"Data Science
+Audience Insight R&D",Rudy Gilmore,,"https://tatari.atlassian.net/wiki/spaces/AIRD/pages/41287788/Impressions+Reach+Reconciliation
+https://tatari.atlassian.net/browse/RAD-13221
+https://docs.google.com/spreadsheets/d/1xxmrEjO-AeXL2RPKp87KdRIKhk9lUjuf6iPoC8rBTek/edit#gid=681299435","2022-q2
+ds-product-candidate
+2022-q3
+aird
+ds-weekly-update"
+TATAR-278,Improve National Local Impressions Estimates,Completed 🎉,2022-06-22,2022-08-10,Kaitlin Rasborn,Audience Insight R&D,"Brent White
+Kaitlin Rasborn
+Sabrina An","TATAR-329 - O4: DS-Identify & Integrate Alternate Data Sources
+TATAR-331 - O4: DS-Improve Customer Perception of Measurement Accuracy",,"2022-q3
+aird"
+TATAR-276,Improve Security Posture of AWS,On track,2022-07-12,JULY-SEPTEMBER 2022,JP Ciceri,Security IT,"Dan Stynchula
+Mfon Afangideh
+JP Ciceri",,https://tatari.atlassian.net/browse/SEC-211,"security
+2022-q3
+aws"
+TATAR-277,Improve Security Posture of Gsuite,On track,2022-07-12,JULY-SEPTEMBER 2022,JP Ciceri,Security IT,"Dan Stynchula
+Mfon Afangideh
+JP Ciceri",,https://tatari.atlassian.net/browse/SEC-212,2022-q3
+TATAR-335,Individual Demographics,On track,2022-07-29,JULY-SEPTEMBER 2022,Rudy Gilmore,Data Science,Rudy Gilmore,,https://tatari.atlassian.net/browse/RAD-16268,"ds-product-candidate
+2022-q3
+aird
+ds-weekly-update"
+TATAR-281,Ingest Local ComScore Data,On track,2022-08-26,2022-09-23,Tim Gumbley,Measurement - Core,"Tim Gumbley
+Jian Lu",,https://tatari.atlassian.net/browse/MCORE-42,"product-roadmap
+measurement
+mea-core
+2022-q3
+ds-product-roadmap"
+TATAR-38,Kantar/Avocado S3 Transition,At risk,2022-08-08,JULY-SEPTEMBER 2022,Bruce Rechichar,"Solutions & Integrations ","Bruce Rechichar
+Will Vea
+Jordan Potthoff",TATAR-230 - O1 - Engineering - Grow the Business,"https://tatari.atlassian.net/browse/SE-18
+https://tatari.atlassian.net/browse/SE-18","2022-q3
+se
+2022-obj1-grow-the-business"
+TATAR-313,Legacy pipeline bug fix (linear lift),Completed 🎉,2022-08-26,2022-09-15,Tim Gumbley,Measurement - Core,"Katie Sing
+Tim Gumbley","TATAR-166 - O4: Improve customer perception of measurement accuracy and credibility (e.g., device graph, VT measurement, device-level adjustments) as measured by survey results and reduction in tickets (baseline and target defined by 1/31)","https://tatari.atlassian.net/browse/MCORE-22
+https://tatari.atlassian.net/browse/RAD-15341
+https://tatari.atlassian.net/browse/MCORE-8","product-roadmap
+measurement
+mea-core
+2022-q3
+ds-product-roadmap"
+TATAR-334,Linear Automation (XML MVP),On track,2022-08-30,SEPTEMBER 2022,Elizabeth Spear,MBP Execution,"Tony O'Dell
+Elizabeth Spear",,,"product-roadmap
+2022-q3"
+TATAR-370,Linear Clearance Prediction - Metrics & Monitoring,Pending,,2022-07-25,Tim Morton,,"Lucas Miller
+Tim Morton
+Zishu Wang
+Brandon Lee
+Charlie Qin","TATAR-170 - O5: Support the 95% clearance to budget goals through the launch of improved clearance models
+TATAR-331 - O4: DS-Improve Customer Perception of Measurement Accuracy
+TATAR-216 - O3 - DS - Build Self-Serve",,"2022-q3
+proj-linear-clearance"
+TATAR-368,Linear Clearance Prediction on databricks,On track,2022-07-29,JULY-SEPTEMBER 2022,Tim Morton,MBP Intelligence,"Tim Morton
+Brandon Lee
+Mike Bartoli
+Brad Yinger",TATAR-170 - O5: Support the 95% clearance to budget goals through the launch of improved clearance models,https://tatari.atlassian.net/browse/RAD-17162,"2022-q3
+proj-linear-clearance
+automated-media-planning"
+TATAR-224,Linear Creative Scheduling,Off track,2022-06-24,SEPTEMBER 2022,Celine Nguyen,MBP Execution,"Jinjin Vazquez
+Celine Nguyen
+Yumeng Liao
+Jason Lin
+Elizabeth Spear",TATAR-160 - O3: Achieve consistent 25% reduction in internal team time spent per client by EOY,,"product-roadmap
+2022-q3"
+TATAR-356,Linear Lift Spark Migration,Off track,2022-07-13,2022-10-14,Jim Lyndon,Measurement - Performance,"Jim Lyndon
+Tyler Lovely
+Nick Palombo
+Ty McRae",,,"measurement
+2022-q3
+per"
+TATAR-135,Long Term Branding Effect Publication,On track,2022-07-27,JULY-SEPTEMBER 2022,Rudy Gilmore,"Data Science
+Audience Insight R&D",Rudy Gilmore,TATAR-331 - O4: DS-Improve Customer Perception of Measurement Accuracy,"https://tatari.atlassian.net/wiki/spaces/AIRD/pages/113934350/Long+Term+Branding+Effects+Research
+https://tatari.atlassian.net/browse/RAD-8180","2022-q2
+2022-q3
+aird
+ds-weekly-update"
+TATAR-374,Media Planning Engine Beta,On track,2022-08-09,OCTOBER-DECEMBER 2022,Charlie Qin,MBP Intelligence,"Mike Bartoli
+Brad Yinger
+Charlie Qin
+Brandon Lee
+Tim Morton","TATAR-215 - O3 - Engineering - Build Self-Serve
+TATAR-216 - O3 - DS - Build Self-Serve
+TATAR-162 - O3: Launch intelligent media buying features with 80% adoption by self-managed customers. 
+TATAR-241 - O3 - Product - Build Self Serve",,"product-roadmap
+2022-q3
+proj-linear-clearance"
+TATAR-417,ML Pipeline with Github Actions POC,On track,2022-08-24,2022-09-30,Charlie Qin,MBP Intelligence,"Tim Morton
+Mike Bartoli
+Brandon Lee
+Charlie Qin
+Brad Yinger",TATAR-215 - O3 - Engineering - Build Self-Serve,https://tatari.atlassian.net/browse/MINT-112,"2022-q3
+proj-linear-clearance"
+TATAR-430,National-Local Improve Impressions Estimates: Part II,Pending,,2022-08-17,Sabrina An,,"Rudy Gilmore
+Brent White
+Sabrina An",,"https://tatari.atlassian.net/browse/RAD-15730
+https://team.atlassian.com/project/TATAR-278","ds-product-candidate
+2022-q3
+aird"
+TATAR-213,Okta Deployment,Completed 🎉,2022-05-26,APRIL-JUNE 2022,Jeremy Glenn Lopez,Security IT,"Jeremy Glenn Lopez
+Dan Stynchula",,"https://tatari.atlassian.net/browse/SEC-238
+https://tatari.atlassian.net/browse/SEC-9","2022-q2
+security
+2022-q3"
+TATAR-283,Optimal Frequency in Dashboard,On track,2022-08-17,JULY-SEPTEMBER 2022,Rudy Gilmore,Audience Insight R&D,"Rudy Gilmore
+Brent White",TATAR-329 - O4: DS-Identify & Integrate Alternate Data Sources,"https://tatari.atlassian.net/browse/RAD-16853
+https://tatari.atlassian.net/wiki/spaces/AIRD/pages/41353502/Optimal+Frequency+Range","ds-dlc-transition
+2022-q3
+ds-product-roadmap
+aird"
+TATAR-44,Optimal Frequency Range,At risk,2022-05-19,OCTOBER 2022,Russ O'Reagan,Measurement - Audience,"Russ O'Reagan
+Mala Munisamy","TATAR-161 - O3: Launch MLP to further reduce internal team time spent per self managed client by X% (set target goal by 6/1)
+TATAR-148 - O1: Complete core R&F reporting by Q2 in order to support growth
+TATAR-147 - O1: To support growth in streaming media spend, identify parity gaps and launch 3 industry standard features to achieve $235M goal.",,"aud
+product-roadmap
+measurement
+2022-q2
+2022-q3"
+TATAR-422,Pendo Implementation,Completed 🎉,2022-08-11,AUGUST 2022,Tyrone Chouhan,MBP Client Experience,"Tyrone Chouhan
+David Hwu
+Leo Alekseev","TATAR-162 - O3: Launch intelligent media buying features with 80% adoption by self-managed customers. 
+TATAR-242 - O2 - Product - Drive Scalability",,"product-roadmap
+2022-q3
+cx"
+TATAR-317,Postlog Parsers + Automated Bulking for Non-KANTAR Networks,On track,2022-07-07,2022-09-30,Tyrone Chouhan,Mach 8,"Juan Rueda
+Tyrone Chouhan
+Nicolas Zapata
+Andres Gomez Agudelo",TATAR-160 - O3: Achieve consistent 25% reduction in internal team time spent per client by EOY,https://tatari.atlassian.net/jira/software/projects/FENG/boards/96/backlog?selectedIssue=FENG-91,"product-roadmap
+mach8
+2022-q3"
+TATAR-129,Predicted Impressions,Paused,2022-04-29,JULY-SEPTEMBER 2022,Rudy Gilmore,"Audience Insight R&D
+Data Science","Alexandre Dieudonne
+Rudy Gilmore",,https://tatari.atlassian.net/browse/RAD-11003,"aud
+2022-q2
+2022-q3
+aird
+ds-weekly-update"
+TATAR-284,Predicted RF Accuracy Checks,On track,2022-07-13,JULY-SEPTEMBER 2022,Rudy Gilmore,Audience Insight R&D,Rudy Gilmore,TATAR-331 - O4: DS-Improve Customer Perception of Measurement Accuracy,https://tatari.atlassian.net/browse/RAD-16047,"ds-product-candidate
+2022-q3
+aird"
+TATAR-292,Predicted RF Sampling Approach,Pending,,2022-06-22,Rudy Gilmore,,Rudy Gilmore,,https://tatari.atlassian.net/browse/RAD-16098,"2022-q3
+aird"
+TATAR-322,Private Exchange Milestone 1,Completed 🎉,2022-07-12,2022-09-01,Toni Poe,Programmatic,Toni Poe,"TATAR-165 - O4: Develop strategic plan for programmatic/streaming/non-linear that differentiates Tatari by 7/1 (originally 5/1)
+TATAR-248 - O4 - Product - Lead With Innovation","https://tatari.atlassian.net/wiki/spaces/PROG/pages/92242112/Direct+Publisher+Support+for+TVP
+https://tatari.atlassian.net/browse/PROG-289","product-roadmap
+2022-q3
+prog
+2022-obj5-control-supply"
+TATAR-439,Private Exchange Milestone 2,At risk,2022-09-02,2022-09-30,Toni Poe,Programmatic,Toni Poe,"TATAR-165 - O4: Develop strategic plan for programmatic/streaming/non-linear that differentiates Tatari by 7/1 (originally 5/1)
+TATAR-248 - O4 - Product - Lead With Innovation",https://tatari.atlassian.net/browse/PROG-328,"product-roadmap
+2022-q3"
+TATAR-339,Produce PoC of Longterm Data sync solution between Data Lake and Dashboard,On track,2022-09-16,OCTOBER 2022,Owen Sanders,Data Platform,"Owen Sanders
+Henry Zhang
+Ben Horn
+Dan Mahoney",,,"2022-q3
+2022-q4
+dat"
+TATAR-336,Programmatic BI Schema Consolidation,Off track,2022-08-19,2022-09-30,Toni Poe,Programmatic,Toni Poe,"TATAR-231 - O1 - Product - Grow the Business
+TATAR-146 - O1: To support programmatic growth, finish Beeswax integration (booking to measurement including retargeting)","https://tatari.atlassian.net/wiki/spaces/PROG/pages/91783457
+https://tatari.atlassian.net/browse/PROG-290","product-roadmap
+2022-q3
+prog
+2022-obj1-grow-the-business"
+TATAR-451,Programmatic in Campaign Manager,Pending,,2022-09-02,Ivo Kolev,Programmatic,"Ivo Kolev
+Toni Poe","TATAR-146 - O1: To support programmatic growth, finish Beeswax integration (booking to measurement including retargeting)","https://tatari.atlassian.net/browse/PROG-338
+https://team.atlassian.com/project/TATAR-451","product-roadmap
+2022-q3"
+TATAR-340,Programmatic Spend Improvements and Tableau Spend Alignment,Off track,2022-07-12,2022-09-30,Ivo Kolev,Programmatic,"Ivo Kolev
+Toni Poe","TATAR-231 - O1 - Product - Grow the Business
+TATAR-146 - O1: To support programmatic growth, finish Beeswax integration (booking to measurement including retargeting)",,"product-roadmap
+2022-q3
+prog
+2022-obj1-grow-the-business"
+TATAR-96,[Q2 Carryover] 50% of S3 Data Sets usable from Data Lake,Completed 🎉,2022-04-12,2022-09-30,Patrick Strittmater,Data Platform,"Patrick Strittmater
+Russell Simco
+Owen Sanders
+Harshal Dalvi",,,"2022-q2
+2022-q3
+dat"
+TATAR-97,[Q2 Carryover] Make Bronze and Silver data sets available in the Data Catalog,Completed 🎉,2022-04-12,2022-08-30,Russell Simco,Data Platform,"Harshal Dalvi
+Patrick Strittmater
+Owen Sanders
+Russell Simco",,,"2022-q2
+2022-q3
+dat"
+TATAR-98,[Q2 Carryover] Set up infrastructure for Philo replication into Data Lake.,On track,2022-04-12,2022-09-30,Leslie Rodriguez Garcia,Data Platform,"Leslie Rodriguez Garcia
+Harshal Dalvi
+Owen Sanders",,https://tatari.atlassian.net/browse/DAT-832,"2022-q2
+2022-q3
+dat"
+TATAR-138,Reach by Geo (DS support),On track,2022-07-13,JULY-SEPTEMBER 2022,Rudy Gilmore,Data Science,Rudy Gilmore,"TATAR-216 - O3 - DS - Build Self-Serve
+TATAR-329 - O4: DS-Identify & Integrate Alternate Data Sources",https://tatari.atlassian.net/browse/RAD-16302,"2022-q2
+2022-q3
+ds-product-roadmap
+aird
+ds-weekly-update"
+TATAR-433,Reporting & Dashboards <> Media Reduction Pricing [MRP],On track,2022-08-19,DECEMBER 2022,Russ O'Reagan,Measurement - Audience,"Tyrone Chouhan
+Mala Munisamy
+Bryce York
+Tyler Lovely
+Russ O'Reagan
+Dhara Shah",,,"product-roadmap
+2022-q3
+proj-media-reduction-pricing"
+TATAR-418,RF calculation migration to Spark and Databricks,Pending,,OCTOBER-DECEMBER 2022,Russ O'Reagan,,Russ O'Reagan,,,"aud
+product-roadmap
+measurement
+2022-q3"
+TATAR-37,RF Report by Geo,On track,2022-03-25,SEPTEMBER 2022,Russ O'Reagan,Product Design,"Jian Lu
+Luyao Zhang
+Russ O'Reagan
+Janina Mejia","TATAR-151 - O2: Reduce CSM hours per client by X% by launching flexible reporting
+TATAR-148 - O1: Complete core R&F reporting by Q2 in order to support growth
+TATAR-147 - O1: To support growth in streaming media spend, identify parity gaps and launch 3 industry standard features to achieve $235M goal.","https://www.figma.com/file/ZOQhr1seKr9cDPdpsicqQK/Reach-%26-Frequency-by-Geo?node-id=2%3A53
+https://tatari.atlassian.net/browse/MBP-4122","aud
+product-roadmap
+measurement
+2022-q2
+2022-q3"
+TATAR-309,S3 Fees,Completed 🎉,2022-06-30,2022-07-15,Tim Gumbley,"Measurement - Audience
+Measurement - Performance","Katie Sing
+Kyle Zou
+Tim Gumbley
+Daniel Leon",,https://tatari.atlassian.net/browse/PER-1524,"measurement
+2022-q3"
+TATAR-432,S3 <> Media Reduction Pricing [MRP],Pending,2022-08-26,OCTOBER-DECEMBER 2022,Tim Gumbley,,"Bryce York
+Tim Gumbley",,,"product-roadmap
+2022-q3
+proj-media-reduction-pricing"
+TATAR-133,S3 Report Monitor Improvements,Completed 🎉,2022-04-29,2022-08-16,Tim Gumbley,Measurement - Core,"Tim Gumbley
+Tim Kohrumel","TATAR-153 - O2: Reduce data QA tickets by 50% per client
+TATAR-166 - O4: Improve customer perception of measurement accuracy and credibility (e.g., device graph, VT measurement, device-level adjustments) as measured by survey results and reduction in tickets (baseline and target defined by 1/31)","https://tatari.atlassian.net/wiki/spaces/MDQ/pages/38174989/S3+Report+Monitor+Improvements+-+One+Pager
+https://tatari.atlassian.net/browse/AUD-568","aud
+product-roadmap
+measurement
+2022-q2
+mea-core
+2022-q3"
+TATAR-287,Samba Data Integration,Pending,,AUGUST 2022,Lin O'Driscoll,,"Rudy Gilmore
+Lin O'Driscoll","TATAR-330 - O4: DS-Explore & Evaluate New Data Sources
+TATAR-328 - O4: DS-Mitigate Against Material Data Loss",,"ds-product-candidate
+2022-q3
+aird"
+TATAR-366,Shopify Security & Delisting Resolution,Completed 🎉,2022-07-21,2022-08-12,Tyrone Chouhan,MBP Client Experience,"Kienan Knight-Boehm
+David Hwu
+Tyrone Chouhan",,,"product-roadmap
+2022-q3
+cx"
+TATAR-183,SLA Dashboard,At risk,2022-06-03,SEPTEMBER 2022,Tim Gumbley,Measurement - Core,"Tim Gumbley
+Lucas Baik","TATAR-166 - O4: Improve customer perception of measurement accuracy and credibility (e.g., device graph, VT measurement, device-level adjustments) as measured by survey results and reduction in tickets (baseline and target defined by 1/31)
+TATAR-153 - O2: Reduce data QA tickets by 50% per client",https://tatari.atlassian.net/browse/AUD-766,"product-roadmap
+measurement
+mea-core
+2022-q3"
+TATAR-359,S&P Approval (Campaign Manager - Phase 2),Completed 🎉,2022-07-14,AUGUST 2022,Tyrone Chouhan,MBP Client Experience,"David Hwu
+Tyrone Chouhan
+Jordan Gulbronson
+Leo Alekseev",TATAR-160 - O3: Achieve consistent 25% reduction in internal team time spent per client by EOY,,"product-roadmap
+2022-q3
+cx"
+TATAR-316,Speed up Linear Lift via DataBricks (Ingestion),At risk,2022-07-11,SEPTEMBER 2022,Tim Gumbley,Measurement - Core,"Natanael Wijaya
+Ani Govindan
+Clara Martinez Rubio
+Tim Gumbley",TATAR-152 - O2: Scale measurement platform to consistently meet all data SLAs by delivering MVP of next-gen data architecture (v3),https://tatari.atlassian.net/browse/MCORE-36,"product-roadmap
+measurement
+mea-core
+2022-q3"
+TATAR-315,Speed up RF via DataBricks (Ingestion),On track,2022-07-11,2022-09-30,Tim Gumbley,Measurement - Core,"Jian Lu
+Ani Govindan
+Tim Gumbley",TATAR-152 - O2: Scale measurement platform to consistently meet all data SLAs by delivering MVP of next-gen data architecture (v3),https://tatari.atlassian.net/browse/MCORE-13,"product-roadmap
+measurement
+mea-core
+2022-q3"
+TATAR-347,SRE-1058 Wire Okta SSO Apps,On track,2022-07-11,JULY-SEPTEMBER 2022,Stephen Price,SRE,"Scott Idler
+Stephen Price",,,2022-q3
+TATAR-83,SRE-1065 Migrate All k8s Apps to Istio + ArgoCD,Completed 🎉,2022-04-15,JULY 2022,Dan Mahoney,SRE,"Dan Mahoney
+Patrick Shelby
+Scott Idler",,,"2022-q2
+2022-q3
+sre"
+TATAR-342,SRE-1253 Develop Employee|Team API,Completed 🎉,2022-07-11,AUGUST 2022,Sakshi Garg,SRE,"Patrick Shelby
+Scott Idler
+Sakshi Garg",,,2022-q3
+TATAR-341,SRE-1320 ML-based MPE Microservice,On track,2022-07-01,JULY-SEPTEMBER 2022,Dan Mahoney,SRE,"Dan Mahoney
+Scott Idler",,,"2022-q3
+sre"
+TATAR-345,SRE-1322 Task Queues Infra,On track,2022-07-11,JULY-SEPTEMBER 2022,Calvin Morrow,SRE,"Scott Idler
+Calvin Morrow",,,2022-q3
+TATAR-343,SRE-1323 GH Deployments API Automation,On track,2022-07-11,JULY-SEPTEMBER 2022,Willis Schubert,SRE,"Patrick Shelby
+Scott Idler
+Willis Schubert",,,2022-q3
+TATAR-350,SRE-1343 Migrate CD Steps GA->ArgoCD,On track,2022-07-11,JULY-SEPTEMBER 2022,Margot Maxwell,SRE,"Margot Maxwell
+Scott Idler",,,2022-q3
+TATAR-414,SRE-1467 Datadog Cost Reduction,On track,2022-08-09,SEPTEMBER 2022,Patrick Shelby,SRE,Patrick Shelby,,,2022-q3
+TATAR-332,"Streaming Inventory Selector ",On track,2022-07-22,JULY-SEPTEMBER 2022,Elizabeth Spear,Programmatic,"Elizabeth Spear
+Jordan Gulbronson","TATAR-154 - Comfortably achieve a $36MM/year/buyer run rate (33% improvement)
+TATAR-159 - O3: Get 33 customers to adopt self serve MVP offering by EOY
+TATAR-147 - O1: To support growth in streaming media spend, identify parity gaps and launch 3 industry standard features to achieve $235M goal.",,"product-roadmap
+2022-q3"
+TATAR-288,Streaming Overlap in Buying Tool,Pending,,2022-06-22,Rudy Gilmore,Audience Insight R&D,"Rudy Gilmore
+Victor Ortiz",,,"2022-q3
+aird"
+TATAR-90,Streaming Predicted CPX [Eng],On track,2022-04-28,SEPTEMBER 2022,Elizabeth Spear,"Product Design
+MBP Intelligence","Brad Yinger
+Mike Bartoli
+Zishu Wang
+Charlie Qin
+Jordan Gulbronson","TATAR-159 - O3: Get 33 customers to adopt self serve MVP offering by EOY
+TATAR-154 - Comfortably achieve a $36MM/year/buyer run rate (33% improvement)
+TATAR-162 - O3: Launch intelligent media buying features with 80% adoption by self-managed customers. 
+TATAR-147 - O1: To support growth in streaming media spend, identify parity gaps and launch 3 industry standard features to achieve $235M goal.
+TATAR-161 - O3: Launch MLP to further reduce internal team time spent per self managed client by X% (set target goal by 6/1)","https://tatari.atlassian.net/browse/MINT-1
+https://www.figma.com/file/17B35QFOZuQtSx6g7qpqrz/Streaming-Predicted-CPX?node-id=525%3A233838
+https://tatari.slack.com/archives/C02U2FQ75K7
+https://tatari.atlassian.net/wiki/spaces/MB/pages/31588877/Streaming+Predicted+CPX","product-design
+product-roadmap
+2022-q2
+2022-q3
+ds-weekly-update
+automated-media-planning"
+TATAR-413,Streaming Rates Bulk Upload,On track,2022-08-16,JULY-SEPTEMBER 2022,Elizabeth Spear,MBP Execution,"Elizabeth Spear
+Alex Kahan","TATAR-154 - Comfortably achieve a $36MM/year/buyer run rate (33% improvement)
+TATAR-159 - O3: Get 33 customers to adopt self serve MVP offering by EOY",,"product-roadmap
+2022-q3"
+TATAR-361,Streamline Onboarding/Offboarding and Access,On track,2022-07-15,JULY-SEPTEMBER 2022,Majken Longlade,Security IT,"Dan Stynchula
+Majken Longlade
+Mfon Afangideh
+Alessandro Gracia",,,"it-security
+security
+2022-q3
+onboarding-offboarding"
+TATAR-441,Supply-side Data Support,Completed 🎉,2022-08-22,2022-09-01,Toni Poe,Programmatic,Toni Poe,"TATAR-251 - O5 - Product - Control Supply
+TATAR-169 - O5: Integration with publishers and/or SSPs for additional data that drives X% increase in performance",https://tatari.atlassian.net/browse/PROG-327,"product-roadmap
+2022-q3"
+TATAR-333,Surfacing Inventory Data,Pending,,2022-07-08,Elizabeth Spear,Product,Elizabeth Spear,,,"product-roadmap
+2022-q3"
+TATAR-294,Syndication and Broadcast Spot Processing,On track,2022-06-23,2022-09-30,Tyrone Chouhan,Mach 8,Tyrone Chouhan,TATAR-160 - O3: Achieve consistent 25% reduction in internal team time spent per client by EOY,,"product-roadmap
+mach8
+2022-q3"
+TATAR-289,Tatari Impressions in Predicted RF,Pending,,2022-06-22,Rudy Gilmore,Audience Insight R&D,Rudy Gilmore,,https://tatari.atlassian.net/browse/RAD-16075,"2022-q3
+aird"
+TATAR-280,Tatari Tag Manager Crawler,Completed 🎉,2022-06-16,2022-08-15,Reno Brown,MBP Client Experience,"Kelly Chung
+Reno Brown
+Tyrone Chouhan
+Thuy-Van Watts","TATAR-233 - O2 - Engineering - Drive Scalability
+TATAR-215 - O3 - Engineering - Build Self-Serve",https://tatari.atlassian.net/browse/CX-1712,"product-roadmap
+2022-q3
+cx"
+TATAR-184,Traffic Prediction Anomaly Detector (Short term plan eng support),On track,2022-04-29,NOVEMBER 2022,Harshal Dalvi,Data Platform,"Owen Sanders
+Harshal Dalvi
+Henry Zhang","TATAR-153 - O2: Reduce data QA tickets by 50% per client
+TATAR-166 - O4: Improve customer perception of measurement accuracy and credibility (e.g., device graph, VT measurement, device-level adjustments) as measured by survey results and reduction in tickets (baseline and target defined by 1/31)",https://tatari.atlassian.net/browse/AUD-756,"aud
+product-roadmap
+data-platform
+measurement
+2022-q2
+2022-q3"
+TATAR-421,"TVP - AdOps - integration to Atlassian ",On track,2022-08-12,2022-10-05,Polina Frolova,"Security IT
+TVP AdOps
+TVP Product","Iryna Kaplia
+Denys Novikov
+Yarik Vyrva
+Yana Kyselova
+Majken Longlade
+Alexandra Vozghrechko
+Yulia Koshel
+Andrew Prysiazhnyi
+Dima Dibrova
+Polina Frolova",,,"tvp
+2022-q3"
+TATAR-420,TVP - Full Atlassian migration to Tatari Atlassian space,Completed 🎉,2022-08-12,2022-08-30,Polina Frolova,Security IT,"Majken Longlade
+Polina Frolova",,,"tvp
+2022-q3"
+TATAR-387,TVP - General improvements / Platform Managment tasks,Completed 🎉,,2022-08-01,Polina Frolova,TVP Eng,"Nataliia Myroshnychenko
+Vitalii Litkevich
+Yevhen Shakhov
+Polina Frolova
+Roman Pavlushkov
+Yana Belokoz
+Oleg Gubanov
+Dmitriy Butko",,"https://tatari.atlassian.net/browse/TVP-1758
+https://tatari.atlassian.net/browse/TVP-1752
+https://tatari.atlassian.net/browse/TVP-1752",2022-q3
+TATAR-391,TVP - Infrastructure / Migration to Aerospike,Completed 🎉,,2022-08-08,Polina Frolova,"TVP Eng
+TVP DevOps","Yevhen Shakhov
+Gennadii Kravchenko
+Nataliia Myroshnychenko
+Polina Frolova
+Roman Pavlushkov
+Yana Belokoz
+Vlad Belik
+Oleg Gubanov
+Anton Slobodskyi
+Viacheslav Shostak",,https://tatari.atlassian.net/jira/software/c/projects/TVP/boards/122?modal=detail&selectedIssue=TVP-2006&assignee=61fcf616c224b80069c9aa45&assignee=61fcf618c224b80069c9aa49,2022-q3
+TATAR-390,TVP - Infrastructure / Migration to k8s,On track,2022-08-08,2022-09-12,Vlad Belik,"TVP Eng
+TVP DevOps","Polina Frolova
+Gennadii Kravchenko
+Roman Pavlushkov
+Anton Slobodskyi
+Vlad Belik
+Yevhen Shakhov
+Yana Belokoz",,,"tvp
+2022-q3"
+TATAR-392,TVP - Infrastructure / Update ClickHouse cluster,On track,2022-08-08,2022-08-31,Vlad Belik,"TVP DevOps
+TVP Eng","Gennadii Kravchenko
+Yevhen Shakhov
+Polina Frolova
+Vlad Belik
+Roman Pavlushkov
+Yana Belokoz
+Anton Slobodskyi",,"https://tatari.atlassian.net/jira/software/c/projects/TVP/boards/122?modal=detail&selectedIssue=TVP-2036&assignee=61fcf616c224b80069c9aa45&assignee=61fcf618c224b80069c9aa49
+https://tatari.atlassian.net/jira/software/c/projects/TVP/boards/122?modal=detail&selectedIssue=TVP-2036&assignee=61fcf616c224b80069c9aa45&assignee=61fcf618c224b80069c9aa49","tvp
+2022-q3"
+TATAR-393,TVP - Infrastructure / Zabbix Sunset,Completed 🎉,,2022-08-04,Polina Frolova,TVP DevOps,"Polina Frolova
+Vlad Belik
+Gennadii Kravchenko
+Anton Slobodskyi",,"https://tatari.atlassian.net/jira/software/c/projects/TVP/boards/122?modal=detail&selectedIssue=TVP-2003&assignee=61fcf616c224b80069c9aa45&assignee=61fcf618c224b80069c9aa49
+https://tatari.atlassian.net/browse/TVP-2003",2022-q3
+TATAR-399,TVP - Integration / HB SpringServe,On track,2022-08-11,2022-09-15,Denys Novikov,TVP Eng,"Oleg Gubanov
+Dmitriy Butko
+Roman Pavlushkov
+Vitalii Litkevich
+Viacheslav Shostak
+Yevhen Shakhov
+Yana Belokoz
+Vlad Belik
+Polina Frolova
+Nataliia Myroshnychenko
+Denys Novikov",,https://tatari.atlassian.net/browse/TVP-2028,"tvp
+2022-q3"
+TATAR-389,TVP - Integrations / DV integration,Completed 🎉,2022-08-08,2022-08-31,Polina Frolova,TVP Eng,"Viacheslav Shostak
+Vlad Belik
+Oleg Gubanov
+Yevhen Shakhov
+Polina Frolova
+Dmitriy Butko
+Vitalii Litkevich
+Roman Pavlushkov",,"https://tatari.atlassian.net/browse/TVP-1981
+https://tatari.atlassian.net/browse/TVP-1981",2022-q3
+TATAR-395,TVP - Integrations / IAB CCPA Compliance Framework,Completed 🎉,2022-08-08,2022-08-31,Polina Frolova,TVP Product,Polina Frolova,,https://tatari.atlassian.net/browse/TVP-1451,2022-q3
+TATAR-388,TVP - Perfomance marketplace features,Pending,,2022-09-01,Polina Frolova,TVP Eng,"Yana Belokoz
+Vlad Belik
+Oleg Gubanov
+Polina Frolova
+Dmitriy Butko
+Roman Pavlushkov
+Vitalii Litkevich",,https://tatari.atlassian.net/browse/TVP-1887,"tvp
+2022-q3"
+TATAR-396,TVP - Private Exchange / Advertiser - add entity,On track,2022-08-12,2022-09-22,Polina Frolova,"TVP Eng
+TVP Product","Denys Novikov
+Yarik Vyrva
+Oleg Gubanov
+Vlad Belik
+Polina Frolova",,https://tatari.atlassian.net/browse/TVP-1920,"tvp
+2022-q3"
+TATAR-386,TVP - Private Exchange / Campaign delivery metrics tasks,Completed 🎉,2022-08-08,2022-09-15,Polina Frolova,TVP Eng,"Polina Frolova
+Vitalii Litkevich
+Dmitriy Butko
+Nataliia Myroshnychenko
+Roman Pavlushkov
+Viacheslav Shostak
+Vlad Belik
+Yevhen Shakhov
+Oleg Gubanov
+Yana Belokoz",,https://tatari.atlassian.net/browse/TVP-1457,2022-q3
+TATAR-394,TVP - Private Exchange / Request for Proposal,On track,2022-08-12,2022-09-22,Polina Frolova,TVP Eng,"Viacheslav Shostak
+Yevhen Shakhov
+Yana Belokoz
+Vlad Belik
+Polina Frolova
+Nataliia Myroshnychenko
+Oleg Gubanov
+Roman Pavlushkov
+Dmitriy Butko
+Vitalii Litkevich",,"https://tatari.atlassian.net/browse/TVP-1984
+https://tatari.atlassian.net/browse/TVP-1984","tvp
+2022-q3"
+TATAR-398,TVP - Private Exchenge / Improve Deal (managed) view,On track,2022-08-12,2022-09-28,Polina Frolova,TVP Eng,Polina Frolova,,https://tatari.atlassian.net/browse/TVP-1598,"tvp
+2022-q3"
+TATAR-397,TVP - Private Exchenge / Streamline server logic for guaranteed campaigns,On track,2022-08-12,2022-09-28,Polina Frolova,TVP Eng,"Vlad Belik
+Roman Pavlushkov
+Oleg Gubanov
+Yana Belokoz
+Dmitriy Butko
+Vitalii Litkevich
+Viacheslav Shostak
+Yevhen Shakhov
+Polina Frolova
+Nataliia Myroshnychenko",,https://tatari.atlassian.net/browse/TVP-1633,"tvp
+2022-q3"
+TATAR-365,Update Right Side Panel for Reports and Dashboard,Off track,2022-08-19,SEPTEMBER 2022,Russ O'Reagan,Measurement - Audience,Russ O'Reagan,,,"aud
+product-roadmap
+measurement
+2022-q3"

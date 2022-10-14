@@ -1,3 +1,28 @@
+# 
+# The DBManager class tree implements the interface to our warehouse database.
+#
+# Unlike the typical DBAPI pattern, we generally don't rely on taking raw SQL
+# statements as our underlying engines (DuckDB, Clickhouse) support very different
+# syntaxes for everything but the most core ANSI SQL statements. So instead we
+# provide explicit interfaces for CREATE TABLE, DROP TABLE, SHOW TABLES, etc...
+#
+# This also works because the Unify engine is already parsing the user's SQL
+# statements and is interpreting/adjusting many of them.
+#
+# DBManager also defines an interface for reading and writing DataFrames into the 
+# database.
+#
+# **Information schema**
+#
+# The DBManager will create an "user space" information_schema database in the user's
+# database, and will keep this schema populated with meta information about the
+# user's tables and schemas. These tables are created by a set of SQLAlchemy models.
+# The DBManager implements a `signals` system where entity creation/deletion produce
+# signals that we observe and use to keep the meta information up to date. This system
+# is mostly implemented in the DBManager base class, but underlying engines need
+# to generate signals at the right times.
+#
+
 from __future__ import annotations
 import base64
 import contextlib
@@ -20,7 +45,7 @@ import duckdb
 from clickhouse_driver import Client
 import clickhouse_driver
 import sqlglot
-import enum
+import sqlglot.expressions
 from sqlalchemy import Enum
 from sqlalchemy import Column, String, DateTime, PickleType, create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -87,38 +112,26 @@ class TableHandle:
     def table_opts(self):
         return self._table_opts
 
+    def user_name(self) -> str:
+        return self.schema() + "." + self.table_root()
+
     def __str__(self) -> str:
         return self.schema() + "." + self.table_root()
 
     def __repr__(self) -> str:
         return "TableHandle(" + str(self) + ")"
 
-# 
-# The DBManager class tree implements the interface to our warehouse database.
-#
-# Unlike the typical DBAPI pattern, we generally don't rely on taking raw SQL
-# statements as our underlying engines (DuckDB, Clickhouse) support very different
-# syntaxes for everything but the most core ANSI SQL statements. So instead we
-# provide explicit interfaces for CREATE TABLE, DROP TABLE, SHOW TABLES, etc...
-#
-# This also works because the Unify engine is already parsing the user's SQL
-# statements and is interpreting/adjusting many of them.
-#
-# DBManager also defines an interface for reading and writing DataFrames into the 
-# database.
-#
-# **Information schema**
-#
-# The DBManager will create an "user space" information_schema database in the user's
-# database, and will keep this schema populated with meta information about the
-# user's tables and schemas. These tables are created by a set of SQLAlchemy models.
-# The DBManager implements a `signals` system where entity creation/deletion produce
-# signals that we observe and use to keep the meta information up to date. This system
-# is mostly implemented in the DBManager base class, but underlying engines need
-# to generate signals at the right times.
-#
+
+class DBSignals:
+    SCHEMA_CREATE = "schema_create"
+    SCHEMA_DROP = "schema_drop"
+    TABLE_CREATE = "table_create"
+    TABLE_DROP = "table_drop"
+    TABLE_LOADED = "table_loaded"
 
 class DBManager(contextlib.AbstractContextManager):
+    SIG_DICT = {}
+
     # 
     # Schemata signals
     #
@@ -128,30 +141,45 @@ class DBManager(contextlib.AbstractContextManager):
         self.DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
         os.makedirs(self.DATA_HOME, exist_ok=True)
 
-        self.signals = {
-            "schema_create": Signal(args=['schema']),
-            "schema_drop": Signal(args=['schema']),
-            "table_create": Signal(args=['table']),
-            "table_drop": Signal(args=['table'])
-        }
-        self.signals["schema_create"].connect(self._on_schema_create)
-        self.signals["schema_drop"].connect(self._on_schema_drop)
-        self.signals["table_create"].connect(self._on_table_create)
-        self.signals["table_drop"].connect(self._on_table_drop)
+        self.signals = DBManager.SIG_DICT
+        if len(self.signals) == 0:
+            self.signals.update({
+                DBSignals.SCHEMA_CREATE: Signal(args=['dbmgr', 'schema']),
+                DBSignals.SCHEMA_DROP: Signal(args=['dbmgr', 'schema']),
+                DBSignals.TABLE_CREATE: Signal(args=['dbmgr', 'table']),
+                DBSignals.TABLE_DROP: Signal(args=['dbmgr', 'table']),
+                DBSignals.TABLE_LOADED: Signal(args=['dbmgr', 'table']), # emitted after a table is loaded or updated
+            })
+        self.signals[DBSignals.SCHEMA_CREATE].connect(self._on_schema_create)
+        self.signals[DBSignals.SCHEMA_DROP].connect(self._on_schema_drop)
+        self.signals[DBSignals.TABLE_CREATE].connect(self._on_table_create)
+        self.signals[DBSignals.TABLE_DROP].connect(self._on_table_drop)
         self.engine: Unknown = None
+        # Keep track of table references from the most recent query
+        self.last_seen_tables = []
 
     def register_for_signal(self, signal, callback):
         if signal not in self.signals:
             raise RuntimeError(f"Unknown signal '{signal}'")
         self.signals[signal].connect(callback)
 
-    def _on_schema_create(self, schema):
+    def send_signal(self, signal=None, **kwargs):
+        if signal not in self.signals:
+            raise RuntimeError(f"Unknown signal '{signal}'")
+        kwargs['dbmgr'] = self       
+        self.signals[signal].emit(**kwargs)
+
+    def _send_signal(self, signal, **kwargs):
+        kwargs['dbmgr'] = self
+        self.signals[signal].emit(**kwargs)
+
+    def _on_schema_create(self, dbmgr, schema):
         session = Session(bind=self.engine)
         session.query(Schemata).filter(Schemata.name == schema).delete()
         session.add(Schemata(name=schema, type="schema"))
         session.commit()
 
-    def _on_schema_drop(self, schema):
+    def _on_schema_drop(self, dbmgr, schema):
         session = Session(bind=self.engine)
         session.query(Schemata).filter(Schemata.name == schema).delete()
         session.commit()
@@ -238,6 +266,7 @@ class DBManager(contextlib.AbstractContextManager):
         return rows["column_name"].values.tolist()
 
     def list_columns(self, table: TableHandle, match: str=None) -> pd.DataFrame:
+        """ Returns a dataframe describing each column in a table. """
         return self.execute_df(f"describe {table}")
 
     def delete_rows(self, table: TableHandle, filter_values: dict, where_clause: str=None):
@@ -257,12 +286,12 @@ class DBManager(contextlib.AbstractContextManager):
         if cascade:
             sql += " cascade"
         res = self.execute(sql)
-        self.signals["schema_drop"].emit(schema=schema)
+        self._send_signal(signal=DBSignals.SCHEMA_DROP, schema=schema)
         return res
 
     def drop_table(self, table: TableHandle):
         res = self.execute(f"drop table {table}")
-        self.signals["table_drop"].emit(table=table)
+        self._send_signal(signal=DBSignals.TABLE_DROP, table=table)
         return res
 
     def dialect(self):
@@ -278,6 +307,9 @@ class DBManager(contextlib.AbstractContextManager):
         return self.execute(Queries.list_schemas)
 
     def list_tables(self, schema=None) -> pd.DataFrame:
+        """ Returns a dataframe describing the tables inside the given schema.
+            Columns will include: table_name, table_schema, connection, decription, source, created
+        """
         session = Session(bind=self.engine)
         records = [
             {
@@ -366,7 +398,7 @@ class DuckDBWrapper(DBManager):
 
     def create_schema(self, schema) -> duckdb.DuckDBPyConnection:
         res: duckdb.DuckDBPyConnection = self.execute(f"create schema if not exists {schema}")
-        self.signals["schema_create"].emit(schema=schema)
+        self._send_signal(signal=DBSignals.SCHEMA_CREATE, schema=schema)
         return res
 
     def create_table(self, table: TableHandle, columns: dict):
@@ -382,7 +414,7 @@ class DuckDBWrapper(DBManager):
         self.execute(
             f"create table if not exists {table} (" + ",".join(["{} {}".format(n, t) for n, t in new_cols.items()]) + ")"
         )
-        self.signals["table_create"].emit(table=table)
+        self._send_signal(signal=DBSignals.TABLE_CREATE, table=table)
 
 
     def create_memory_table(self, table_root: str, df: pd.DataFrame):
@@ -400,7 +432,7 @@ class DuckDBWrapper(DBManager):
         # create the table AND flush current row_buffer values to the db            
         DuckDBWrapper.DUCK_CONN.execute(f"create or replace table {table} as select * from df1")
         DuckDBWrapper.DUCK_CONN.unregister("df1")
-        self.signals["table_create"].emit(table=table)
+        self._send_signal(signal=DBSignals.TABLE_CREATE, table=table)
 
     def append_dataframe_to_table(self, value: pd.DataFrame, table: TableHandle):
         # FIXME: we should probably use a context manager at the caller to ensure
@@ -506,6 +538,7 @@ class CHTableHandle(TableHandle):
     def __str__(self) -> str:
         return self.real_schema() + "." + self.real_table_root()
 
+
 class CHTableMissing(TableMissingException):
     def __init__(self, msg):
         table = msg.split(".")[1].replace(CHTableHandle.SCHEMA_SEP, ".")
@@ -523,7 +556,6 @@ class ClickhouseWrapper(DBManager):
         self.tenant_id: Union[str,None] = None
         self.tenant_db: Union[str,None] = None
         self.engine: Union[str,None] = None
-        print(f"Connecting to clickhouse database at: {os.environ['DATABASE_HOST']}")
 
     def dialect(self):
         return "clickhouse"
@@ -538,6 +570,7 @@ class ClickhouseWrapper(DBManager):
 
     @staticmethod
     def _connect_to_db():
+        print(f"Connecting to clickhouse database at: {os.environ['DATABASE_HOST']}")
         if 'DATABASE_HOST' not in os.environ:
             raise RuntimeError("DATABASE_HOST not set")
         if 'DATABASE_USER' not in os.environ:
@@ -545,11 +578,11 @@ class ClickhouseWrapper(DBManager):
         if 'DATABASE_PASSWORD' not in os.environ:
             raise RuntimeError("DATABASE_PASSWORD not set")
 
+        ClickhouseWrapper.SINGLE_TENANT_ID = os.environ['DATABASE_USER']
         tenant_db = f"tenant_{ClickhouseWrapper.SINGLE_TENANT_ID}"
         settings = {'allow_experimental_object_type': 1, 'allow_experimental_lightweight_delete': 1}
         # FIXME: Pass the settings in when creating the SQLAlchemy engine
 
-        ClickhouseWrapper.SINGLE_TENANT_ID = os.environ['DATABASE_USER']
         ClickhouseWrapper.SHARED_ENGINE = ClickhouseWrapper.get_sqla_engine().execution_options(
             # Map of SQLA model schemas to point to the tenant schema
     	    schema_translate_map={UNIFY_META_SCHEMA: tenant_db, None: tenant_db}
@@ -584,26 +617,45 @@ class ClickhouseWrapper(DBManager):
             {"schema": schema}
         )
 
-    def rewrite_query(self, query: typing.Union[sqlglot.expressions.Expression,str]=None) -> str:
+    def _find_table_op(self, query: sqlglot.Expression, operation: sqlglot.expressions._Expression, signal: str):
+        for table_op in query.find_all(operation):
+            kind = table_op.args['kind'] # view or table
+            for table_ref in table_op.find_all(sqlglot.exp.Table):
+                return [{'signal': signal, 'table': table_ref.sql(), 'kind': kind}]
+        return []
+
+    def rewrite_query(self, query: typing.Union[sqlglot.expressions.Expression,str]=None, capture_dml: list=[]) -> str:
         # Rewrite table references to use prefixes instead of schema names
+        # FIXME: fix "show create table ..."
         if isinstance(query, str):
             try:
-                query = sqlglot.parse_one(query)
+                query = sqlglot.parse_one(query, read='clickhouse')            
             except Exception as e:
-                breakpoint()
                 msg = f"sqlglot parsing failed: {e}"
                 print(msg)
                 return f"/* {msg} */ {query}"
 
+        # Look for creates or drops executed as raw sql
+        capture_dml.extend(self._find_table_op(query, sqlglot.exp.Create, DBSignals.TABLE_CREATE))
+        capture_dml.extend(self._find_table_op(query, sqlglot.exp.Drop, DBSignals.TABLE_DROP))
+
+        cte_tables = [str(alias) for alias in query.find_all(sqlglot.exp.TableAlias)]
+
         def transformer(node):
-            if isinstance(node, sqlglot.exp.Table):
+            if isinstance(node, (sqlglot.exp.Table, sqlglot.exp.Column)):
+                if isinstance(node, sqlglot.exp.Table):
+                    self.last_seen_tables.append(TableHandle(str(node)))
                 parts = str(node).split(".")
-                new_table = self.tenant_db + "." + parts[0] + CHTableHandle.SCHEMA_SEP + parts[1]
-                return sqlglot.parse_one(new_table)
+                if len(parts) == 2:
+                    if parts[0] not in cte_tables:
+                        new_table = self.tenant_db + "." + parts[0] + CHTableHandle.SCHEMA_SEP + parts[1]
+                        return sqlglot.parse_one(new_table)
             return node
 
         newsql = query.transform(transformer).sql('clickhouse')
-        print(f"REWROTE '{query}' as '{newsql}'")
+        if re.match(r"create\s+table", newsql, re.IGNORECASE) and not re.match("engine", newsql, re.IGNORECASE):
+            newsql += " ENGINE = MergeTree()"
+        #print(f"REWROTE '{query}' as '{newsql}'")
         return newsql
 
     def current_date_expr(self):
@@ -614,27 +666,44 @@ class ClickhouseWrapper(DBManager):
         return self.client.execute(f"EXISTS {real_table}")[0] == 1
 
     def execute_raw(self, query: str, args=[]):
-        return self.execute(query, args=args, native=True)
+        return self.execute_df(query, args=args, native=True)
 
     def execute(self, query: str, args=[], native=False):
+        return self.execute_df(query, args=args, native=native)
+
+    def execute_df(self, query: str, args=[], native=False, context=None) -> pd.DataFrame:
+        self.last_seen_tables = []
+        capture_dmls = []
         if not native:
-            query = self.rewrite_query(query)
+            query = self.rewrite_query(query, capture_dml=capture_dmls)
+            if context:
+                context.set_recent_tables(self.last_seen_tables)
         if query.strip().lower().startswith("insert"):
             return self._execute_insert(query, args)
         if args:
             query = self._substitute_args(query, args)
 
-        logger.debug(query)
         try:
-            return self.client.query_dataframe(query)
+            df = self.client.query_dataframe(query)
+            for dml in capture_dmls:
+                self._send_signal(dml['signal'], table=TableHandle(dml['table']))
+            return df
         except clickhouse_driver.errors.ServerException as e:
-            m = re.search(r"Table (\S+) doesn't exist.", str(e))
+            if e.code == 60:
+                m = re.search(r"Table (\S+) doesn't exist.", str(e))
+                if m:
+                    raise CHTableMissing(m.group(1))
+            elif e.code == 62:
+                m = re.search(r"Syntax error[^.]+.", e.message)
+                if m:
+                    raise QuerySyntaxException(m.group(0))
+            elif "<Empty trace>" in e.message:
+                e.message += " (while executing: " + query + ")"
+                raise e
+            m = re.search(r"(^.*)Stack trace:", e.message)
             if m:
-                # convert back to user land version
-                raise CHTableMissing(m.group(1))
-            else:
-                logger.critical(str(e) + "\n" + f"While executing: {query}")
-                raise
+                e.message = m.group(1)
+            raise e
 
 
     def _execute_insert(self, query, args=[]):
@@ -663,28 +732,6 @@ class ClickhouseWrapper(DBManager):
         #df=pd.DataFrame(result,columns=[tuple[0] for tuple in columns])
         #return df.to_json(orient='records')
 
-    def execute_df(self, query: str, native=False) -> pd.DataFrame:
-        if not native:
-            query = self.rewrite_query(query)
-        try:
-            return self.client.query_dataframe(query)
-        except clickhouse_driver.errors.ServerException as e:
-            if e.code == 60:
-                m = re.search(r"Table (\S+) doesn't exist.", str(e))
-                if m:
-                    raise CHTableMissing(m.group(1))
-            elif e.code == 62:
-                m = re.search(r"Syntax error[^.]+.", e.message)
-                if m:
-                    raise QuerySyntaxException(m.group(0))
-            elif "<Empty trace>" in e.message:
-                e.message += " (while executing: " + query + ")"
-                raise e
-            m = re.search(r"(^.*)Stack trace:", e.message)
-            if m:
-                e.message = m.group(1)
-            raise e
-
     def get_table_columns(self, table):
         # Returns the column names for the table in their insert order
         rows = self.execute_df("describe " + str(CHTableHandle(table, tenant_id=self.tenant_id)), native=True)
@@ -712,7 +759,8 @@ class ClickhouseWrapper(DBManager):
 
         # Thus our 'create schema' just registers the schema in the schemata, which in effect
         # "creates the schema" as far as the caller is concerned
-        self.signals["schema_create"].emit(schema=schema)
+        self._send_signal(signal=DBSignals.SCHEMA_CREATE, schema=schema)
+
 
     def list_schemas(self):
         session = Session(bind=self.engine)
@@ -722,7 +770,6 @@ class ClickhouseWrapper(DBManager):
 
     def list_tables(self, schema=None) -> pd.DataFrame:
         if schema == 'information_schema':
-            breakpoint()
             # Special case because we don't reflect our custom IS tables ourselves, so fall back
             # to the system.
             tprefix = "information_schema" + CHTableHandle.SCHEMA_SEP
@@ -738,7 +785,14 @@ class ClickhouseWrapper(DBManager):
     def list_columns(self, table: TableHandle, match: str=None) -> pd.DataFrame:
         table = CHTableHandle(table, tenant_id=self.tenant_id)
         # FIXME: Handle 'match' - may need our tenant-specific information_schema table
-        return self.execute_df(f"describe {table}", native=True)
+        df = self.execute_df(f"describe {table}", native=True)
+        if match is not None:
+            match = match.replace('*', '.*')
+            match = match.replace('%', '.*')
+            match = '^' + match + '$'
+            return df.loc[df.name.str.contains(match, case=False)]
+        else:
+            return df
 
     def create_table(self, table: TableHandle, columns: dict):
         real_table = CHTableHandle(table, tenant_id=self.tenant_id)
@@ -762,7 +816,7 @@ class ClickhouseWrapper(DBManager):
             f"create table if not exists {real_table} (" + ",".join(["{} {}".format(n, t) for n, t in new_cols.items()]) + ")" + \
                 f" ENGINE = MergeTree() {primary_key} {ordering}"
         self.execute(table_ddl, native=True)
-        self.signals["table_create"].emit(table=real_table)
+        self._send_signal(signal=DBSignals.TABLE_CREATE, table=real_table)
 
     def replace_table(self, source_table: TableHandle, dest_table: TableHandle):
         real_src = CHTableHandle(source_table, tenant_id=self.tenant_id)
@@ -777,7 +831,7 @@ class ClickhouseWrapper(DBManager):
             raise RuntimeError("Memory tables cannot specify a schema")
         table = TableHandle(table_root, "default")
         self.write_dataframe_as_table(df, table, table_engine="Memory")
-        self.signals["table_create"].emit(table=table)
+        self._send_signal(signal=DBSignals.TABLE_CREATE, table=table)
         return str(table)
 
     def drop_memory_table(self, table_root: str):
@@ -787,10 +841,10 @@ class ClickhouseWrapper(DBManager):
         if cascade:
             # delete tables in the schema
             pass
-        self.signals["schema_drop"].emit(schema=schema)
+        self._send_signal(signal=DBSignals.SCHEMA_DROP, schema=schema)
 
-    def _on_schema_drop(self, schema):
-        super()._on_schema_drop(schema)
+    def _on_schema_drop(self, dbmgr, schema):
+        super()._on_schema_drop(dbmgr, schema)
         # FIXME: figure out the Clickhouse sync option
         time.sleep(0.1)
     
@@ -798,7 +852,7 @@ class ClickhouseWrapper(DBManager):
     def drop_table(self, table: TableHandle):
         chtable = CHTableHandle(table, tenant_id=self.tenant_id)
         self.execute(f"drop table {chtable}", native=True)
-        self.signals["table_drop"].emit(table=table)
+        self._send_signal(signal=DBSignals.TABLE_DROP, table=table)
 
     def _on_table_drop(self, **kwargs):
         super()._on_table_drop(**kwargs)
@@ -847,7 +901,7 @@ class ClickhouseWrapper(DBManager):
                 f") Engine={table_engine}() {primary_key}"
         logger.debug(sql)
         self.client.execute(sql)
-        self.signals["table_create"].emit(table=table)
+        self._send_signal(signal=DBSignals.TABLE_CREATE, table=table)
 
         logger.debug("Writing dataframe to table")
         if value.shape[0] > 0:
@@ -873,7 +927,7 @@ class ClickhouseWrapper(DBManager):
         df_schema = pa.Schema.from_pandas(value)
         for col in df_schema.names:
             f = df_schema.field(col)
-            if pa.types.is_boolean(f.type):
+            if pa.types.is_boolean(f.type) or pa.types.is_timestamp(f.type):
                 # See if the table column is a string
                 db_type = self.execute(
                     Queries.list_columns.format(real_table.real_schema(), real_table.real_table_root(), col),
@@ -882,7 +936,7 @@ class ClickhouseWrapper(DBManager):
                 if db_type.lower() == "string" or db_type.lower().startswith("varchar"):
                     # Corece bool values to string
                     value[col] = value[col].astype(str)
-                    logger.critical("Coercing bool column {} to string".format(col))
+                    logger.critical("Coercing bool/date column {} to string".format(col))
 
         self.client.insert_dataframe(
             f"INSERT INTO {real_table} VALUES", 

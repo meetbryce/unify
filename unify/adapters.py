@@ -25,7 +25,7 @@ class Connection:
         self.schema_name: str = schema_name
         self.adapter: Adapter = adapter
         self.adapter.resolve_auth(self.schema_name, opts['options'])
-        self.is_valid = True #self.adapter.validate()
+        self.is_valid = self.adapter.validate()
 
     @staticmethod
     def load_connections_config():
@@ -353,7 +353,7 @@ class Adapter:
 
     def __repr__(self) -> AnyStr:
         return f"{self.__class__.__name__}({self.name}) ->\n" + \
-            ", ".join(map(lambda t: str(t), self.tables)) + "\n"
+            ", ".join(map(lambda t: str(t), self.tables or [])) + "\n"
 
     def __str__(self) -> str:
         return self.name

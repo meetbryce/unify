@@ -17,17 +17,35 @@ tables:
     query_resource: GET /crm/v3/objects/contacts
     result_body_path: results
     supports_paging: true
+  - name: company_properties
+    query_resource: GET /crm/v3/properties/company
+    result_body_path: results
+    supports_paging: true
   - name: companies
     query_resource: GET /crm/v3/objects/companies
     result_body_path: results
     supports_paging: true
     strip_prefixes: properties_
     params:
-      properties: sql@(select arrayStringConcat(groupArray(name),',') from company_properties)
-  - name: company_properties
-    query_resource: GET /crm/v3/properties/company
+      properties: sql@(select arrayStringConcat(groupArray(name),',') from company_properties where displayOrder >= 0)
+  - name: deal_properties
+    query_resource: GET /crm/v3/properties/deal
     result_body_path: results
     supports_paging: true
+  - name: deals
+    query_resource: GET /crm/v3/objects/deals
+    result_body_path: results
+    supports_paging: true
+    strip_prefixes: properties_
+    params:
+      properties: sql@(select arrayStringConcat(groupArray(name),',') from deal_properties where displayOrder >= 0)
+  - name: deal_assocs
+    query_resource: GET /crm/v3/objects/deals/{dealId}/associations/company
+    result_body_path: results
+    supports_paging: true
+    params:
+      dealId: sql@(select id from deals)
+    copy_params_to_output: [dealId]  
   - name: owners
     query_resource: GET /crm/v3/owners/
     result_body_path: results

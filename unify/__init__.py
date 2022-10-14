@@ -7,8 +7,14 @@
 #   db_wrapper.py - Defines all local db managers
 #
 #     rest_adapter.py - Defines the core REST API adapter
+#     grammar.lark - Contains the Lark grammar for the interpreter
 #  
-from .interpreter import CommandInterpreter
+import os
+
+if 'UNIFY_HOME' not in os.environ:
+    os.environ['UNIFY_HOME'] = os.path.expanduser("~/unify")
+    
+from .interpreter import CommandInterpreter, CommandContext
 from .db_wrapper import dbmgr
 
 

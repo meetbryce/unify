@@ -64,6 +64,10 @@ class LocalFileAdapter(Adapter):
             ]
         return self.tables
 
+    def drop_table(self, table_root: str):
+        self.storage.delete_object('tables', table_root)
+        self.tables = None
+
     def list_files(self, match: str) -> list[str]:
         if match is None:
             match = "*"
@@ -104,8 +108,6 @@ class LocalFileAdapter(Adapter):
             return df
 
     def import_file(self, file_uri: str, options: list=[]):
-        print("importing the file")
-
         file_path = self._resolve_path(file_uri)
         if not file_path.exists():
             raise RuntimeError(f"Cannot find file '{file_uri}'")

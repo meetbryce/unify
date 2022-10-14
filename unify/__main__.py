@@ -8,7 +8,7 @@ from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 
-from .interpreter import CommandInterpreter
+from .interpreter import CommandInterpreter, CommandContext
 from .db_wrapper import (
     ClickhouseWrapper, 
     DBManager, 
@@ -33,7 +33,8 @@ class UnifyRepl:
                     cmd = session.prompt("> ", auto_suggest=suggester)
                     if cmd.strip() == "":
                         continue
-                    outputs, df = self.interpreter.run_command(cmd)
+                    context: CommandContext = self.interpreter.run_command(cmd)
+                    outputs, df = [context.logger.get_output(), context.result]
                     print("\n".join(outputs))
                     if isinstance(df, pd.DataFrame):
                         with pd.option_context('display.max_rows', None):
@@ -43,7 +44,7 @@ class UnifyRepl:
                                 "index": False,
                                 "max_rows" : None,
                                 "min_rows" : 10,
-                                "max_colwidth": 80,
+                                "max_colwidth": 50 if not context.print_wide else None,
                                 "header": True,
                                 "float_format": '{:0.2f}'.format
                             }

@@ -30,6 +30,8 @@ command: show_tables
          | help
          | show_files
          | import_command
+         | search_command
+         | help_last
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
 
@@ -112,6 +114,12 @@ delete_schedule: "run" WS "delete" schedule_ref
 import_command: "import" WS file_path (options)?
 
 options: ANY
+
+search_command: "search"i WS query
+
+query: ANY
+
+help_last: "??"
 
 file_path: SINGLE_QUOTED_STRING | /\S+/
 
