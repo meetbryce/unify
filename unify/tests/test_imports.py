@@ -7,6 +7,8 @@ import pandas as pd
 from unify import CommandInterpreter, CommandContext
 from unify.search import Searcher
 
+os.environ['UNIFY_DISABLE_SEARCH'] = 'false'
+
 @pytest.fixture
 def interp():
     return CommandInterpreter()

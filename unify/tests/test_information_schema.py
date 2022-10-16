@@ -102,6 +102,7 @@ def test_create_table_signal(db: DBManager):
 
     assert len(signals) == 1
 
+    db.execute("drop view if exists sch1.all_users")
     db.execute("create view sch1.all_users as select * from sch1.users")
     assert len(signals) == 2
 

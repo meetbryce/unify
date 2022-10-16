@@ -9,6 +9,28 @@ from whoosh.writing import IndexWriter
 from whoosh.qparser import QueryParser, FuzzyTermPlugin
 from whoosh.reading import ReaderClosed
 
+class NullSearcher:
+    def open_index(self):
+        pass
+
+    def clear_index(self):
+        pass
+
+    def index_object(self, type: str, name: str, parent: str=None, description: str=None):
+        pass
+
+    def delete_object(self, type: str, name: str, parent: str):
+        pass
+
+    def delete_child_objects(self, type: str, parent: str):
+        pass
+
+    def close_index(self):
+        pass
+
+    def search(self, query_str: str, type=None, deep=False):
+        return []
+
 class Searcher:
     """
         Uses the Whoosh library to implement full text search on database metadata

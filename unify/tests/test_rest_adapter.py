@@ -3,7 +3,7 @@ import os
 import yaml
 
 from unify.adapters import Adapter, Connection, RESTView, OutputLogger
-from unify.rest_schema import RESTAdapter, RESTTable
+from unify.rest_adapter import RESTAdapter, RESTTable
 
 def test_apispec_class():
     config = {

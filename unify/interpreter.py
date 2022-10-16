@@ -292,11 +292,19 @@ class CommandContext:
         self.logger: OutputLogger = OutputLogger()
         self.print_buffer = []
         self.parser_visitor = ParserVisitor()
-        self.result = None
+        self.result: pd.DataFrame = None
         self.interp_command = None
         self.lark_parse_error = None
         self.print_wide = False
         self.recent_tables: list[TableHandle] = []
+
+    @property
+    def df(self) -> pd.DataFrame:
+        return self.result
+
+    @property 
+    def lines(self) -> list[str]:
+        return self.logger.get_output()
 
     def mark_ran(self):
         self.has_run = True

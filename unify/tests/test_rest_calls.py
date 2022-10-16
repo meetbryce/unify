@@ -6,7 +6,7 @@ import requests_mock
 
 from mocksvc.mocksvc import MockSvc
 from unify.adapters import Connection, Adapter, UnifyLogger
-from unify.rest_schema import RESTAdapter
+from unify.rest_adapter import RESTAdapter
 
 @pytest.fixture
 def connection():

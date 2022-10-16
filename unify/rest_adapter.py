@@ -150,15 +150,6 @@ class PagerTokenPager(PagingHelper):
             return self.current_token is not None
         return False
 
-def validate_dict(object_type: str, object_name: str, opts: dict, valid_keys: dict):
-    for key in opts.keys():
-        if key not in valid_keys:
-            raise RuntimeError(f"Invalid key '{key}' for {object_type} - {object_name}")
-        else:
-            val_type = valid_keys[key]
-            if not isinstance(opts[key], val_type):
-                raise RuntimeError(f"Invalid type for key '{key}' for {object_type} - {object_name}, expected: {val_type}")
-
 
 class RESTTable(TableDef):
     VALID_KEYS = {
@@ -188,7 +179,7 @@ class RESTTable(TableDef):
         fmt = string.Formatter()
         self.max_pages = 50000 # TODO: Alow adapter to override this
 
-        validate_dict(
+        self.validate_dict(
             "Table definition", 
             spec.name + "." + self.name, 
             dictvals, 
@@ -261,6 +252,15 @@ class RESTTable(TableDef):
         self.params = dictvals.get('params', {})
         self.post = dictvals.get('post')
         self.keyColumnName = self.keyColumnType = None       
+
+    def validate_dict(self, object_type: str, object_name: str, opts: dict, valid_keys: dict):
+        for key in opts.keys():
+            if key not in valid_keys:
+                raise RuntimeError(f"Invalid key '{key}' for {object_type} - {object_name}")
+            else:
+                val_type = valid_keys[key]
+                if not isinstance(opts[key], val_type):
+                    raise RuntimeError(f"Invalid type for key '{key}' for {object_type} - {object_name}, expected: {val_type}")
 
     def get_sql_query_param(self, key, value):
         if not isinstance(value, str):

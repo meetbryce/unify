@@ -44,7 +44,7 @@ class Connection:
 
     @classmethod
     def setup_connections(cls, conn_list=None, connections_path=None, storage_mgr_maker=None):
-        from .rest_schema import RESTAdapter
+        from .rest_adapter import RESTAdapter
 
         adapter_table = {}
         for f in glob.glob(os.path.join(os.path.dirname(__file__), "../rest_specs/*spec.yaml")):

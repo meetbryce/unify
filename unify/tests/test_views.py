@@ -1,4 +1,5 @@
 # Test creation of views defined in Adapter specs
+from distutils.cmd import Command
 import pytest
 import requests_mock
 
@@ -6,6 +7,7 @@ from mocksvc.mocksvc import MockSvc
 from unify.loading import TableLoader, dbmgr
 from unify.db_wrapper import dbmgr
 from unify.adapters import Connection
+from unify import CommandInterpreter
 
 @pytest.fixture
 def connections():

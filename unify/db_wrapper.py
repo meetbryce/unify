@@ -140,10 +140,11 @@ class DBManager(contextlib.AbstractContextManager):
     #
     def __init__(self) -> None:
         super().__init__()
-
+        self.signals : typing.Dict[str, Signal] = {}
         self.DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
         os.makedirs(self.DATA_HOME, exist_ok=True)
 
+    def _setup_signals(self):
         self.signals = DBManager.SIG_DICT
         if len(self.signals) == 0:
             self.signals.update({
@@ -159,9 +160,15 @@ class DBManager(contextlib.AbstractContextManager):
         self.signals[DBSignals.TABLE_CREATE].connect(self._on_table_create)
         self.signals[DBSignals.TABLE_DROP].connect(self._on_table_drop)
         self.signals[DBSignals.TABLE_RENAME].connect(self._on_table_rename)
-        self.engine: Unknown = None
         # Keep track of table references from the most recent query
         self.last_seen_tables = []
+
+    def _remove_signals(self):
+        self.signals[DBSignals.SCHEMA_CREATE].disconnect(self._on_schema_create)
+        self.signals[DBSignals.SCHEMA_DROP].disconnect(self._on_schema_drop)
+        self.signals[DBSignals.TABLE_CREATE].disconnect(self._on_table_create)
+        self.signals[DBSignals.TABLE_DROP].disconnect(self._on_table_drop)
+        self.signals[DBSignals.TABLE_RENAME].disconnect(self._on_table_rename)
 
     def register_for_signal(self, signal, callback):
         if signal not in self.signals:
@@ -179,6 +186,7 @@ class DBManager(contextlib.AbstractContextManager):
         self.signals[signal].emit(**kwargs)
 
     def _on_schema_create(self, dbmgr, schema):
+        print(f"ON SCHEMA CREATE for {schema}: ", self)
         session = Session(bind=self.engine)
         session.query(Schemata).filter(Schemata.name == schema).delete()
         session.add(Schemata(name=schema, type="schema"))
@@ -378,10 +386,12 @@ class DuckDBWrapper(DBManager):
             DuckDBWrapper.DUCK_CONN.execute(f"create schema if not exists {UNIFY_META_SCHEMA}")
 
         self.engine = DuckDBWrapper.DUCK_ENGINE
+        self._setup_signals()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         DuckDBWrapper.REF_COUNTER -= 1
+        self._remove_signals()
         if DuckDBWrapper.REF_COUNTER == 0 and self.__class__.DUCK_CONN is not None:
             try:
                 DuckDBWrapper.DUCK_CONN.execute("COMMIT")
@@ -626,9 +636,11 @@ class ClickhouseWrapper(DBManager):
             self.tenant_id = ClickhouseWrapper.SINGLE_TENANT_ID
             self.tenant_db = f"tenant_{self.tenant_id}"
             self.engine = ClickhouseWrapper.SHARED_ENGINE
+        self._setup_signals()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self._remove_signals()
         pass
 
     @classmethod
@@ -878,10 +890,9 @@ class ClickhouseWrapper(DBManager):
         # FIXME: figure out the Clickhouse sync option
         time.sleep(0.1)
     
-
     def drop_table(self, table: TableHandle):
         chtable = CHTableHandle(table, tenant_id=self.tenant_id)
-        self.execute(f"drop table {chtable}", native=True)
+        self.execute(f"drop table if exists {chtable}", native=True)
         self._send_signal(signal=DBSignals.TABLE_DROP, table=table)
 
     def _on_table_drop(self, **kwargs):

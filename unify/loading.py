@@ -18,7 +18,7 @@ import numpy as np
 
 from sqlalchemy.orm.session import Session
 
-from .rest_schema import (
+from .rest_adapter import (
     Adapter, 
     RESTView,
     TableDef,
@@ -37,7 +37,7 @@ from .db_wrapper import (
 )
 from .adapters import Connection, OutputLogger
 from .file_adapter import LocalFileAdapter
-from .search import Searcher
+from .search import Searcher, NullSearcher
 
 logger = logging.getLogger(__name__)
 
@@ -567,7 +567,10 @@ class TableLoader:
             )
             duck.create_schema('files')
 
-            self.searcher = Searcher()
+            if os.environ.get('UNIFY_DISABLE_SEARCH', '') in ['true','True','1']:
+                self.searcher = NullSearcher()
+            else:
+                self.searcher = Searcher()
 
             # Connections defines the set of schemas we will create in the database.
             # For each connection/schema then we will define the tables as defined

@@ -1,5 +1,5 @@
 import pytest
-from unify.rest_schema import (
+from unify.rest_adapter import (
     PagingHelper, 
     PageAndCountPager, 
     OffsetAndCountPager, 
