@@ -68,6 +68,13 @@ class LocalFileAdapter(Adapter):
         self.storage.delete_object('tables', table_root)
         self.tables = None
 
+    def rename_table(self, table_root: str, new_name: str):
+        values = self.storage.get_object('tables', table_root)
+        if values:
+            self.storage.delete_object('tables', table_root)
+            self.storage.put_object('tables', new_name, values)
+        self.tables = None
+
     def list_files(self, match: str) -> list[str]:
         if match is None:
             match = "*"

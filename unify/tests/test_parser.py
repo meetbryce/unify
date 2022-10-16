@@ -94,11 +94,15 @@ def test_other_statements(visitor, parser):
     verify_parse(v, p, "delete_statement", query="delete from foo1 where id = 5")
     verify_parse(v, p, "drop_table", query="drop table gsheets.users",
         args={"table_ref": "gsheets.users"})
+    verify_parse(v, p, "drop_table", query="drop table if exists gsheets.users",
+        args={"table_ref": "gsheets.users"})
     verify_parse(v, p, "drop_schema", query="drop schema myscheme1",
         args={"schema_ref": "myscheme1"})
     verify_parse(v, p, "clear_table", query="clear table github.orgs", args={'table_schema_ref':"github.orgs"})
     verify_parse(v, p, "refresh_table", query="refresh table github.orgs", args={'table_ref':"github.orgs"})
     verify_parse(v, p, "reload_table", query="reload table github.orgs", args={'table_ref':"github.orgs"})
+    verify_parse(v, p , "alter_table", query="alter table github.orgs rename to organizations", 
+        args={'table_ref':"github.orgs", 'new_table': "organizations"})
 
 def test_chart_commands(visitor, parser):
     v = visitor

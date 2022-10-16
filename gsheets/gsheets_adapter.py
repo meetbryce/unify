@@ -442,6 +442,13 @@ is a good option if the sheet data is changing frequenly.
         self.storage.delete_object('tables', table_root)
         self.tables = None
 
+    def rename_table(self, table_root: str, new_name: str):
+        values = self.storage.get_object('tables', table_root)
+        if values:
+            self.storage.delete_object('tables', table_root)
+            self.storage.put_object('tables', new_name, values)
+        self.tables = None
+
     def supports_commands(self) -> bool:
         return True
 

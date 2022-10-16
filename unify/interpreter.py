@@ -15,7 +15,7 @@ from lark.visitors import v_args
 
 from .adapters import Adapter, OutputLogger
 from .loading import TableLoader, TableExporter
-from .db_wrapper import TableHandle, TableMissingException, dbmgr, SavedVar, RunSchedule, ColumnInfo
+from .db_wrapper import DBSignals, TableHandle, TableMissingException, dbmgr, SavedVar, RunSchedule, ColumnInfo
 from .file_adapter import LocalFileAdapter
 
 from .parsing_utils import (
@@ -187,6 +187,13 @@ class ParserVisitor(Visitor):
         self._the_command = 'refresh_table'
         self._the_command_args['table_ref'] = \
             collect_child_text("table_ref", tree, full_code=self._full_code)
+
+    def alter_table(self, tree):
+        self._the_command = 'alter_table'
+        self._the_command_args['table_ref'] = \
+            collect_child_text("table_ref", tree, full_code=self._full_code)
+        self._the_command_args['new_table'] = \
+            collect_child_text("new_table", tree, full_code=self._full_code)
 
     def reload_table(self, tree):
         self._the_command = 'reload_table'
@@ -369,7 +376,8 @@ class CommandInterpreter:
             self.run_interp_commands
         ]
         with dbmgr() as duck:
-            duck.register_for_signal("table_drop", self.on_table_drop)
+            duck.register_for_signal(DBSignals.TABLE_DROP, self.on_table_drop)
+            duck.register_for_signal(DBSignals.TABLE_RENAME, self.on_table_rename)
 
             self.duck = duck
             for stage in pipeline:
@@ -552,6 +560,9 @@ class CommandInterpreter:
     # program to render the result. Commands should call `context.get_input` to
     # retrieve input from the user interactively.
     ################
+    def alter_table(self, table_ref, new_table):
+        self.duck.rename_table(TableHandle(table_ref), new_table)
+
     def count_table(self, table_ref):
         """ count <table> - returns count of rows in a table """
         return self._execute_duck(f"select count(*) from {table_ref}")
@@ -692,6 +703,10 @@ class CommandInterpreter:
         if table.schema() in self.adapters:
             self.adapters[table.schema()].drop_table(table.table_root())
 
+    def on_table_rename(self, dbmgr, old_table, new_table):
+        if old_table.schema() in self.adapters:
+            self.adapters[old_table.schema()].rename_table(old_table.table_root(), new_table.table_root())
+
     def peek_table(self, qualifier, peek_object, line_count=20, build_stats=True, debug=False):
         # Get column weights and widths.
         if qualifier == 'file':
@@ -770,7 +785,7 @@ class CommandInterpreter:
 
     def reload_table(self, table_ref):
         """ reload table <table> - reloads the entire table from the source adapter """
-        self._execute_duck(f"drop table {table_ref}")
+        self._execute_duck(f"drop table if exists {table_ref}")
         schema, table_root = table_ref.split(".")
         self.load_adapter_data(schema, table_root)
 
@@ -900,7 +915,7 @@ class CommandInterpreter:
             actuals: pd.DataFrame = self.duck.list_tables(schema_ref)
             actual_names = []
             if not actuals.empty:
-                df = pd.concat([df, actuals]).drop_duplicates('table_name').reset_index(drop=True)
+                df = pd.concat([df, actuals]).drop_duplicates('table_name',keep='last').reset_index(drop=True)
                 actual_names = actuals['table_name'].tolist()
             if not df.empty:
                 df.sort_values('table_name', ascending = True, inplace=True)

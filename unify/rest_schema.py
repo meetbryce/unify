@@ -271,6 +271,10 @@ class RESTTable(TableDef):
         else:
             return None
 
+    def get_table_source(self):
+        # Returns a description of where we are loading data from for the table
+        return {"api": (self.query_method + " " + self.query_path), "adapter": self.spec.name}
+
     def supports_paging(self):
         return self._supports_paging
 

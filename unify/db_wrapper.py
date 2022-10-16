@@ -121,6 +121,8 @@ class TableHandle:
     def __repr__(self) -> str:
         return "TableHandle(" + str(self) + ")"
 
+    def set_opt(self, key: str, value: str):
+        self._table_opts[key] = value
 
 class DBSignals:
     SCHEMA_CREATE = "schema_create"
@@ -128,6 +130,7 @@ class DBSignals:
     TABLE_CREATE = "table_create"
     TABLE_DROP = "table_drop"
     TABLE_LOADED = "table_loaded"
+    TABLE_RENAME = "table_rename"
 
 class DBManager(contextlib.AbstractContextManager):
     SIG_DICT = {}
@@ -148,12 +151,14 @@ class DBManager(contextlib.AbstractContextManager):
                 DBSignals.SCHEMA_DROP: Signal(args=['dbmgr', 'schema']),
                 DBSignals.TABLE_CREATE: Signal(args=['dbmgr', 'table']),
                 DBSignals.TABLE_DROP: Signal(args=['dbmgr', 'table']),
+                DBSignals.TABLE_RENAME: Signal(args=['dbmgr', 'old_table', 'new_table']),
                 DBSignals.TABLE_LOADED: Signal(args=['dbmgr', 'table']), # emitted after a table is loaded or updated
             })
         self.signals[DBSignals.SCHEMA_CREATE].connect(self._on_schema_create)
         self.signals[DBSignals.SCHEMA_DROP].connect(self._on_schema_drop)
         self.signals[DBSignals.TABLE_CREATE].connect(self._on_table_create)
         self.signals[DBSignals.TABLE_DROP].connect(self._on_table_drop)
+        self.signals[DBSignals.TABLE_RENAME].connect(self._on_table_rename)
         self.engine: Unknown = None
         # Keep track of table references from the most recent query
         self.last_seen_tables = []
@@ -194,14 +199,28 @@ class DBManager(contextlib.AbstractContextManager):
         session.commit()
         t = SchemataTable(table_name=table.table_root(), table_schema=table.schema())
         opts = table.table_opts()
+        print(f"SAVING meta for table {table} with ops: {opts}")
         for key in ['description', 'source', 'connection']:
             if key in opts:
                 setattr(t, key, opts[key])
         session.add(t)
         session.commit()
-        #self.engine.execute("COMMIT")
         session.expire_all()
 
+    def _on_table_rename(self, **kwargs):
+        print(f"RENAME TABLE: {kwargs}")
+        old_table = kwargs['old_table']
+        new_table = kwargs['new_table']
+        session = Session(bind=self.engine)
+        session.query(SchemataTable).filter(
+            SchemataTable.table_name == old_table.table_root(),
+            SchemataTable.table_schema == old_table.schema()
+        ).update({
+            SchemataTable.table_name: new_table.table_root(),
+            SchemataTable.table_schema: new_table.schema()
+        })
+        session.commit()
+        
     def _on_table_drop(self, **kwargs):
         table = kwargs['table']
         session = Session(bind=self.engine)
@@ -249,6 +268,9 @@ class DBManager(contextlib.AbstractContextManager):
 
     def rewrite_query(self, query: sqlglot.expressions.Expression) -> str:
         # Allows the db adapter to rewrite an incoming sql query
+        pass
+
+    def rename_table(self, table: TableHandle, new_name: str):
         pass
 
     def table_exists(self, table: TableHandle) -> bool:
@@ -411,9 +433,8 @@ class DuckDBWrapper(DBManager):
                 continue
             new_cols[name] = type
 
-        self.execute(
-            f"create table if not exists {table} (" + ",".join(["{} {}".format(n, t) for n, t in new_cols.items()]) + ")"
-        )
+        sql = f"create table if not exists {table} (" + ",".join(["{} {}".format(n, t) for n, t in new_cols.items()]) + ")"
+        self.execute(sql)
         self._send_signal(signal=DBSignals.TABLE_CREATE, table=table)
 
 
@@ -658,6 +679,15 @@ class ClickhouseWrapper(DBManager):
         #print(f"REWROTE '{query}' as '{newsql}'")
         return newsql
 
+    def rename_table(self, table: TableHandle, new_name: str):
+        if "." in new_name:
+            raise QuerySyntaxException("Cannot specify schema when renaming table")
+        old_table = CHTableHandle(table, self.tenant_id)
+        new_table = CHTableHandle(TableHandle(new_name, table.schema()), self.tenant_id)
+        df = self.execute_df(f"RENAME TABLE {old_table} TO {new_table}", native=True)
+        self.send_signal(DBSignals.TABLE_RENAME, old_table=old_table, new_table=new_table)
+
+
     def current_date_expr(self):
         return "today()"
 
@@ -790,9 +820,9 @@ class ClickhouseWrapper(DBManager):
             match = match.replace('*', '.*')
             match = match.replace('%', '.*')
             match = '^' + match + '$'
-            return df.loc[df.name.str.contains(match, case=False)]
+            return df.loc[df.name.str.contains(match, case=False)].sort_values('name')
         else:
-            return df
+            return df.sort_values('name')
 
     def create_table(self, table: TableHandle, columns: dict):
         real_table = CHTableHandle(table, tenant_id=self.tenant_id)

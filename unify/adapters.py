@@ -399,3 +399,6 @@ class Adapter:
 
     def drop_table(self, table_root: str):
         pass
+
+    def rename_table(self, table_root: str, new_name: str):
+        pass

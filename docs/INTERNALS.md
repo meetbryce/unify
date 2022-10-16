@@ -49,3 +49,12 @@ also supplies values for the "auth vars" needed by the adapter. These can either
 hard-coded values or references on env vars.
 
 We don't ever use "Connector" to avoid confusion!
+
+Each Adapter represents the data sets that it can produce via the `TableDef` class.
+So we ask the adapter for its "virtual tables" via `list_tables` and get a list of
+TableDefs back. To load the table (pull data from the underlying API and populate
+our local db) we use the `TableLoader` class from the `loading` module. This class implements
+re-usable logic for loading data from APIs, where the adapter's TableDef is responsible
+for talking to the specific API.
+
+Most connections will re-use our RESTAdapter.
