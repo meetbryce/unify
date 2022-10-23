@@ -1,12 +1,11 @@
 from cgi import parse_multipart
-import glob
+import json
 import os
 import re
+import time
 from pprint import pprint
 import string
-import sys
 from tempfile import NamedTemporaryFile
-import yaml
 from typing import List, AnyStr, Dict, Union, Iterable, Generator
 import typing
 from datetime import datetime
@@ -15,6 +14,9 @@ from collections import namedtuple
 
 import requests
 from jsonpath_ng import parse
+
+from google.oauth2.credentials import Credentials
+import google.auth.transport.requests
 
 from .storage_manager import StorageManager
 from .data_utils import interp_dollar_values
@@ -320,6 +322,8 @@ class RESTTable(TableDef):
                 merge_cols = None
             for page, size_return in self._query_resource(tableLoader, params_record.copy(), logger):
                 yield AdapterQueryResult(json=page, size_return=size_return, merge_cols=merge_cols)
+                if self.spec.throttle:
+                    time.sleep(self.spec.throttle['sleep'])
 
     def generate_param_values(self, tableLoader):
         """ 
@@ -368,27 +372,32 @@ class RESTTable(TableDef):
         # Now run through parameters and if we find one with multiple values we generate
         # param dictionaries with each value
 
-        # FIXME: This method needs to be recursive to handle multiple multi-value params
-        sent_values = False
-        for pname, value in params.items():
-            if not isinstance(value, str) and isinstance(value, Iterable):
-                sent_values = True
-                param_cols = re.split(r"\s*,\s*", pname)
-                del params[pname] # will refill below
-                for row in value:
-                    if len(param_cols) == 1:
-                        params[pname] = (row[0] if hasattr(row, 'size') else row)
-                    else:
-                        # Unpack multiple param values
-                        params.update(dict(zip(param_cols, row)))
-                    # Now send params back to call, which will issue the API call using those
-                    # params (and possibly paginating the results)
-                    yield params
-                return # only allow one multi-value parameter for now
-        
-        if not sent_values:
-            # If nothing but scalar params then just yield the single record
-            yield params    
+
+        # Recursively iterate through each parameter in the list. If we encounter
+        # a multi-value then we generate a row for each value. Otherwisewe just generate
+        # for the single scalar vlaue. We continue until we our out of params.
+        # This works even for multiple multi-value parameters.
+
+        def emit_params(accum: dict, params: list, pos:int = 0):
+            if pos >= len(params):
+                yield accum
+            else:
+                pname, value = params[pos]
+                if not isinstance(value, str) and isinstance(value, Iterable):
+                    param_cols = re.split(r"\s*,\s*", pname)
+                    for row in value:
+                        if len(param_cols) == 1:
+                            accum[pname] = (row[0] if hasattr(row, 'size') else row)
+                        else:
+                            # Unpack multiple param values
+                            accum.update(dict(zip(param_cols, row)))
+                        yield from emit_params(accum.copy(), params, pos+1)
+                else:
+                    accum[pname] = value
+                    yield from emit_params(accum, params, pos+1)
+
+        yield from emit_params({}, list(params.items()))
+
                     
     def _query_resource(
         self, 
@@ -433,6 +442,7 @@ class RESTTable(TableDef):
                     show_params = api_params
                 print(url, api_params)
                 r = session.get(url, params=api_params)
+                #print(r.text)
 
             if r.status_code >= 400:
                 print(r.text)
@@ -509,6 +519,7 @@ class RESTAdapter(Adapter):
         self.cacheTTLSecs = spec.get('cacheTTLSecs')
         self.polling_interval_secs = spec.get('polling_interval_secs', 60*60*4)
         self.next_page_token = spec.get('next_page_token')
+        self.throttle = spec.get('throttle')
 
         if "tables" in spec:
             self.tables = [RESTTable(self, d) for d in spec['tables']]
@@ -565,8 +576,19 @@ class RESTAdapter(Adapter):
                 self.auth['region'],
                 self.auth['service']
             )
+        elif authType == 'GOOGLE_AUTH':
+            creds_path = os.path.expanduser(self.auth['client_creds_path'])
+            if os.path.exists(creds_path):
+                cred_data = json.loads(open(creds_path).read())
+                self.creds = Credentials(**cred_data)
+                req: google.auth.transport.requests.Request = google.auth.transport.requests.Request()
+                try:
+                    self.creds.refresh(req)
+                    self.creds.apply(session.headers)
+                except google.auth.exceptions.RefreshError:
+                    raise
         elif authType == 'NONE':
             pass
         else:
-            raise Exception("Error unknown auth type")
+            raise Exception(f"Error unknown auth type: {authType}")
 

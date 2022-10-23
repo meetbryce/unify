@@ -1,3 +1,4 @@
+from distutils.cmd import Command
 import io
 import traceback
 import pandas as pd
@@ -7,7 +8,7 @@ import time
 import logging
 
 from ipykernel.kernelbase import Kernel
-from unify import CommandInterpreter
+from unify import CommandInterpreter, CommandContext
 from lark.visitors import Visitor
 from unify.parsing_utils import find_node_return_children
 import ipynbname
@@ -85,12 +86,14 @@ class UnifyKernel(Kernel):
                    allow_stdin=False):
         self._allow_stdin = allow_stdin
         try:
-            lines, object = self.unify_runner.run_command(
+            context: CommandContext = self.unify_runner.run_command(
                 code, 
                 input_func=self.raw_input, 
                 get_notebook_func=self._find_notebook,
                 interactive=(not silent)
             )
+            lines = context.lines
+            object = context.result
             if not silent:
                 if lines:
                     self.send_response(self.iopub_socket, 'stream', {'name': 'stdout', 'text': "\n".join(lines)})

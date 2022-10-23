@@ -53,3 +53,76 @@ in `information_schema.tables` that tracks the population event for the table.
 The information schema is maintained by SQLAlchemy classes that are configured to use the active
 tenant's schema.
 
+## Data provenance
+
+We want to keep a complete record of the "provenance" of each table. So as both to understand
+the contents of the table, but also to automatically execute pipelines which maintaing derived
+data sets.
+
+Examples:
+
+The "prs_and_tickets" view collates information from Github and JIRA together into a single view.
+It's provenance, in reverse order, looks like:
+
+  prs_and_tickets view
+  -> create view as (select from jira_issues, pr_counts JOINED to github.coders)
+     ancestor tables: jira_isses, pr_counts, github.coders
+        
+      jira_issues
+      -> loaded by the JIRA adapter, issues table
+
+      pr_counts
+      -> CTE loaded by the Github adapter, pulls table
+
+      github.coders
+      -> create view as (select from $emps)
+      ancestor tables: $emps
+
+        $emps:
+        -> select from github.users, gsheets.employees
+           ancestor tables: github.users, gsheets.employees
+
+           github.users
+           -> loaded by the Github adapter
+           
+           gsheets.employees
+           -> loaded from a spreadsheet by the GSheets adapter
+
+Now, whenever the system observes new data arriving at any of the source tables
+(employees, github.user, github.pulls, jira.issues) then it should be able to
+re-calculate the pr_and_tickets view by re-executing the dependency tree.
+
+### Tables or scripts
+
+Should we store "scripts", and maintain the depedendency between them, and automatically
+re-execute them? This has the advantage of supporting non-table creating commands inside
+scripts like building dashboards or sending emails. But it requires us to save and
+manage "script" models in the database. We also have to assume that scripts are correct
+when executed in order.
+
+The advantage of "table dependence" is that we just have to record data for each table
+and then traverse the relationships to understand the provenance.
+
+## Pull or push
+
+We really want to be able to 'pull' results through the system. Basically I have an output
+target that I want created:
+
+- Construct a table of data (for use by someone else)
+- Construct a chart report (and email or display it)
+- Construct a tabular report (and email or display it)
+- Construct a "composite" report of other reports
+
+And I want to generate these outputs on some kind of schedule (daily report, or dashboard
+updated hourly).
+
+The generation of these reports should "pull" the dependent data through the system. That is,
+I should trace through the data sets used by the reports back ultimately to adapter tables, refresh the data from those adapters, then run any intermediate transformation steps, and
+then re-generate the report.
+
+So I have:
+
+**report** This is the fundamental thing that I want to create.
+
+
+    

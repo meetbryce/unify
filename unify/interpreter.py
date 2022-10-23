@@ -398,7 +398,8 @@ class CommandInterpreter:
             self.run_commands_after_db_closed(context)
         self.clean_df_result(context)
         self.print_df_header(context)
-        self._last_result = context.result
+        if isinstance(context.result, pd.DataFrame):
+            self._last_result = context.result
         self.recent_tables = context.recent_tables
         return context
 
@@ -1079,6 +1080,8 @@ class CommandInterpreter:
             chart_params["y"] = 'b'           
 
         if chart_source:
+            if chart_source.startswith('$'):
+                df = self._get_variable(chart_source[1:])
             df = self._execute_duck(f"select * from {chart_source}")
         else:
             df = self._last_result
@@ -1104,7 +1107,8 @@ class CommandInterpreter:
             raise RuntimeError(f"Uknown chart type '{chart_type}'")
 
         #chart_params["tooltip"] = {"content":"data"}
-        
+        rolling = chart_params.pop('rolling', None)
+
         print(chart_params)
         chart = altair.Chart(df)
         chart = getattr(chart, chart_methods[chart_type])(tooltip=True). \
@@ -1122,6 +1126,20 @@ class CommandInterpreter:
                 trendline = "_trend"
             trend = altair.Chart(df).mark_line(color='red').encode(x=chart_params['x'], y=trendline)
             chart = chart + trend
+
+        if rolling:
+            try:
+                window = int(rolling)
+            except ValueError:
+                raise RuntimeError("rolling parameter must be the window size as an integer")
+            
+            rollavg = altair.Chart(df).mark_line(color="#FFAA00").transform_window(
+                rolling_mean='mean(' + chart_params['y'] + ')',
+                frame=[-window, window]
+            ).encode(
+                **(chart_params | {'y': 'rolling_mean:Q'})
+            )
+            chart = chart + rollavg
 
         self.last_chart = chart
         return chart

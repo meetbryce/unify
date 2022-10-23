@@ -157,6 +157,7 @@ class DBManager(contextlib.AbstractContextManager):
             })
         self.signals[DBSignals.SCHEMA_CREATE].connect(self._on_schema_create)
         self.signals[DBSignals.SCHEMA_DROP].connect(self._on_schema_drop)
+        print("ADDING TABLE_CREATE signal handler for DBManager: ", self)
         self.signals[DBSignals.TABLE_CREATE].connect(self._on_table_create)
         self.signals[DBSignals.TABLE_DROP].connect(self._on_table_drop)
         self.signals[DBSignals.TABLE_RENAME].connect(self._on_table_rename)
@@ -164,6 +165,7 @@ class DBManager(contextlib.AbstractContextManager):
         self.last_seen_tables = []
 
     def _remove_signals(self):
+        print("REMOVING TABLE_CREATE signal handler for DBManager: ", self)
         self.signals[DBSignals.SCHEMA_CREATE].disconnect(self._on_schema_create)
         self.signals[DBSignals.SCHEMA_DROP].disconnect(self._on_schema_drop)
         self.signals[DBSignals.TABLE_CREATE].disconnect(self._on_table_create)
@@ -207,7 +209,7 @@ class DBManager(contextlib.AbstractContextManager):
         session.commit()
         t = SchemataTable(table_name=table.table_root(), table_schema=table.schema())
         opts = table.table_opts()
-        print(f"SAVING meta for table {table} with ops: {opts}")
+        print(f"SAVING meta for table {table} with ops: {opts} on self: ", self)
         for key in ['description', 'source', 'connection']:
             if key in opts:
                 setattr(t, key, opts[key])
@@ -727,6 +729,16 @@ class ClickhouseWrapper(DBManager):
 
         try:
             df = self.client.query_dataframe(query)
+            # The Clickhouse client doesn't seem to return actually date-typed columns for date functions, even
+            # through the query returns date-typed values. So let's try to coerce the column type.
+            if df.shape[0] > 0:
+                for col in df.columns:
+                    if df[col].iloc[0].__class__.__name__.startswith('date'):
+                        try:
+                            df[col] = pd.to_datetime(df[col], errors='ignore')
+                        except:
+                            pass
+
             for dml in capture_dmls:
                 self._send_signal(dml['signal'], table=TableHandle(dml['table']))
             return df

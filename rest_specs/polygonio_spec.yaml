@@ -1,0 +1,20 @@
+enabled: true
+name: polygonio
+help: |
+  Provide historical stock and financials data for companies.
+base_url: https://api.polygon.io
+auth:
+  type: PARAMS
+  params:
+    apiKey: POLYGON_API_KEY
+throttle:
+  sleep: 15
+tables:
+  - name: financials
+    resource_path: /vX/reference/financials
+    result_body_path: results
+    params:
+      ticker: [TTD, SHOP, GOOG, APPL, "$SPX"]
+      filing_date.lte: ["2021-01-01", "2021-03-31", "2021-06-30", "2021-09-30", "2021-12-31", "2022-03-31", "2022-06-30", "2022-09-30", "2022-12-31"]
+      timeframe: quarterly
+

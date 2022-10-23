@@ -185,6 +185,7 @@ chart_param: X_PARAM
              | COLOR_PARAM
              | THETA
              | TRENDLINE
+             | ROLLING
              
 X_PARAM: "x"
 Y_PARAM: "y"
@@ -194,6 +195,7 @@ STACKED_PARAM: "stacked"
 COLOR_PARAM: "color"
 THETA: "theta"
 TRENDLINE: "trendline"
+ROLLING: "rolling"
 
 param_value: WORD | LITERAL
 column_ref: WORD

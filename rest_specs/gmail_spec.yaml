@@ -1,0 +1,19 @@
+enabled: true
+name: gmail
+auth:
+  type: GOOGLE_AUTH
+  client_json_path: client_json_path
+  client_creds_path: client_creds_path
+base_url: https://gmail.googleapis.com/gmail
+tables:
+  - name: message_ids
+    resource_path: /v1/users/me/messages
+    params:
+      maxResults: 500
+    result_body_path: messages
+  - name: messages
+    resource_path: /v1/users/me/messages/{id}
+    params:
+      id: sql@(select id from message_ids)
+      format: full
+     

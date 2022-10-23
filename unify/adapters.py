@@ -68,6 +68,10 @@ class Connection:
         for opts in connections:
             schema_name = next(iter(opts))
             opts = opts[schema_name]
+            if opts['adapter'] not in adapter_table:
+                print(f"Error: cannot find adapter {opts['adapter']} for connection {schema_name}")
+                print("Available adapters: ", adapter_table.keys())
+                continue
             adapter_klass, spec = adapter_table[opts['adapter']]
             adapter = adapter_klass(spec, storage_mgr_maker(schema_name))
             c = Connection(adapter, schema_name, opts)

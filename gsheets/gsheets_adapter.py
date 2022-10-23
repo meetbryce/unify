@@ -31,7 +31,11 @@ class GSheetsClient:
     ALL_SPREADSHEETS_TABLE = "all_spreadsheets"
     MAPPED_SHEETS_TABLE = "mapped_sheets"
 
-    SCOPES = ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
+    SCOPES = [
+        "https://www.googleapis.com/auth/drive", 
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/gmail.readonly"
+    ]
 
     def __init__(self, spec):
         self.creds: Credentials = None

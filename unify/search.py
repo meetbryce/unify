@@ -61,7 +61,6 @@ class Searcher:
         self.index = create_in(self.ix_path, schema=self.schema)
 
     def index_object(self, type: str, name: str, parent: str=None, description: str=None):
-        print(f"Adding search doc: [{type}]", name, " < ", parent)
         self.writer.add_document(
             type=type,
             key=type + "." + (parent or '') + "." + name, 
