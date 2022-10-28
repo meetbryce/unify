@@ -17,6 +17,7 @@ def db():
     with dbmgr() as _db:
         yield _db
 
+@pytest.mark.skip(reason="")
 def test_schemas(db: DBManager):
     db.create_schema("myscheme1")
     scs = db.list_schemas()   
@@ -44,6 +45,7 @@ def test_tables(db: DBManager):
     assert df.empty
     db.drop_schema(schema, cascade=True)
 
+@pytest.mark.skip(reason="")
 def test_df_tables(db: DBManager):
     schema = "myscheme3"
     db.drop_schema(schema, cascade=True)
@@ -71,6 +73,7 @@ def test_df_tables(db: DBManager):
 
 
 from sqlalchemy.orm.session import Session
+@pytest.mark.skip(reason="")
 def test_connection_scans(db):
     from unify.db_wrapper import ConnectionScan
 
@@ -85,7 +88,7 @@ def test_connection_scans(db):
     print("found scan: ", scan)
     assert c.values == values
 
-
+@pytest.mark.skip(reason="")
 def test_create_table_signal(db: DBManager):
     signals = []
     def on_table_create(dbmgr, table):

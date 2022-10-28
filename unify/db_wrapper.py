@@ -430,7 +430,8 @@ class DuckDBWrapper(DBManager):
                 DuckDBWrapper.DUCK_CONN.execute("COMMIT")
             except:
                 pass
-            DuckDBWrapper.DUCK_CONN.close()
+            # We are sharing the conn with SQLA, so let the Engine close it
+            DuckDBWrapper.DUCK_ENGINE.dispose()
             DuckDBWrapper.DUCK_CONN = None
 
     def dialect(self):
@@ -485,7 +486,8 @@ class DuckDBWrapper(DBManager):
 
         sql = f"create table if not exists {table} (" + ",".join(["{} {}".format(n, t) for n, t in new_cols.items()]) + ")"
         self.execute(sql)
-        self._send_signal(signal=DBSignals.TABLE_CREATE, table=table)
+        # This is not needed, as 'execute' will parse the create and send the signal for us
+        #self._send_signal(signal=DBSignals.TABLE_CREATE, table=table)
 
 
     def create_memory_table(self, table_root: str, df: pd.DataFrame):

@@ -1,0 +1,12 @@
+enabled: true
+name: tokenterminal
+base_url: https://api.tokenterminal.com
+auth:
+  type: BEARER
+  tokenvar: TTERMINAL_API_TOKEN
+tables:
+  - name: bitcoin
+    resource_path: /v2/projects/bitcoin/metrics
+    result_body_path: data
+    params:
+      metrics: fees,revenue
