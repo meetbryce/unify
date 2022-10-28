@@ -159,6 +159,7 @@ class RESTTable(TableDef):
         'description': str,
         'resource_path': str,
         'result_body_path' : (str, list),
+        'result_object_path': (str, list),
         'result_meta_paths': list,
         'supports_paging': bool,
         'paging': dict,
@@ -238,6 +239,7 @@ class RESTTable(TableDef):
         if (self.query_path == '<inline>'):
             self.static_values = dictvals.get('values')
         self.result_body_path = dictvals.get('result_body_path')
+        self.result_object_path = dictvals.get('result_object_path')
         self.result_meta_paths = dictvals.get('result_meta_paths')
 
         # parse columns

@@ -131,6 +131,7 @@ class TableDef:
         self._name = name
         self._select_list = []
         self._result_body_path = None
+        self._result_object_path = None
         self.result_meta_paths = None
         self._key = None
         self._queryDateFormat = None #Use some ISO default
@@ -197,6 +198,14 @@ class TableDef:
     @result_body_path.setter
     def result_body_path(self, val):
         self._result_body_path = val
+
+    @property
+    def result_object_path(self):
+        return self._result_object_path
+
+    @result_object_path.setter
+    def result_object_path(self, val):
+        self._result_object_path = val
 
     def get_table_updater(self, updates_since: datetime) -> TableUpdater:
         # default is just to reload
@@ -328,6 +337,11 @@ class Adapter:
         # We need to:
         # 1. Resolve the env var references in the Connection options
         # 2. Copy the connection options into the REST API spec's auth clause
+        if not isinstance(connection_opts, dict):
+            raise RuntimeError(
+                f"Bad connection options, expected a dict got type {type(connection_opts)}: ", 
+                connection_opts
+            )
         for k, value in connection_opts.items():
             if value.startswith("$"):
                 try:

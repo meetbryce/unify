@@ -1,5 +1,4 @@
 import os
-import shutil
 import pytest
 
 import pandas as pd
@@ -18,6 +17,7 @@ def clear_search(interp):
 
 # Note that the LocalFilesAdapter setup assumes files appear in $UNIFY_HOME/files,
 # and our conftest.py set UNIFY_HOME to be the tests directory.
+@pytest.mark.skip(reason="")
 def test_csv_import(interp: CommandInterpreter):
     clear_search(interp)
 

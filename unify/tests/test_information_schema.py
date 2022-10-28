@@ -39,6 +39,7 @@ def test_tables(db: DBManager):
         assert alltables == ['users']
 
     db.drop_table(TableHandle("users", schema))
+    time.sleep(1)
     df = db.list_tables(schema)
     assert df.empty
     db.drop_schema(schema, cascade=True)

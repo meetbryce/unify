@@ -157,7 +157,6 @@ class DBManager(contextlib.AbstractContextManager):
             })
         self.signals[DBSignals.SCHEMA_CREATE].connect(self._on_schema_create)
         self.signals[DBSignals.SCHEMA_DROP].connect(self._on_schema_drop)
-        print("ADDING TABLE_CREATE signal handler for DBManager: ", self)
         self.signals[DBSignals.TABLE_CREATE].connect(self._on_table_create)
         self.signals[DBSignals.TABLE_DROP].connect(self._on_table_drop)
         self.signals[DBSignals.TABLE_RENAME].connect(self._on_table_rename)
@@ -165,7 +164,6 @@ class DBManager(contextlib.AbstractContextManager):
         self.last_seen_tables = []
 
     def _remove_signals(self):
-        print("REMOVING TABLE_CREATE signal handler for DBManager: ", self)
         self.signals[DBSignals.SCHEMA_CREATE].disconnect(self._on_schema_create)
         self.signals[DBSignals.SCHEMA_DROP].disconnect(self._on_schema_drop)
         self.signals[DBSignals.TABLE_CREATE].disconnect(self._on_table_create)
@@ -188,7 +186,7 @@ class DBManager(contextlib.AbstractContextManager):
         self.signals[signal].emit(**kwargs)
 
     def _on_schema_create(self, dbmgr, schema):
-        print(f"ON SCHEMA CREATE for {schema}: ", self)
+        print(f"ON SCHEMA CREATE for {schema}: ")
         session = Session(bind=self.engine)
         session.query(Schemata).filter(Schemata.name == schema).delete()
         session.add(Schemata(name=schema, type="schema"))
@@ -209,7 +207,7 @@ class DBManager(contextlib.AbstractContextManager):
         session.commit()
         t = SchemataTable(table_name=table.table_root(), table_schema=table.schema())
         opts = table.table_opts()
-        print(f"SAVING meta for table {table} with ops: {opts} on self: ", self)
+        print(f"SAVING meta for table {table} with ops: {opts}")
         for key in ['description', 'source', 'connection']:
             if key in opts:
                 setattr(t, key, opts[key])
@@ -252,6 +250,36 @@ class DBManager(contextlib.AbstractContextManager):
         return re.sub("\\?", repl, query)
 
     # 
+    # query parsing
+    #
+
+    def parse_query_intel(self, query: str, dialect: str, capture_dml: list=[]) -> dict:
+        tables: list[TableHandle] = []
+
+        def transformer(node):
+            if isinstance(node, sqlglot.exp.Table):
+                tables.append(TableHandle(str(node)))
+            return node
+
+        try:
+            parsed_query = sqlglot.parse_one(query, read=dialect)
+            # Look for creates or drops executed as raw sql
+            capture_dml.extend(self._find_table_op(parsed_query, sqlglot.exp.Create, DBSignals.TABLE_CREATE))
+            capture_dml.extend(self._find_table_op(parsed_query, sqlglot.exp.Drop, DBSignals.TABLE_DROP))
+
+            parsed_query.transform(transformer).sql()
+            return {"tables": tables}
+        except Exception as e:
+            return {}
+
+    def _find_table_op(self, query: sqlglot.Expression, operation: sqlglot.expressions._Expression, signal: str):
+        for table_op in query.find_all(operation):
+            kind = table_op.args['kind'] # view or table
+            for table_ref in table_op.find_all(sqlglot.exp.Table):
+                return [{'signal': signal, 'table': table_ref.sql(), 'kind': kind}]
+        return []
+
+    # 
     # context manager
     #
     def __enter__(self) -> DBManager:
@@ -260,7 +288,7 @@ class DBManager(contextlib.AbstractContextManager):
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
-    def execute(self, query: str, args: Union[list, tuple] = []) -> pd.DataFrame:
+    def execute(self, query: str, args: Union[list, tuple] = [], context=None) -> pd.DataFrame:
         return None
 
     def current_date_expr(self):
@@ -294,12 +322,12 @@ class DBManager(contextlib.AbstractContextManager):
 
     def get_table_columns(self, table):
         # Returns the column names for the table in their insert order
-        rows = self.execute_df("describe " + table)
+        rows = self.execute("describe " + table)
         return rows["column_name"].values.tolist()
 
     def list_columns(self, table: TableHandle, match: str=None) -> pd.DataFrame:
         """ Returns a dataframe describing each column in a table. """
-        return self.execute_df(f"describe {table}")
+        return self.execute(f"describe {table}")
 
     def delete_rows(self, table: TableHandle, filter_values: dict, where_clause: str=None):
         pass
@@ -322,7 +350,7 @@ class DBManager(contextlib.AbstractContextManager):
         return res
 
     def drop_table(self, table: TableHandle):
-        res = self.execute(f"drop table {table}")
+        res = self.execute(f"drop table if exists {table}")
         self._send_signal(signal=DBSignals.TABLE_DROP, table=table)
         return res
 
@@ -363,13 +391,16 @@ class DuckDBWrapper(DBManager):
     DUCK_CONN: duckdb.DuckDBPyConnection = None
     DUCK_ENGINE = None
     REF_COUNTER = 0
+    ALERTED = False
 
     """ A cheap hack around DuckDB only usable in a single process. We just open/close
         each time to manage. Context manager for accessing the DuckDB database """
 
     def __init__(self):
         super().__init__()
-        print(f"Connecting to local DuckDB database")
+        if not DuckDBWrapper.ALERTED:
+            print(f"Connecting to local DuckDB database")
+            DuckDBWrapper.ALERTED = True
 
     def __enter__(self) -> DBManager:
         DuckDBWrapper.REF_COUNTER += 1
@@ -405,21 +436,28 @@ class DuckDBWrapper(DBManager):
     def dialect(self):
         return "duckdb"
 
-    def execute(self, query: str, args=[]):
+    def execute(self, query: str, args=[], context=None):
+        capture_dmls: list = []
+        intel = self.parse_query_intel(query, dialect='duckdb', capture_dml=capture_dmls)
+        if 'tables' in intel and context:
+            context.set_recent_tables(intel['tables'])
+
         try:
-            return DuckDBWrapper.DUCK_CONN.execute(query, args).df()
+            df = DuckDBWrapper.DUCK_CONN.execute(query, args).df()
+
+            for dml in capture_dmls:
+                self._send_signal(dml['signal'], table=TableHandle(dml['table']))
+
+            return df
         except RuntimeError as e:
             if re.search(r"Table.+ does not exist", str(e)):
                 raise TableMissingException(self.extract_missing_table(query, e))
             else:
                 raise
 
-    def execute_df(self, query: str, args=[]) -> pd.DataFrame:
-        return self.execute(query, args)  # type: ignore
-
     def get_table_columns(self, table: TableHandle):
         # Returns the column names for the table in their insert order
-        rows = self.execute_df("describe " + str(table))
+        rows = self.execute("describe " + str(table))
         return rows["column_name"].values.tolist()
 
     def delete_rows(self, table: TableHandle, filter_values: dict=None, where_clause: str=None):
@@ -652,13 +690,6 @@ class ClickhouseWrapper(DBManager):
             {"schema": schema}
         )
 
-    def _find_table_op(self, query: sqlglot.Expression, operation: sqlglot.expressions._Expression, signal: str):
-        for table_op in query.find_all(operation):
-            kind = table_op.args['kind'] # view or table
-            for table_ref in table_op.find_all(sqlglot.exp.Table):
-                return [{'signal': signal, 'table': table_ref.sql(), 'kind': kind}]
-        return []
-
     def rewrite_query(self, query: typing.Union[sqlglot.expressions.Expression,str]=None, capture_dml: list=[]) -> str:
         # Rewrite table references to use prefixes instead of schema names
         # FIXME: fix "show create table ..."
@@ -698,7 +729,7 @@ class ClickhouseWrapper(DBManager):
             raise QuerySyntaxException("Cannot specify schema when renaming table")
         old_table = CHTableHandle(table, self.tenant_id)
         new_table = CHTableHandle(TableHandle(new_name, table.schema()), self.tenant_id)
-        df = self.execute_df(f"RENAME TABLE {old_table} TO {new_table}", native=True)
+        df = self.execute(f"RENAME TABLE {old_table} TO {new_table}", native=True)
         self.send_signal(DBSignals.TABLE_RENAME, old_table=old_table, new_table=new_table)
 
 
@@ -710,12 +741,9 @@ class ClickhouseWrapper(DBManager):
         return self.client.execute(f"EXISTS {real_table}")[0] == 1
 
     def execute_raw(self, query: str, args=[]):
-        return self.execute_df(query, args=args, native=True)
+        return self.execute(query, args=args, native=True)
 
-    def execute(self, query: str, args=[], native=False):
-        return self.execute_df(query, args=args, native=native)
-
-    def execute_df(self, query: str, args=[], native=False, context=None) -> pd.DataFrame:
+    def execute(self, query: str, args=[], native=False, context=None) -> pd.DataFrame:
         self.last_seen_tables = []
         capture_dmls = []
         if not native:
@@ -788,7 +816,7 @@ class ClickhouseWrapper(DBManager):
 
     def get_table_columns(self, table):
         # Returns the column names for the table in their insert order
-        rows = self.execute_df("describe " + str(CHTableHandle(table, tenant_id=self.tenant_id)), native=True)
+        rows = self.execute("describe " + str(CHTableHandle(table, tenant_id=self.tenant_id)), native=True)
         return rows["name"].values.tolist()
 
     def get_short_date_cast(self, column):
@@ -829,7 +857,7 @@ class ClickhouseWrapper(DBManager):
             tprefix = "information_schema" + CHTableHandle.SCHEMA_SEP
             q = f"select * from information_schema.tables where table_schema = '{self.tenant_db}' and " + \
                 f"table_name like '{tprefix}%'"
-            df = self.execute_df(q, native=True)
+            df = self.execute(q, native=True)
             df['table_schema'] = 'information_schema'
             df['table_name'] = df['table_name'].apply(lambda x: x[len(tprefix):])
             return df[['table_schema', 'table_name']]
@@ -839,14 +867,15 @@ class ClickhouseWrapper(DBManager):
     def list_columns(self, table: TableHandle, match: str=None) -> pd.DataFrame:
         table = CHTableHandle(table, tenant_id=self.tenant_id)
         # FIXME: Handle 'match' - may need our tenant-specific information_schema table
-        df = self.execute_df(f"describe {table}", native=True)
+        df = self.execute(f"describe {table}", native=True)
+        df.rename(columns={'name': 'column_name', 'type': 'column_type'}, inplace=True)
         if match is not None:
             match = match.replace('*', '.*')
             match = match.replace('%', '.*')
             match = '^' + match + '$'
-            return df.loc[df.name.str.contains(match, case=False)].sort_values('name')
+            return df.loc[df.column_name.str.contains(match, case=False)].sort_values('column_name')
         else:
-            return df.sort_values('name')
+            return df.sort_values('column_name')
 
     def create_table(self, table: TableHandle, columns: dict):
         real_table = CHTableHandle(table, tenant_id=self.tenant_id)
@@ -996,59 +1025,6 @@ class ClickhouseWrapper(DBManager):
             value, 
             settings={'use_numpy': True}
         )
-
-class UnifyDBStorageManager(StorageManager):
-    """
-        Stores adapter metadata in DuckDB. Creates a "meta" schema, and creates
-        tables named <adapter schema>_<collection name>.
-    """
-    def __init__(self, adapter_schema: str, duck):
-        self.adapter_schema = adapter_schema
-        self.duck : DBManager = duck
-
-    def put_object(self, collection: str, id: str, values: dict) -> None:
-        with Session(bind=self.duck.engine) as session:
-            # Good to remember that Clickhouse won't enforce unique keys!
-            session.query(AdapterMetadata).filter(
-                AdapterMetadata.id == id,
-                AdapterMetadata.collection==(self.adapter_schema + "." + collection)
-            ).delete()
-            session.commit()
-            session.add(AdapterMetadata(
-                id=id, 
-                collection=self.adapter_schema + "." + collection,
-                values = values
-            ))
-            session.commit()
-
-    def get_object(self, collection: str, id: str) -> dict:
-        with Session(bind=self.duck.engine) as session:
-            rec = session.query(AdapterMetadata).filter(
-                AdapterMetadata.id == id,
-                AdapterMetadata.collection==(self.adapter_schema + "." + collection)
-            ).first()
-            if rec:
-                return rec.values
-
-    def delete_object(self, collection: str, id: str) -> bool:
-        with Session(bind=self.duck.engine) as session:
-            session.query(AdapterMetadata).filter(
-                AdapterMetadata.id == id,
-                AdapterMetadata.collection==(self.adapter_schema + "." + collection)
-            ).execution_options(
-                settings={'mutations_sync': 1}
-            ).delete()
-            session.commit()
-            time.sleep(0.1)
-
-    def list_objects(self, collection: str) -> list[tuple]:
-        with Session(bind=self.duck.engine) as session:
-            return [
-                (row.id, row.values)for row in \
-                    session.query(AdapterMetadata).filter(
-                        AdapterMetadata.collection==(self.adapter_schema + "." + collection)
-                    )
-            ]
 
 ## ORM classes for unify_schema 
 

@@ -33,8 +33,9 @@ from .db_wrapper import (
     DBSignals,
     TableMissingException,
     TableHandle,
-    UnifyDBStorageManager,
 )
+from .sqla_storage_manager import UnifyDBStorageManager
+
 from .adapters import Connection, OutputLogger
 from .file_adapter import LocalFileAdapter
 from .search import Searcher, NullSearcher
@@ -297,6 +298,9 @@ class BaseTableScan(Thread):
                 metas = [p.split(".") for p in metas]
             if isinstance(json_page, pd.DataFrame):
                 df = json_page
+            elif self.tableMgr.table_spec.result_object_path:
+                df = pd.DataFrame(json_page.get(self.tableMgr.table_spec.result_object_path))
+                breakpoint
             else:
                 df = pd.json_normalize(
                     json_page, 
@@ -479,9 +483,9 @@ class TableExporter(Thread):
 
         with dbmgr() as duck:
             if self.query:
-                r = duck.execute_df(self.query)
+                r = duck.execute(self.query)
             else:
-                r = duck.execute_df(f"select * from {self.table}")
+                r = duck.execute(f"select * from {self.table}")
 
             # FIXME: Use DF chunking and multiple pages
             self.adapter.write_page(self.output_handle, r, output_logger, append=self.append, page_num=1)
@@ -613,7 +617,7 @@ class TableLoader:
                 parent=table.schema()
             )
             for row in cols_df.to_dict('records'):
-                self.searcher.index_object("column", row['name'], parent=table.user_name())
+                self.searcher.index_object("column", row['column_name'], parent=table.user_name())
         finally:
             self.searcher.close_index()
 
@@ -723,7 +727,7 @@ class TableLoader:
         newq = sqlglot.parse_one(query, read='clickhouse').transform(transformer)
         with dbmgr() as db:
             parent_query = newq.sql(dialect=db.dialect())
-            yield db.execute_df(parent_query)
+            yield db.execute(parent_query)
 
     def read_table_rows(self, table, limit=None):
         with dbmgr() as duck:
@@ -737,7 +741,7 @@ class TableLoader:
                     limit = f" limit {limit}"
                 else:
                     limit = ""
-                yield duck.execute_df(f"select * from {table} {limit}")
+                yield duck.execute(f"select * from {table} {limit}")
             else:
                 raise RuntimeError(f"Could not get rows for table {table}")
 

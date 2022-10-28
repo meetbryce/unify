@@ -556,7 +556,7 @@ class CommandInterpreter:
     def _execute_duck(self, query: typing.Union[str, CommandContext]) -> pd.DataFrame:
         if isinstance(query, CommandContext):
             query = query.command
-        return self.duck.execute_df(query, context=self.context)
+        return self.duck.execute(query, context=self.context)
 
     def print(self, *args):
         self.context.logger.print(*args)
@@ -872,7 +872,7 @@ class CommandInterpreter:
             self._save_variable(var_ref, val, is_global)
             self.print(val)
         else:
-            val = self.duck.execute_df(var_expression)
+            val = self.duck.execute(var_expression)
             if not val.empty and val.shape == (1, 1):
                 val = val.iloc[0][0]
             self._save_variable(var_ref, val, is_global)
@@ -887,7 +887,7 @@ class CommandInterpreter:
                 else:
                     # Maybe it was stored as full table
                     table_name = "var_" + LocalFileAdapter.convert_string_to_table_name(name)
-                    return self.duck.execute_df(f"select * from meta.{table_name}")
+                    return self.duck.execute(f"select * from meta.{table_name}")
         else:
             return self.session_vars[name]
 

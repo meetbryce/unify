@@ -44,3 +44,4 @@ class MemoryStorageManager(StorageManager):
             
     def list_objects(self, collection: str) -> list[tuple]:
         return [(key, val) for key, val in self.get_col(collection).items()]
+
