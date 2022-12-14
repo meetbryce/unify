@@ -378,6 +378,7 @@ class CommandInterpreter:
             self.check_print_wide,
             self.run_command_direct_to_db,
             self.substitute_variables,
+            self.replace_last_table_reference,
             self.run_adapter_commands,
             self.lark_parse_command,
             self.skip_non_interactive,
@@ -521,6 +522,15 @@ class CommandInterpreter:
                 logger: OutputLogger = OutputLogger()
                 handler: Adapter = self.adapters[first_word]
                 return handler.run_command(rest_of_command, logger)
+
+    def replace_last_table_reference(self, context: CommandContext):
+        pos = context.command.find(" ??")
+        if pos > 0:
+            if len(self.recent_tables) > 0:
+                context.command = context.command[0:pos] + " " + str(self.recent_tables[0]) + " " + context.command[pos + 3:]
+                self.print(context.command)
+            else:
+                raise RuntimeError("Can't find previous table to replace '??'")
 
     def substitute_variables(self, context: CommandContext):
         if re.match(r"\s*\$[\w_0-9]+\s*$", context.command):

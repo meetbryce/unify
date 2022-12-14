@@ -13,6 +13,9 @@ class UnifyDBStorageManager(StorageManager):
         self.adapter_schema = adapter_schema
         self.duck : DBManager = duck
 
+    def get_local_db(self):
+        return self.duck
+        
     def put_object(self, collection: str, id: str, values: dict) -> None:
         from unify import dbmgr
         with dbmgr() as duck:

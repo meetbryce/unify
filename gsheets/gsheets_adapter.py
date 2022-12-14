@@ -337,7 +337,7 @@ class GsheetCommandParser(Visitor):
       
 
 class GSheetsAdapter(Adapter):
-    def __init__(self, spec, storage: StorageManager):
+    def __init__(self, spec, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
         self.auth = spec['auth'].copy()
         self.logger: OutputLogger = None
@@ -365,7 +365,8 @@ is a good option if the sheet data is changing frequenly.
         self.tables = []
 
     def validate(self, silent=False):
-        return self.client.validate(self, silent)
+        #return self.client.validate(self, silent)
+        pass
 
     def list_tables(self):
         if not self.tables:

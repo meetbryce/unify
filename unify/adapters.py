@@ -52,9 +52,13 @@ class Connection:
             if spec.get('enabled') == False:
                 continue
             klass = RESTAdapter
-            if 'class' in spec and spec['class'].lower() == 'gsheetsadapter':
-                from gsheets.gsheets_adapter import GSheetsAdapter
-                klass = GSheetsAdapter
+            if 'class' in spec:
+                if spec['class'].lower() == 'gsheetsadapter':
+                    from gsheets.gsheets_adapter import GSheetsAdapter
+                    klass = GSheetsAdapter
+                elif spec['class'].lower() == 'postgresadapter':
+                    from .postgres_adapter import PostgresAdapter
+                    klass = PostgresAdapter           
             adapter_table[spec['name']] = (klass, spec)
         
         if conn_list:
@@ -73,7 +77,7 @@ class Connection:
                 print("Available adapters: ", adapter_table.keys())
                 continue
             adapter_klass, spec = adapter_table[opts['adapter']]
-            adapter = adapter_klass(spec, storage_mgr_maker(schema_name))
+            adapter = adapter_klass(spec, storage_mgr_maker(schema_name), schema_name)
             c = Connection(adapter, schema_name, opts)
             if c.is_valid:
                 result.append(c)
@@ -343,7 +347,7 @@ class Adapter:
                 connection_opts
             )
         for k, value in connection_opts.items():
-            if value.startswith("$"):
+            if value and value.startswith("$"):
                 try:
                     value = os.environ[value[1:]]
                     connection_opts[k] = value

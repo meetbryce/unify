@@ -49,7 +49,7 @@ class LocalFileTableSpec(TableDef):
 
 
 class LocalFileAdapter(Adapter):
-    def __init__(self, spec, root_path: str, storage: StorageManager):
+    def __init__(self, spec, root_path: str, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
         # FIXME: Use user-specific path when we have one
         self.root_path = Path(root_path)

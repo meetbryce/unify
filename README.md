@@ -126,7 +126,7 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
 1. [done] SQL expressions for rest specs
 1. [done] Implement "peek <table>" command which automatically selects interesting columns
 1. [done] Implement "run [<notebook>] at <schedule>" command
-1. Have "show tables" indicate table comment and if data has been loaded from the table yet
+1. [done] Have "show tables" indicate table comment and if data has been loaded from the table yet
 1. [done] Automagically show hyperlinks for URL content from tables
 1. Start working on "lineage" features that can show which notebook/code produced a table
 1. [done] Make sure date/float typing works properly on table load
@@ -140,6 +140,46 @@ See the [SQL LANGUAGE](docs/SQL_LANGUAGE.md) docs for syntax.
     1. [done] Custom charting command
     1. Implement more autocompletions based on scanning help messages
     1. Async responses for slow actions (like emailing)
+
+## Roadmap
+
+### Adapters
+
+- Implement some interesting new adapters: Gmail, Salesforce, S3, GDrive
+- Implement YAMLSchema validation for adapter specs
+- A Web based "adapter builder" for interactive building/modifying of adapter specs
+- Generalizeed Oauth support
+
+### Interpreter
+
+- Proper command/table/column completion
+
+### Web interface
+
+- Build a centralized web admin front-end for interacting with the interpreter
+- Data exploration interfaces
+    - Create connection interface
+    - Schema browser
+    - Data "peeking" (both tables and API endpoints)
+    - Adapter builder
+    - Command console
+- Proprietary "notebook" support. A notebook is a similar to Jupyter - a sequential set of cells
+where cells are either code or right text. Notebooks also include "input" and "output" metadata.
+That is, notebooks automatically describe which tables/vars they depend on for input, and which ones
+they generate as output. This allows the user to decompose a complex pipeline into multiple notebooks,
+where the system automatically understands the dependencies between the pieces. The user can annotate
+a notebook to "auto execute" if any of its inputs change. So if I imported a spreadsheet into a table,
+then created a notebook to transform the sheet data into another table, then I could specify that
+the notebook should be executed automatically if the original sheet data was updated.
+- Implement support for "reports" and "dashboards" either as new first-class objects or specializations
+of notebooks. Likely to be the latter. You create a notebook and then say "render this notebook as
+a dashboard" which basically extracts and displays only "marked reportable" cells. By default a code
+cell which makes a chart will be marked "reportable". But the user could elect to report via tables or
+text cells as well.
+- Notebook "dev/publish" mode should be very clear. A notebook can only be run automatically in the background
+once it is "published" which creates a "hard version" of the notebook contents. This let's someone play
+with notebook edits without affecting published notebooks. (Maybe "published" notebooks are commited into
+the interpreter, while dev notebooks are only held in the admin layer?)
 
 ## Developing
 

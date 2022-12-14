@@ -300,7 +300,6 @@ class BaseTableScan(Thread):
                 df = json_page
             elif self.tableMgr.table_spec.result_object_path:
                 df = pd.DataFrame(json_page.get(self.tableMgr.table_spec.result_object_path))
-                breakpoint
             else:
                 df = pd.json_normalize(
                     json_page, 
@@ -567,7 +566,8 @@ class TableLoader:
             self.adapters[schema] = LocalFileAdapter(
                 {'name':schema},
                 root_path=os.path.join(os.environ['UNIFY_HOME'], "files"),
-                storage=UnifyDBStorageManager(schema, duck)
+                storage=UnifyDBStorageManager(schema, duck),
+                schema_name='files'
             )
             duck.create_schema('files')
 

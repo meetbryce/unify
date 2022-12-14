@@ -509,7 +509,7 @@ class RESTTable(TableDef):
 
     
 class RESTAdapter(Adapter):
-    def __init__(self, spec, storage: StorageManager=None):
+    def __init__(self, spec, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
         self.base_url = spec['base_url']
         self.paging_options = spec.get('paging')

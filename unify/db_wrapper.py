@@ -589,7 +589,7 @@ monkeypatch_clickhouse_driver()
 #                     else:
 #                         primary_key = result.inserted_primary_key
 
-PROCTECTED_SCHEMAS = ['information_schema','default']
+PROCTECTED_SCHEMAS = ['information_schema']
 
 class CHTableHandle(TableHandle):
     SCHEMA_SEP = '____'
@@ -712,6 +712,9 @@ class ClickhouseWrapper(DBManager):
         def transformer(node):
             if isinstance(node, (sqlglot.exp.Table, sqlglot.exp.Column)):
                 if isinstance(node, sqlglot.exp.Table):
+                    if "." not in str(node):
+                        # Coerce unqualified table references into 'default' schema
+                        node = sqlglot.parse_one(f"default.{str(node)}")
                     self.last_seen_tables.append(TableHandle(str(node)))
                 parts = str(node).split(".")
                 if len(parts) == 2:
