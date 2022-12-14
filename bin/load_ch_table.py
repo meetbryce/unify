@@ -56,6 +56,8 @@ def ch_root_type(pgtype: str):
         return "String"
     if pgtype.startswith("time "):
         return "String"
+    if pgtype.startswith("date"):
+        return "Date32"
     if pgtype.startswith("timestamp"):
         return "DateTime64(3)"
     if pgtype.startswith("int") or pgtype.startswith("bigint"):
