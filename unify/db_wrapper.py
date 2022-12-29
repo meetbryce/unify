@@ -67,6 +67,10 @@ class MyFilter:
 logger.addFilter(MyFilter())
 UNIFY_META_SCHEMA = 'unify_schema'
 
+# Patch SQLA Cursor class which doesn't work will with SQL Inserts on Clickhouse
+from .sqla_patch import patch_sqlalchemy_cursor
+patch_sqlalchemy_cursor()
+
 class TableMissingException(RuntimeError):
     def __init__(self, table: str):
         super().__init__("Table {} does not exist".format(table))
