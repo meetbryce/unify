@@ -29,6 +29,20 @@ systems, adapters, and other features.
     drop table <schema>.<table>
     drop schema <schema> ["cascade"]
 
+## Convenience syntax
+
+    > ??
+
+    Describe the columns from the last referenced table.
+
+    > select * from  ??
+
+    Short-cut to reference the most recent table.
+
+    > count <table>
+
+    Short-cut for 'select count(*) from <table>'
+
 ## Peeking at tables
 
 The special `peek` command makes it easy to see "interesting" data from a table without having
@@ -72,7 +86,7 @@ Some systems, like Google Sheets, have special commands for importing data. Use 
 
 You can import flat file data using the `import` command:
 
-    import '<file url>' into <schema>.<table> ["overwrite"|"append"]
+    import '<file url>' [into <schema>.<table> ["overwrite"|"append"]]
 
 This command will create the indicated table according to the schema of the source file, which should be in
 csv or parquet format. If the table exists then this command will return an error unless

@@ -43,6 +43,51 @@ becomes:
 Similarly we need to map all informational queries, like "show schemas" and "show tables"
 to observe this mapping scheme.
 
+The problem with this approach is that ALL queries have to be rewritten on input and output,
+including if someone wants to connect directly to the Clickhouse server. For development
+expediancy it would be better if we can use Clickhouse "as is" without having to resort to
+naming schemes.
+
+So, we could choose one of:
+
+1. Pack all user tables into a single database, and use a user-visible prefix to "namespace"
+the tables within a system, like:
+   github_users
+   github_orgs
+   jira_issues
+
+Obviously with enough systems connected this will get pretty messy. Also makes something like
+"show tables from github" needs to observe the prefix. However, this approach would work and
+is easy to implement.
+
+2. Let each user have a dedicated database per system. The problem is that database names
+have to be unique, so only one user on a system can use "github" as the schema name. In this
+case we probably need a per-customer prefix to keep the database names unique:
+
+    tenant1_github
+    tenant1_jira
+    tenant1_salesforce
+    tenant1_files
+
+This leads to queries like:
+    select * from tenant1_github.users
+
+which is pretty gross.
+
+3. Adopt a "table batch" approach. This would be a compromise where a given tenant
+could own multiple databases, and stripe their tables across them. But again the
+databases would need "constructed" names:
+
+    tenant1abc01
+    tenant2abc02
+    tenant3abc03
+
+Not clear that querying "select * from tenant1abc01.users" is any better.
+
+At the end of the day I think approach #1 is the best for now. Name prefix all the
+tables with the system name. Maybe for command line usage we can support some
+syntactic sugar like "show tables from <system>" which understands the prefixes.
+
 ### System tables
 
 We have various needs to store "system" information inside the database. Generally

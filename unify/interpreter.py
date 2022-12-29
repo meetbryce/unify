@@ -529,6 +529,7 @@ class CommandInterpreter:
             if len(self.recent_tables) > 0:
                 context.command = context.command[0:pos] + " " + str(self.recent_tables[0]) + " " + context.command[pos + 3:]
                 self.print(context.command)
+                context.set_recent_tables(self.recent_tables)
             else:
                 raise RuntimeError("Can't find previous table to replace '??'")
 

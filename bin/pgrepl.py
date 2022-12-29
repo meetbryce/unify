@@ -28,13 +28,15 @@ def verif_pg_env():
         print("CLICKHOUSE_PASSWORD not set")
         sys.exit(1)
 
-def dump_table(table, schema_file, csv_file):
+def dump_schema(table, schema_file):
     verif_pg_env()
     ret = os.system(f"psql --pset=format=unaligned -c \"\\d {table}\" > {schema_file}")
     if ret != 0:
-        print("Error dumping schema")
-        sys.exit(1)
+        raise RuntimeError("Error dumping schema")
     print(f"Saved schema to {schema_file}")
+
+def dump_table(table, schema_file, csv_file):
+    dump_schema(table, schema_file)
     print(datetime.now(), " Extracting table with COPY to csv...")
     ret = os.system(f'psql -c "\\copy (select * from {table}) to {csv_file} CSV HEADER\"')
     if ret != 0:
@@ -142,7 +144,7 @@ def load_table(table, schema_file, csv_file, create_table=True):
 
     print("Sending to clickhouse...")
     line_count = int(return_output(f"wc -l {csv_file}").split()[0])
-    print(f"Loading {line_count} rows into {table}")
+    print(f"Loading {line_count} rows into `{table}` table")
     
     if create_table:
         order_cols = ', '.join(opts['primary_key_cols'])
@@ -156,6 +158,9 @@ def return_output(cmd):
     return val.stdout.decode('utf-8').strip()
 
 def update_table(table, schema_file):
+    if not os.path.exists(schema_file):
+        dump_schema(table, schema_file)
+
     opts = parse_schema_file(schema_file)
     if not opts['primary_key_cols']:
         raise RuntimeError("No primary key for the table found, have to reload")
@@ -164,7 +169,7 @@ def update_table(table, schema_file):
     primary_key = opts['primary_key_cols'][0]
 
     max_val = clickclient(f'SELECT max({primary_key}) FROM {table}')
-    print("Max primary key value: ", max_val)
+    print("Max primary key value in Clickhouse: ", max_val)
 
     csv_file = table + str(date.today()) + ".csv"
     # Now extract PG records where the primary key is greater than what's in Clickhouse
