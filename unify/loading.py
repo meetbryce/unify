@@ -38,7 +38,6 @@ from .sqla_storage_manager import UnifyDBStorageManager
 
 from .adapters import Connection, OutputLogger
 from .file_adapter import LocalFileAdapter
-from .search import Searcher, NullSearcher
 
 logger = logging.getLogger(__name__)
 
@@ -543,8 +542,6 @@ class TableLoader:
     """
     def __init__(self, silence_errors=False, given_connections: list[Connection]=None):
         with dbmgr() as duck:
-            duck.register_for_signal(DBSignals.TABLE_CREATE, self.on_table_created)
-            duck.register_for_signal(DBSignals.TABLE_DROP, self.on_table_dropped)
             try:
                 if given_connections:
                     self.connections = given_connections
@@ -571,17 +568,11 @@ class TableLoader:
             )
             duck.create_schema('files')
 
-            if os.environ.get('UNIFY_DISABLE_SEARCH', '') in ['true','True','1']:
-                self.searcher = NullSearcher()
-            else:
-                self.searcher = Searcher()
-
             # Connections defines the set of schemas we will create in the database.
             # For each connection/schema then we will define the tables as defined
             # in the REST spec for the target system.
             for conn in self.connections:
                 duck.create_schema(conn.schema_name)
-                self.index_connection(conn)
                 for t in conn.adapter.list_tables():
                     tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                     self.tables[tmgr.name] = tmgr
@@ -602,50 +593,6 @@ class TableLoader:
             for t in conn.adapter.list_tables():
                 tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                 self.tables[tmgr.name] = tmgr
-
-    def index_connection(self, conn: Connection):
-        # Used to bootstrap the search index on the schema/tables from an Adapter
-        # Only indexes opportunistically - if we can find the schema in the existing
-        # index then we skip.
-        if len(self.searcher.search(conn.schema_name, type="schema")) > 0:
-            return
-
-        try:
-            self.searcher.open_index()
-            self.searcher.index_object("schema", conn.schema_name, description=conn.adapter.help)
-            for t in conn.adapter.list_tables():
-                self.searcher.index_object(
-                    "table", 
-                    name=t.name, 
-                    parent=conn.schema_name, 
-                    description=t.description
-                )
-        finally:
-            self.searcher.close_index()
-
-    def on_table_created(self, dbmgr, table):
-        # Index the table columns after we load it
-        cols_df: pd.DataFrame = dbmgr.list_columns(table)
-        try:
-            self.searcher.open_index()
-            self.searcher.index_object(
-                "table", 
-                name=table.table_root(), 
-                parent=table.schema()
-            )
-            for row in cols_df.to_dict('records'):
-                self.searcher.index_object("column", row['column_name'], parent=table.user_name())
-        finally:
-            self.searcher.close_index()
-
-    def on_table_dropped(self, dbmgr, table):
-        print(f"Droppping table {table} from index")
-        try:
-            self.searcher.open_index()
-            self.searcher.delete_object("table", table.table_root(), table.schema())
-            self.searcher.delete_child_objects("column", parent=table.user_name())
-        finally:
-            self.searcher.close_index()
 
     def _get_table_mgr(self, table):
         if table in self.tables:

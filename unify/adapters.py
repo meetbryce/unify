@@ -115,8 +115,6 @@ class Connection:
                 continue
             adapter_klass, spec = adapter_table[opts['adapter']]
             adapter = adapter_klass(spec, storage_mgr_maker(schema_name), schema_name)
-            if schema_name == 'gsheets':
-                breakpoint()
             c = Connection(adapter, schema_name, opts)
             if c.is_valid:
                 result.append(c)
