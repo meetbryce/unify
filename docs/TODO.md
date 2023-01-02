@@ -4,6 +4,7 @@
 1. Add "connect" interactive flow
 1. Create proper install package
 1. Create a basic usage tutorial
+1. Add background task processing
 
 ### FileAdapter
 
@@ -38,6 +39,7 @@
 1. [done] implement CSV and parquest file import/export
 1. Fix date handling in charts (requires strings right now)
 1. Automatically unpack TAR and compressed files
+1. Add support for PRSQL syntax
 
 ## Jupyter integration
 

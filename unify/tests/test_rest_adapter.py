@@ -1,6 +1,8 @@
+import base64
 import io
 import os
 import yaml
+import requests
 
 from unify.adapters import Adapter, Connection, RESTView, OutputLogger
 from unify.rest_adapter import RESTAdapter, RESTTable
@@ -12,7 +14,7 @@ def test_apispec_class():
         "description":"GitHub API",
         "help": "This is the GitHub API"
     }
-    spec = RESTAdapter(config)
+    spec = RESTAdapter(config, None, schema_name="github")
     assert spec.name == "github"
     assert spec.base_url == "https://api.github.com"
     assert spec.help == config["help"]
@@ -34,7 +36,7 @@ def test_apispec_class():
     config['tables'] = tables
     config['views'] = views
 
-    spec = RESTAdapter(config)
+    spec = RESTAdapter(config, None, schema_name="github")
     assert len(spec.tables) == 2
     assert spec.tables[0].name == "repos"
     assert rest_tables[0].query_path == "/repos"
@@ -62,3 +64,43 @@ def test_connector():
     conn_config = next(conn for conn in config if next(iter(conn.keys())) == "github")
     conn_config = next(iter(conn_config.values()))
     assert "options" in conn_config
+
+def test_rest_basic_auth():
+    spec = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "../../rest_specs/github_spec.yaml")))
+    schema = "github"
+
+    username = "scottpersinger@gmail.com"
+    password = "secret"
+    good_params = {"username": username, "password": password}
+    adapter = RESTAdapter(spec, storage=None, schema_name=schema)
+    adapter.resolve_auth(schema, good_params)
+
+    session = requests.Session()
+    request = requests.Request('GET', 'https://google.com')
+    adapter._setup_request_auth(session)
+
+    prepped = session.prepare_request(request)
+
+    assert 'Authorization' in prepped.headers
+    # Encode username and password with base64
+    encoded = base64.b64encode(f"{username}:{password}".encode('utf-8')).decode('utf-8')
+    assert prepped.headers['Authorization'] == f"Basic {encoded}"
+
+def test_rest_headers_auth():
+    spec = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "../../rest_specs/hubspot_spec.yaml")))
+    schema = "hubspot"
+
+    bearer_token = "hubspot123"
+    good_params = {"bearer_token": bearer_token}
+    adapter = RESTAdapter(spec, storage=None, schema_name=schema)
+    adapter.resolve_auth(schema, good_params)
+
+    session = requests.Session()
+    request = requests.Request('GET', 'https://google.com')
+    adapter._setup_request_auth(session)
+
+    prepped = session.prepare_request(request)
+
+    assert 'Authorization' in prepped.headers
+    # Encode username and password with base64
+    assert prepped.headers['Authorization'] == f"Bearer {bearer_token}"

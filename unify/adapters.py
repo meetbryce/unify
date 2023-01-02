@@ -21,6 +21,8 @@ TableUpdater = typing.NewType("TableUpdater", None)
 
 
 class Connection:
+    ADAPTER_SPECS: dict = {}
+
     def __init__(self, adapter, schema_name, opts):
         self.schema_name: str = schema_name
         self.adapter: Adapter = adapter
@@ -28,7 +30,7 @@ class Connection:
         self.is_valid = self.adapter.validate()
 
     @staticmethod
-    def load_connections_config():
+    def find_connections_config():
         trylist = [
             os.path.expanduser("~/unify/unify_connections.yaml"),
             os.path.expanduser("~/unify_connections.yaml"),
@@ -39,8 +41,37 @@ class Connection:
         for p in trylist:
             if os.path.exists(p):
                 logger.info("Loading connections config from: {}".format(p))
-                return yaml.safe_load(open(p))
+                return p
         raise RuntimeError("Could not find unify_connections.yaml in HOME or current directory.")
+
+    @staticmethod
+    def load_connections_config():
+        return yaml.safe_load(open(Connection.find_connections_config()))
+
+    @staticmethod
+    def update_connections_config(schema_name, adapter_name, options):
+        path = None
+        try:
+            path = Connection.find_connections_config()
+            conf = yaml.safe_load(open(path))
+            orig_lines = open(path).readlines()
+        except RuntimeError:
+            path = os.path.expanduser("~/unify/unify_connections.yaml")
+            conf = []
+            orig_lines = []
+
+        conf.append({schema_name: {"adapter": adapter_name, "options": options}})
+        
+        # write out the new config, but preserve comments from the old file
+        with open(path, "w") as f:
+            for line in orig_lines:
+                if line.startswith("#"):
+                    f.write(line)
+                elif conf is not None:
+                    yaml.dump(conf, f, default_flow_style=False)
+                    conf = None
+            if conf is not None:
+                yaml.dump(conf, f, default_flow_style=False)
 
     @classmethod
     def setup_connections(cls, conn_list=None, connections_path=None, storage_mgr_maker=None):
@@ -60,13 +91,19 @@ class Connection:
                     from .postgres_adapter import PostgresAdapter
                     klass = PostgresAdapter           
             adapter_table[spec['name']] = (klass, spec)
-        
+
+        Connection.ADAPTER_TABLE = adapter_table
+
         if conn_list:
             connections = conn_list
         elif connections_path is not None:
             connections = yaml.safe_load(open(connections_path))
         else:
-            connections = Connection.load_connections_config()
+            try:
+                connections = Connection.load_connections_config()
+            except RuntimeError:
+                print("Warning, no connections config file found")
+                connections = []
         result = []
         # Instantiate each adapter, resolve auth vars, and validate the connection
         for opts in connections:
@@ -78,16 +115,32 @@ class Connection:
                 continue
             adapter_klass, spec = adapter_table[opts['adapter']]
             adapter = adapter_klass(spec, storage_mgr_maker(schema_name), schema_name)
+            if schema_name == 'gsheets':
+                breakpoint()
             c = Connection(adapter, schema_name, opts)
             if c.is_valid:
                 result.append(c)
             else:
-                print("Failed to load connection {schema_name} as adapter is invalid", file=sys.stderr)
+                print(f"Failed to load connection '{schema_name}' as adapter is invalid", file=sys.stderr)
+
+        Connection.ADAPTER_SPECS.update(adapter_table)
         return result
+
+    @classmethod
+    def create_connection(cls, adapter_name: str, schema_name: str, opts: dict, storage_mgr_maker=None):
+        adapter_klass, spec = cls.ADAPTER_SPECS[adapter_name]
+        adapter = adapter_klass(spec, storage_mgr_maker(schema_name), schema_name)
+        c = Connection(adapter, schema_name, {"options": opts})
+        c.test_connection()
+        Connection.update_connections_config(schema_name, adapter_name, opts)
+        return c
 
     def list_tables(self):
         return self.adapter.list_tables()
 
+    def test_connection(self):
+        # Used to verify valid auth for a new connection
+        pass
 
 class OutputLogger:
     def __init__(self) -> None:
@@ -314,11 +367,15 @@ class Adapter:
         self.auth: dict = {}
         self.storage: StorageManager = storage
 
+    def get_config_parameters(self):
+        """ Returns a dict mapping config parameter names to descriptions. """       
+        return {}
+
     @staticmethod
     def convert_string_to_table_name(title: str):
         title = title.lower()
-        title = re.sub("\s+", "_", title)
-        if re.match("^\d+", title):
+        title = re.sub(r"\s+", "_", title)
+        if re.match(r"^\d+", title):
             # Can't start with numbers
             title = "tab" + title
         title = re.sub(r"[^\w]+", "", title) # remove special characters
@@ -361,16 +418,16 @@ class Adapter:
                 elif isinstance(value, dict):
                     resolve_auth_values(value, conn_opts)
                 else:
-                    if value in conn_opts:
-                        auth_tree[key] = conn_opts[value]
-                    elif "{" in  value:
-                        # Resolve a string with connection opt references
-                        auth_tree[key] = value.format(**conn_opts)
-                    elif not re.match(r"[A-Z_]+", value):
-                        # allow static values that are not like XXX_XXX
-                        pass
-                    else:
-                        print(f"Error: auth key {key} missing value in connection options")
+                    if key in conn_opts:
+                        auth_tree[key] = conn_opts[key]
+                    # elif "{" in  value:
+                    #     # Resolve a string with connection opt references
+                    #     auth_tree[key] = value.format(**conn_opts)
+                    # elif not re.match(r"[A-Z_]+", value):
+                    #     # allow static values that are not like XXX_XXX
+                    #     pass
+                    # else:
+                    #     print(f"Error: auth key {key} missing value in connection options")
         resolve_auth_values(self.auth, connection_opts)
 
     def __repr__(self) -> AnyStr:
@@ -379,6 +436,10 @@ class Adapter:
 
     def __str__(self) -> str:
         return self.name
+
+    @property
+    def base_api_url(self) -> str:
+        return getattr(self, 'base_url', '')
 
     def supports_commands(self) -> bool:
         return self.help is not None

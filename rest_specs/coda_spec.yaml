@@ -7,7 +7,8 @@ page_cursor_arg: pageToken
 next_page_token: nextPageToken
 auth:
   type: BEARER
-  tokenvar: CODA_TOKEN
+  params:
+    token: CODA API token
 tables:
   - name: whoami
     resource_path: /whoami

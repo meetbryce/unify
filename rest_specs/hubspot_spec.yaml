@@ -9,9 +9,9 @@ paging:
   token_param: after
   page_size: 100
 auth:
-  type: HEADERS
-  headers:
-    Authorization: "Bearer {HUBSPOT_PRIVATE_APP_TOKEN}"
+  type: BEARER
+  params:
+    bearer_token: Hubspot private app token
 tables:
   - name: contacts
     query_resource: GET /crm/v3/objects/contacts

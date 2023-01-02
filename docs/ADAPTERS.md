@@ -10,8 +10,9 @@ Example auth strategies:
 
     auth:
       type: BASIC
-      uservar: GHUSER
-      tokenvar: GHTOKEN
+      parameters:
+        - uservar
+        - tokenvar
 
     auth:
       type: PARAMS

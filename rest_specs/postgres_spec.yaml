@@ -3,9 +3,10 @@ name: postgres
 class: PostgresAdapter
 auth:
   type: CUSTOM_AUTH
-  db_host: DBHOST
-  db_user: DBUSER
-  db_password: DBPASSWORD
-  db_database: DBDATABASE
+  params:
+    db_host: Database host name
+    db_user: Database user
+    db_password: User password
+    db_database: Active database
   
 

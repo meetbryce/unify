@@ -98,6 +98,7 @@ class PostgresAdapter(Adapter):
     def validate(self) -> bool:
         self.mapped_remote_db = self.db.tenant_id + "_" + re.sub(r"[\.-]", "_", self.auth['db_host']) + "_" + self.auth['db_database']
         self.mapped_catalog = self.mapped_remote_db + "_catalog"
+        self.base_url = self.auth['db_host']
 
         # Create the remote PG connected local db
         pw = "" if self.auth['db_password'] is None else self.auth['db_password']

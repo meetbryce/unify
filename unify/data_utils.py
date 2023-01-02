@@ -45,3 +45,14 @@ def interp_dollar_values(node: dict, replacements: dict):
             return newv
 
     return dict_deep_transform(node, value_xform=str_replace_values)
+
+def flatten_dict(target: dict):
+    """ Returns a new dict with all keys,vals flattened to top level. """
+    res = {}
+    def grab_value(key, value):
+        if not isinstance(value, dict):
+            res[key] = value
+        return value
+
+    dict_deep_transform(target, value_xform=grab_value)
+    return res

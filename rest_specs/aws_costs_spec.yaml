@@ -3,9 +3,10 @@ name: aws_costs
 base_url: https://ce.us-east-1.amazonaws.com
 auth:
   type: AWS4Auth
-  access_id: AWS_ACCESS_KEY_ID
-  secret_key: AWS_SECRET_ACCESS_KEY
-  region: AWS_DEFAULT_REGION
+  params:
+    access_key_id: AWS access key id
+    secret_key: AWS secret access key
+    region: AWS default region
   service: ce
 paging:
   strategy: pagerToken

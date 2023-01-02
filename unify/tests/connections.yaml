@@ -2,8 +2,8 @@
 - github:
     adapter: github
     options:
-      GHUSER: $GHUSER
-      GHTOKEN: $GHTOKEN
+      username: $GHUSER
+      password: $GHTOKEN
 - mocksvc:
     adapter: mocksvc
     options:

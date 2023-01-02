@@ -33,6 +33,8 @@ command: show_tables
          | import_command
          | search_command
          | help_last
+         | connections_command
+         | connect_command
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
 
@@ -125,6 +127,10 @@ search_command: "search"i WS query
 query: ANY
 
 help_last: "??"
+
+connections_command: "connections"
+
+connect_command: "connect"
 
 file_path: SINGLE_QUOTED_STRING | /\S+/
 

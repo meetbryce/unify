@@ -19,8 +19,9 @@ pageMaxArg: per_page
 dateParser: '%Y-%m-%dT%H:%M:%SZ'
 auth:
   type: BASIC
-  uservar: GHUSER
-  tokenvar: GHTOKEN
+  params:
+    username: Github user email
+    password: Github personal access token 
 tables:
   - name: orgs
     resource_path: /user/orgs

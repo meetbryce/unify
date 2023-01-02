@@ -586,6 +586,23 @@ class TableLoader:
                     tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                     self.tables[tmgr.name] = tmgr
 
+    def add_connection(self, adapter_name: str, schema_name: str, opts: dict):
+        with dbmgr() as db:
+            # Adds a connection to the loader. This is used by the REST API to add
+            # new connections to the database.
+            conn = Connection.create_connection(
+                adapter_name, 
+                schema_name, 
+                opts, 
+                storage_mgr_maker=lambda schema: UnifyDBStorageManager(schema_name, db)
+            )
+            self.connections.append(conn)
+            self.adapters[schema_name] = conn.adapter
+            db.create_schema(conn.schema_name)
+            for t in conn.adapter.list_tables():
+                tmgr = TableMgr(conn.schema_name, conn.adapter, t)
+                self.tables[tmgr.name] = tmgr
+
     def index_connection(self, conn: Connection):
         # Used to bootstrap the search index on the schema/tables from an Adapter
         # Only indexes opportunistically - if we can find the schema in the existing

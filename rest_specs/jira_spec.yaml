@@ -20,8 +20,9 @@ queryDateFormat: "%Y/%m/%d %H:%M"
 cacheTTLSecs: 144000
 auth:
   type: BASIC
-  uservar: JIRAUSER
-  tokenvar: JIRATOKEN
+  params:
+    username: JIRA user
+    password: JIRA API token
 tables:
   - name: issues
     query_resource: GET /rest/api/3/search

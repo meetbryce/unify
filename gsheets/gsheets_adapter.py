@@ -44,7 +44,8 @@ class GSheetsClient:
         # FIXME: Implement a metadata store for user creds rathen than the
         # filesystem. Store creds per Connection so we can have multiple connections.
         needs_auth = True
-        creds_path = os.path.expanduser(adapter.auth['client_creds_path'])
+        params = adapter.auth['params']
+        creds_path = os.path.expanduser(params['client_creds_path'])
         logger.info(f"Loading google creds from path: {creds_path}")
         if os.path.exists(creds_path):
             cred_data = json.loads(open(creds_path).read())
@@ -62,7 +63,7 @@ class GSheetsClient:
             print("Press <enter> to re-authorize the GSheets connection")
             input()
             flow = InstalledAppFlow.from_client_secrets_file(
-                os.path.expanduser(adapter.auth['client_json_path']),
+                os.path.expanduser(params['client_json_path']),
                 self.SCOPES
             )
             flow.run_local_server()
@@ -340,6 +341,7 @@ class GSheetsAdapter(Adapter):
     def __init__(self, spec, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
         self.auth = spec['auth'].copy()
+        self.auth_spec = spec['auth']
         self.logger: OutputLogger = None
 
         self.parser: GsheetCommandParser = GsheetCommandParser()
@@ -365,8 +367,11 @@ is a good option if the sheet data is changing frequenly.
         self.tables = []
 
     def validate(self, silent=False):
-        #return self.client.validate(self, silent)
-        pass
+        return self.client.validate(self, silent)
+
+    def get_config_parameters(self) -> dict:
+        """ Returns a dict mapping config parameter names to descriptions. """
+        return self.auth_spec.get('params', {})
 
     def list_tables(self):
         if not self.tables:

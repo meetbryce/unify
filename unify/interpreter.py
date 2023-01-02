@@ -13,7 +13,7 @@ from lark.lark import Lark
 from lark.visitors import Visitor
 from lark.visitors import v_args
 
-from .adapters import Adapter, OutputLogger
+from .adapters import Adapter, OutputLogger, Connection
 from .loading import TableLoader, TableExporter
 from .db_wrapper import DBSignals, TableHandle, TableMissingException, dbmgr, SavedVar, RunSchedule, ColumnInfo
 from .file_adapter import LocalFileAdapter
@@ -56,6 +56,14 @@ class ParserVisitor(Visitor):
         self._the_command_args['table_schema_ref'] = find_node_return_children("table_schema_ref", tree)
         if self._the_command_args['table_schema_ref']:
             self._the_command_args['table_schema_ref'] = ".".join(self._the_command_args['table_schema_ref'])
+        return tree
+
+    def connections_command(self, tree):
+        self._the_command = 'connections_command'
+        return tree
+
+    def connect_command(self, tree):
+        self._the_command = 'connect_command'
         return tree
 
     def count_table(self, tree):
@@ -582,6 +590,41 @@ class CommandInterpreter:
     ################
     def alter_table(self, table_ref, new_table):
         self.duck.rename_table(TableHandle(table_ref), new_table)
+
+    def connections_command(self):
+        """ connections - list all connections. Use 'connect' to create a new connection. """
+        for c in self.loader.connections:
+            self.print(f"Adapter {c.adapter.name} ({c.adapter.base_api_url}) - schema: {c.schema_name}")
+
+    def connect_command(self):
+        """ connect - connect to a new system. """
+        specs = sorted(Connection.ADAPTER_SPECS.keys())
+        specs_print = "\n".join(f"{idx+1}: {name}" for idx, name in enumerate(specs))
+        spec_number = self.context.get_input(specs_print + "\nPick an adapter: ")
+        if spec_number == "":
+            return
+        adapter_tuple = Connection.ADAPTER_SPECS[specs[int(spec_number)-1]]
+        adapter = adapter_tuple[0](adapter_tuple[1], None, "new_schema")
+        
+        print(f"Ok! Let's setup a new {adapter.name} connection.")
+        print("Please provide the configuration parameters:")
+        config_opts = adapter.get_config_parameters()
+        config_dict = {}
+        for opt, desc in config_opts.items():
+            config_dict[opt] = self.context.get_input(f"{opt} ({desc}): ")
+
+        while True:
+            schema = self.context.get_input(f"Specify the schema name ({adapter.name}): ")
+            if schema == "":
+                schema = adapter.name
+
+            if schema in self.adapters:
+                print("Schema name must be unique")
+            else:
+                break
+        self.loader.add_connection(adapter.name, schema, config_dict)
+        self.adapters: dict[str, Adapter] = self.loader.adapters
+        print(f"New {adapter.name} connection created in schema {schema}")
 
     def count_table(self, table_ref):
         """ count <table> - returns count of rows in a table """

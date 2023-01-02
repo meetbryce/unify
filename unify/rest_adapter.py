@@ -1,4 +1,5 @@
 from cgi import parse_multipart
+import copy
 import json
 import os
 import re
@@ -19,7 +20,7 @@ from google.oauth2.credentials import Credentials
 import google.auth.transport.requests
 
 from .storage_manager import StorageManager
-from .data_utils import interp_dollar_values
+from .data_utils import interp_dollar_values, flatten_dict
 from .adapters import (
     Adapter, 
     AdapterQueryResult,
@@ -513,7 +514,8 @@ class RESTAdapter(Adapter):
         super().__init__(spec['name'], storage)
         self.base_url = spec['base_url']
         self.paging_options = spec.get('paging')
-        self.auth = spec.get('auth', {}).copy()
+        self.auth = copy.deepcopy(spec.get('auth', {}))
+        self.auth_spec = spec.get('auth', {})
         self.help = spec.get('help', None)
 
         self.dateParserFormat = spec.get('dateParser')
@@ -527,6 +529,9 @@ class RESTAdapter(Adapter):
             self.tables = [RESTTable(self, d) for d in spec['tables']]
         else:
             print("Warning: spec '{}' has no tables defined".format(self.name))
+
+        # Extract auth parameter descriptions
+        self.auth_help = self.auth.pop("help", {})
 
         self.views = []
         if "views" in spec:
@@ -543,6 +548,10 @@ class RESTAdapter(Adapter):
                     raise RuntimeError(f"Missing one of name, from or query from view: {d}")                   
 
 
+    def get_config_parameters(self) -> dict:
+        """ Returns a dict mapping config parameter names to descriptions. """
+        return self.auth_spec.get('params', {})
+
     def list_tables(self) -> List[TableDef]:
         return self.tables
 
@@ -552,6 +561,7 @@ class RESTAdapter(Adapter):
     def _setup_request_auth(self, session: requests.Session):
         user = ''
         token = ''
+        params = self.auth.get('params', {})
         session.headers.update({"Content-Type" : "application/json"})
         authType = self.auth['type']
 
@@ -559,11 +569,11 @@ class RESTAdapter(Adapter):
             dynValues = self.auth[authType.lower()]
 
         if authType == 'BASIC':
-            user = self.auth['uservar']
-            token = self.auth['tokenvar']
+            user = params.get('username')
+            token = params.get('password')
             session.auth = (user, token)
         elif authType == 'BEARER':
-            token = os.environ.get(self.auth['tokenvar'], self.auth['tokenvar'])
+            token = os.environ.get(params['bearer_token'], params['bearer_token'])
             headers = {"Authorization": f"Bearer {token}"}
             session.headers.update(headers)
         elif authType == 'HEADERS':
@@ -573,9 +583,9 @@ class RESTAdapter(Adapter):
         elif authType == 'AWS4Auth':
             from requests_aws4auth import AWS4Auth
             session.auth = AWS4Auth(
-                self.auth['access_id'],
-                self.auth['secret_key'],
-                self.auth['region'],
+                params.get('access_key_id'),
+                params.get('secret_key'),
+                params.get('region'),
                 self.auth['service']
             )
         elif authType == 'GOOGLE_AUTH':
@@ -594,3 +604,13 @@ class RESTAdapter(Adapter):
         else:
             raise Exception(f"Error unknown auth type: {authType}")
 
+    def validate(self) -> bool:
+        # Make sure all auth parameters have been supplied
+        auth_params = self.auth.get('params')
+        if auth_params is None:
+            return True
+        for k, v in auth_params.items():
+            if self.auth_spec['params'][k] == v:
+                raise RuntimeError(f"Cannot validate auth for {self.name} adapter, missing required auth parameter: {k}")
+        return True
+            

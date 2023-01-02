@@ -6,6 +6,9 @@ auth:
   headers:
     DD-API-KEY: DD_API_KEY
     DD-APPLICATION-KEY: DD_APP_KEY
+  help:
+    DD_API_KEY: Datadog API key
+    DD_APP_KEY: Datadog Application key
 paging:
   strategy: pagerToken
   pager_token_path: metadata.pagination.next_record_id
