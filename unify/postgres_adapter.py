@@ -86,7 +86,7 @@ class PostgresTableSpec(TableDef):
 class PostgresAdapter(Adapter):
     def __init__(self, spec, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
-        self.auth = spec.get('auth', {}).copy()
+        self.auth = spec.get('auth', {}).get('params').copy()
 
         # connection params will live in self.auth
         self.logger: OutputLogger = None

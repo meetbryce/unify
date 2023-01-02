@@ -4,23 +4,15 @@ import pytest
 import pandas as pd
 
 from unify import CommandInterpreter, CommandContext
-from unify.search import Searcher
-
-os.environ['UNIFY_DISABLE_SEARCH'] = 'false'
 
 @pytest.fixture
 def interp():
     return CommandInterpreter()
 
-def clear_search(interp):
-    interp.loader.searcher.clear_index()
-
 # Note that the LocalFilesAdapter setup assumes files appear in $UNIFY_HOME/files,
 # and our conftest.py set UNIFY_HOME to be the tests directory.
 @pytest.mark.skip(reason="")
 def test_csv_import(interp: CommandInterpreter):
-    clear_search(interp)
-
     fname = "project_list.csv"
     assert os.path.exists(os.path.join(os.path.dirname(__file__), "files", fname))
 
@@ -33,17 +25,7 @@ def test_csv_import(interp: CommandInterpreter):
     assert isinstance(context.result, pd.DataFrame)
     assert context.result.shape[0] > 2
 
-    # Check that our new table got indexed
-    context = interp.run_command("search project_list")
-    assert 'project_list' in "\n".join(context.logger.get_output())
-
-    interp.run_command("drop table files.project_list", interactive=False)
-    context = interp.run_command("search project_list")
-    assert 'project_list' not in "\n".join(context.logger.get_output())
-
-def test_parquest_import(interp: CommandInterpreter):
-    clear_search(interp)
-
+def test_parquet_import(interp: CommandInterpreter):
     fname = "gh_repos.parquet"
     assert os.path.exists(os.path.join(os.path.dirname(__file__), "files", fname))
 

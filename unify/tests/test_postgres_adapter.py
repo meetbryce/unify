@@ -17,7 +17,7 @@ def db():
 def connection(db):
     config = [{"postgres": 
                 {"adapter": "postgres",
-                 "options": {"DBHOST": "localhost", "DBDATABASE":"dvdrental", "DBUSER":"scottp", "DBPASS":""}
+                 "options": {"db_host": "localhost", "db_database":"dvdrental", "db_user":"scottp", "db_password":""}
                 }
             }]
     

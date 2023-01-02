@@ -713,8 +713,9 @@ class TableLoader:
         return next(c for c in self.connections if c.schema_name == name)
 
     def truncate_table(self, table):
-        with dbmgr() as duck:
-            self.tables[table].truncate(duck)
+        if table in self.tables:
+            with dbmgr() as duck:
+                self.tables[table].truncate(duck)
 
     def table_exists_in_db(self, table):
         try:

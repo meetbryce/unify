@@ -13,7 +13,7 @@ from unify import CommandInterpreter
 def connections():
     config = [{"mocksvc": 
                 {"adapter": "mocksvc",
-                "options": {"MOCKSVC_USER": "scott@example.com", "MOCKSVC_PASS": "abc123"}
+                "options": {"username": "scott@example.com", "password": "abc123"}
                 }
             }]
     

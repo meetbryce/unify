@@ -9,8 +9,9 @@ paging:
 queryDateFormat: "%Y/%m/%d %H:%M"  
 auth:
   type: BASIC
-  uservar: MOCKSVC_USER
-  tokenvar: MOCKSVC_PASS
+  params:
+    username: The Mocksvc user
+    password: The user password
 tables:
   - name: repos27
     resource_path: /api/repos_27

@@ -41,10 +41,10 @@ def test_headers_auth_config():
         adapter.validate()
 
     token = "apptoken1"
-    good_params = {"app_token": token}
+    good_params = {"bearer_token": token}
     adapter = RESTAdapter(spec, storage=None, schema_name=schema)
     adapter.resolve_auth(schema, good_params)
 
     assert 'params' in adapter.auth
-    assert adapter.auth['params']['app_token'] == token
+    assert adapter.auth['params']['bearer_token'] == token
     assert adapter.validate()

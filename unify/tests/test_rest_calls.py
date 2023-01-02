@@ -12,7 +12,7 @@ from unify.rest_adapter import RESTAdapter
 def connection():
     config = [{"mocksvc": 
                 {"adapter": "mocksvc",
-                "options": {"MOCKSVC_USER": "scott@example.com", "MOCKSVC_PASS": "abc123"}
+                "options": {"username": "scott@example.com", "password": "abc123"}
                 }
             }]
     
@@ -36,8 +36,8 @@ def test_mocksvc_config(connection):
     assert connection.adapter.base_url == "https://mocksvc.com"
 
     # Verify basic auth options set properly
-    assert connection.adapter.auth['uservar'] == "scott@example.com"
-    assert connection.adapter.auth['tokenvar'] == "abc123"
+    assert connection.adapter.auth['params']['username'] == "scott@example.com"
+    assert connection.adapter.auth['params']['password'] == "abc123"
 
 def test_mocksvc_requests_mock():
     with requests_mock.Mocker() as mock:

@@ -1200,22 +1200,8 @@ class CommandInterpreter:
 
     def search_command(self, query):
         """ search <query> - search for schemas, tables, or columns matching your query """
-        if query[0] not in ['*','"', "'"]:
-            query = '*' + query
-        if query[-1] not in ['*','"', "'"]:
-            query += '*'
-        hits = self.loader.searcher.search(query)
-        results = pd.DataFrame(hits)
-        if results.empty:
-            return
-        for hittype in ['schema','table','column']:
-            matches: pd.DataFrame = results[results['type'] == hittype]
-            if not matches.empty:
-                cols = ['name']
-                if 'parent' in matches.columns:
-                    cols.extend(['parent'])
-                self.print(f"--------{hittype}-------")
-                self.print(matches[cols].to_string(index=False))
+        # TODO: implement
+        pass
 
     #########
     ### FILE system commands
