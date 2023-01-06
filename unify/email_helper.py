@@ -134,3 +134,4 @@ class EmailHelper:
             html="<p>" + subject + "</p>" + "\n" + "{{ myimg }}",
             body_images={"myimg": {"content": image_data, "subtype": mime_type}}
         )
+

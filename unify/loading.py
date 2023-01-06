@@ -2,30 +2,41 @@ import time
 from datetime import datetime, timedelta
 import json
 import logging
+from logging.handlers import QueueHandler, QueueListener
 import math
 import os
 from threading import Thread
+import threading
+import multiprocessing
+import subprocess
 from pprint import pprint
 import re
 import sys
 import typing
 from typing import Dict
+import psutil
+import uuid
+import warnings
 
 import sqlglot
 import pandas as pd
 import pyarrow as pa
 import numpy as np
 
+# Background tasks
+import persistqueue
+import zmq
+import daemonocle
+
 from sqlalchemy.orm.session import Session
 
-from .rest_adapter import (
+from unify.rest_adapter import (
     Adapter, 
     RESTView,
     TableDef,
     TableUpdater,
-    UnifyLogger
 )
-from .db_wrapper import (
+from unify.db_wrapper import (
     ConnectionScan,
     ColumnInfo,
     dbmgr,
@@ -34,20 +45,19 @@ from .db_wrapper import (
     TableMissingException,
     TableHandle,
 )
-from .sqla_storage_manager import UnifyDBStorageManager
+from unify.sqla_storage_manager import UnifyDBStorageManager
 
-from .adapters import Connection, OutputLogger
-from .file_adapter import LocalFileAdapter
+from unify.adapters import Connection, OutputLogger
+from unify.file_adapter import LocalFileAdapter
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger('unify')
+LOG_SOCKET_PORT = 5559
+#persistqueue.sqlbase.TICK_FOR_WAIT = 2
+CURRENT_JOB = None
+SYNCHRONOUS_MODE = os.environ.get('UNIFY_SYNCHRONOUS', False)
 
-
-class SimpleLogger(UnifyLogger):
-    def __init__(self, adapter: Adapter):
-        self.adapter = adapter
-
-    def log_table(self, table: str, level: int, *args):
-        print(f"[{str(self.adapter)}: {table}] ", *args, file=sys.stderr)
+def add_logging_handler(handler):
+    logger.addHandler(handler)
 
 class BaseTableScan(Thread):
     """
@@ -135,7 +145,6 @@ class BaseTableScan(Thread):
             # to corece to the "best" type, but for now we just convert to string
             #
             if pd.api.types.infer_dtype(df[column]).startswith("mixed"):
-                print("Fixing mixed column: ", column)
                 df[column] = df[column].apply(lambda x: str(x))
             
             # 
@@ -214,7 +223,9 @@ class BaseTableScan(Thread):
     def run(self):
         with dbmgr() as duck:
             self.session = Session(bind=duck.engine)
-            self.perform_scan(duck)
+            with warnings.catch_warnings():
+                warnings.simplefilter(action='ignore', category=FutureWarning)
+                self.perform_scan(duck)
             self.session.close()
 
     def save_scan_record(self, values: dict):
@@ -271,7 +282,8 @@ class BaseTableScan(Thread):
 
     def perform_scan(self, duck):
         self.scan_start_handler()
-        print("Running table scan for: ", self.tableMgr.name)
+        logger.debug("Running table scan for: %s", self.tableMgr.name)
+
         scan_start = time.time()
         self.save_scan_record({"scan_start": scan_start})
 
@@ -279,7 +291,6 @@ class BaseTableScan(Thread):
         page_flush_count = 5 # flush 5 REST calls worth of data to the db
         row_buffer_df = None
         table_cols = set()
-        logger = SimpleLogger(self.tableMgr.adapter)
 
         resource_query_mgr: TableDef = self.get_query_mgr()
 
@@ -339,7 +350,7 @@ class BaseTableScan(Thread):
 
         # We save at the end in case we encounter an error
         self.save_scan_record({"scan_complete": scan_start})
-        print("Finished table scan for: ", self.tableMgr.name)
+        logger.debug("Finished table scan for: %s", self.tableMgr.name)
         duck.send_signal(signal=DBSignals.TABLE_LOADED, table=self.table_handle)
 
     def _flush_rows_to_db_catch_error(self, duck: DBManager, tableMgr, next_df, page, flush_count):
@@ -353,7 +364,7 @@ class BaseTableScan(Thread):
         except Exception as e:
             # "Core dump" the bad page
             core_file = f"/tmp/{self.tableMgr.name}_bad_page_{page}.csv"
-            logger.critical("Error saving page to db, dumping to file: " + core_file)
+            logger.critical("Error saving page to db, dumping to file: %s", core_file)
             with open(core_file, "w") as f:
                 next_df.to_csv(f)
             raise
@@ -369,7 +380,7 @@ class InitialTableLoad(BaseTableScan):
             self.create_table_with_first_page(duck, next_df, tableMgr.schema, tableMgr.table_spec.name)
         else:
             next_df = self.cleanup_df_page(next_df)
-            print(f"Saving page {page} with {next_df.shape[1]} columns and {next_df.shape[0]} rows")
+            logger.debug(f"Saving page {page} with {next_df.shape[1]} columns and {next_df.shape[0]} rows")
             duck.append_dataframe_to_table(
                 next_df, 
                 TableHandle(tableMgr.table_spec.name, tableMgr.schema)
@@ -507,9 +518,9 @@ class TableMgr:
     def has_data(self):
         return True
 
-    def truncate(self, duck):
+    def truncate(self, duck: DBManager):
         # Remove table from duck db
-        duck.execute(f"drop table {self.name}")
+        duck.execute(f"truncate {self.name}")
 
     def _create_scanner(self, tableLoader: TableLoader):
         return InitialTableLoad(
@@ -522,25 +533,115 @@ class TableMgr:
     def load_table(self, waitForScan=False, tableLoader=None):
         # Spawn a thread to query the table source
         self.scan = self._create_scanner(tableLoader)
-        if self.synchronous_scanning or waitForScan:
-            self.scan.run()
-        else:
-            self.scan.start()
+        self.scan.run()
 
     def refresh_table(self, tableLoader):
         scanner = TableUpdateScan(self, tableLoader=tableLoader, select=self.table_spec.select_list)
         scanner.run()
 
-class TableLoader:
-    """Master loader class. This class can load the data for any table, either by 
-       querying the table from DuckDB or else by calling the underlying REST API.
+class LoaderJob:
+    ACTION_LOAD_TABLE = "load"
+    ACTION_REFRESH_TABLE = "refresh"
+    ACTION_RELOAD_TABLE = "reload"
+    ACTION_CANCEL = "cancel"
+    ACTION_STOP_DAEMON = "stop_daemon"
 
-       Tables can be in 4 states:
-       1. Unknown (schema and table name never registered)
-       2. Never queried. Call the Adapter to query the data and store it to local db.
-       3. Table exists in the local db.
+    def __init__(self, tenant_id: str, action: str, table: TableHandle = None, parameters: dict = {}):
+        self._job_id = str(uuid.uuid4()) 
+        self._tenant_id = tenant_id
+        self._action = action
+        if table:
+            self._schema = table.schema()
+            self._table_root = table.table_root()
+        else:
+            self._schema = None
+            self._table_root = None
+        self._parameters = parameters
+
+    @property
+    def tenant_id(self):
+        return self._tenant_id
+
+    @property
+    def action(self):
+        return self._action
+
+    @property
+    def job_id(self):
+        return self._job_id
+
+    @property
+    def table(self):
+        if self._table_root and self._schema:
+            return TableHandle(self._table_root, self._schema)
+        else:
+            return None
+
+    @property
+    def parameters(self):
+        return self._parameters
+
+    def __eq__(self, other):
+        return self._job_id == other._job_id
+
+    def __repr__(self) -> str:
+        return str(self.__dict__)
+
+###
+### ZeroMQ multi-process logging
+###
+
+class ZeroMQSocketHandler(QueueHandler):
+    def __init__(self):
+        self.ctx = zmq.Context()
+        socket = self.ctx.socket(zmq.PUSH)
+        socket.connect(f"tcp://localhost:{LOG_SOCKET_PORT}")
+        super().__init__(socket)
+        logger.debug("Started ZeroMQSocketHandler")
+
+    def enqueue(self, record):
+        global CURRENT_JOB
+
+        if CURRENT_JOB:
+            record.__dict__.update(CURRENT_JOB.__dict__)
+        self.queue.send_json(record.__dict__)
+
+    def close(self):
+        self.queue.close()
+
+class ZeroMQSocketListener(QueueListener):
+    def __init__(self, *handlers):
+        self.ctx = zmq.Context()
+        socket = zmq.Socket(self.ctx, zmq.PULL)
+        socket.bind(f"tcp://127.0.0.1:{LOG_SOCKET_PORT}")
+        super().__init__(socket, *handlers)
+
+    def dequeue(self, block):
+        msg = self.queue.recv_json()
+        #print("Zero got a logging record: ", msg)
+        return logging.makeLogRecord(msg)
+        
+
+
+class TableLoader:
+    """ Master loader class. This class can load the data for any table, either by 
+        querying the table from DuckDB or else by calling the underlying REST API.
+
+        We maintain a SQLite queue and dispatch table loading requests to our background worker.
+
+        Loading jobs can be executed synchronously or asynchronously. In either case they will
+        go through the job queue, but in synchronous mode the job will be executed immediately.
+
+        Set UNIFY_SYNCHRONOUS env var to make jobs run immediately.
+
+        Tables can be in 4 states:
+        1. Unknown (schema and table name never registered)
+        2. Never queried. Call the Adapter to query the data and store it to local db.
+        3. Table exists in the local db.
     """
-    def __init__(self, silence_errors=False, given_connections: list[Connection]=None):
+    def __init__(self, silence_errors=False, given_connections: list[Connection]=[], leader=False):
+        self.job_queue: persistqueue.SQLiteQueue = persistqueue.SQLiteQueue(os.path.expanduser("~/unify/unfiysql.db"), auto_commit=True)
+
         with dbmgr() as duck:
             try:
                 if given_connections:
@@ -568,14 +669,54 @@ class TableLoader:
             )
             duck.create_schema('files')
 
-            # Connections defines the set of schemas we will create in the database.
-            # For each connection/schema then we will define the tables as defined
-            # in the REST spec for the target system.
-            for conn in self.connections:
-                duck.create_schema(conn.schema_name)
-                for t in conn.adapter.list_tables():
-                    tmgr = TableMgr(conn.schema_name, conn.adapter, t)
-                    self.tables[tmgr.name] = tmgr
+            if leader:
+                if not SYNCHRONOUS_MODE:
+                    self.setup_task_daemon()
+
+                # Connections defines the set of schemas we will create in the database.
+                # For each connection/schema then we will define the tables as defined
+                # in the REST spec for the target system.
+                for conn in self.connections:
+                    duck.create_schema(conn.schema_name)
+                    for t in conn.adapter.list_tables():
+                        tmgr = TableMgr(conn.schema_name, conn.adapter, t)
+                        self.tables[tmgr.name] = tmgr
+
+    def setup_task_daemon(self):
+        # The handler will actually print the log messages
+        #handler = logging.StreamHandler()
+        #logger.addHandler(handler)
+
+        # The listener runs the dispatch thread, and passes events to the handler. We
+        # don't pass the queue as the listener will make a ZMQ internally.
+        listener = ZeroMQSocketListener(*logger.handlers)
+        listener.start()
+
+        if not self.task_daemon_is_running():
+            self.start_daemon()
+
+    def task_daemon_is_running(self):
+        pid_file = self.get_pid_path()
+        if os.path.exists(pid_file):
+            pid = int(open(pid_file).read())
+            try:
+                process = psutil.Process(pid)
+                if process.status() == 'running':
+                    return True
+            except:
+                pass
+        return False
+
+    def start_daemon(self):
+        # Exec the task daemon
+        logger.debug("Starting the task daemon...")
+        p = subprocess.Popen(["python", __file__], start_new_session=True)
+
+    def stop_daemon(self):
+        self.job_queue.put(LoaderJob(tenant_id=None, action=LoaderJob.ACTION_STOP_DAEMON))
+
+    def get_pid_path(self):
+        return os.path.join(os.path.dirname(__file__), "unify_daemon.pid")
 
     def add_connection(self, adapter_name: str, schema_name: str, opts: dict):
         with dbmgr() as db:
@@ -594,6 +735,15 @@ class TableLoader:
                 tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                 self.tables[tmgr.name] = tmgr
 
+    def delete_connection(self, connection):
+        with dbmgr() as db:
+            # Delete the connection from the database
+            db.drop_schema(connection.schema_name, cascade=True)
+            self.connections.remove(connection)
+            del self.adapters[connection.schema_name]
+
+        Connection.delete_connection_config(connection.schema_name)
+
     def _get_table_mgr(self, table):
         if table in self.tables:
             return self.tables[table]
@@ -604,30 +754,11 @@ class TableLoader:
             self.tables[tmgr.name] = tmgr
             return tmgr
 
-    def materialize_table(self, schema, table):
-        with dbmgr() as duck:
-            qual = schema + "." + table
-            try:
-                tmgr = self._get_table_mgr(qual)
-            except KeyError:
-                raise TableMissingException(f"{schema}.{table}")
-            tmgr.load_table(tableLoader=self)
-            return tmgr.has_data()
-
     def qualify_tables_in_view_query(self, query: str, from_list: list[str], schema: str,
                                     dialect: str):
         """ Replaces non-qualified table references in a view query with qualified ones.
             Returns the corrected query.
-        """
-
-        # Following *almost* works, except type capitalization still breaks on some queries
-        # if not isinstance(from_list, list):
-        #     from_list = [from_list]
-        # froms = ",".join([(schema + "." + t) for t in from_list])
-        # sql = sqlglot.parse_one(query, read=dialect).from_(froms, append=False).sql(dialect=dialect)
-        # print("*******: ", sql)
-        # return sql
-       
+        """       
         query += " "
         for table_root in sqlglot.parse_one(query).find_all(sqlglot.exp.Table):
             table = schema + "." + table_root.name.split(".")[0]
@@ -717,6 +848,12 @@ class TableLoader:
             with dbmgr() as duck:
                 self.tables[table].truncate(duck)
 
+    def drop_table(self, table: TableHandle):
+        if isinstance(table, str):
+            table = TableHandle(table)
+        with dbmgr() as db:
+            db.drop_table(table)
+
     def table_exists_in_db(self, table):
         try:
             # FIXME: memoize the results here
@@ -725,3 +862,77 @@ class TableLoader:
             return True
         except TableMissingException:
             return False
+
+    def materialize_table(self, table: TableHandle):
+        with dbmgr() as duck:
+            qual = str(table)
+            try:
+                tmgr = self._get_table_mgr(qual)
+            except KeyError:
+                raise TableMissingException(qual)
+            tmgr.load_table(tableLoader=self)
+            self.create_views(table.schema(), table.table_root())
+            return tmgr.has_data()
+##
+### Job dispatching
+##
+    def run_job(self, job: LoaderJob):
+        """ Runs the loading job as specified. Returns True if the job was executed
+            or False if the job will run asynchronously.
+        """
+        self.job_queue.put(job)
+        if SYNCHRONOUS_MODE:
+            while True:
+                try:
+                    job = self.job_queue.get_nowait()
+                    logger.debug(f"Running job: {job}")
+                    CURRENT_JOB = job
+                    self._handle_job(job)
+                    return True
+                except persistqueue.exceptions.Empty:
+                    break
+        return False
+
+    def run_table_load_job(self, schema, table_root):
+        self.run_job(LoaderJob("", LoaderJob.ACTION_LOAD_TABLE, TableHandle(table_root, schema=schema)))
+
+    def job_loop(self):
+        pidfile = self.get_pid_path()
+        with open(pidfile, "w") as f:
+            f.write(str(os.getpid()))
+
+        while True:
+            job = self.job_queue.get()
+            try:
+                logger.debug(f"Running job: {job}")
+                self._handle_job(job)
+                logger.debug("done")
+            except Exception as e:
+                logger.error(f"Error running job {job}: {e}")
+            self.job_queue.task_done()
+
+    """ Async worker does any slow TableLoader tasks """
+    def _handle_job(self, job: LoaderJob):
+        global CURRENT_JOB
+        CURRENT_JOB = job
+
+        if job.action == LoaderJob.ACTION_LOAD_TABLE and job.table:
+            self.materialize_table(job.table)
+        elif job.action == LoaderJob.ACTION_STOP_DAEMON:
+            logger.debug("Daemon quitting")
+            os.remove(self.get_pid_path())
+            sys.exit(0)
+        else:
+            raise RuntimeError("Uknown job action: " + job.action)
+
+
+if __name__ == "__main__":
+    import pdb_attach
+    pdb_attach.listen(50000) 
+
+    handler = ZeroMQSocketHandler()
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    logger.debug("Starting Unify worker...")
+    worker: TableLoader = TableLoader()
+    worker.job_loop()

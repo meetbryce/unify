@@ -398,16 +398,11 @@ def dump_duck():
 	#duck = duckdb.connect('/tmp/duckmeta', read_only=False)
 	#dump_tables(duck)
 
-#test_aws_cost_api()
-#test_redmail_image()
-#profile()
-#test_ch_tunnel()
-#test_clicklhouse_sqlalchemy()
-#dump_duck()
+MODE = 1
 
-test_schemata2()
+def tryit():
+	print("MODE ", MODE)
 
-
-
+tryit()
 
 

@@ -1,7 +1,7 @@
 ## OSS readiness
 
-1. Convert to poetry
-1. Add "connect" interactive flow
+1. [done] Convert to poetry
+1. [done] Add "connect" interactive flow
 1. Create proper install package
 1. Create a basic usage tutorial
 1. Add background task processing

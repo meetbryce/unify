@@ -1,6 +1,8 @@
 from cgi import parse_multipart
 import copy
 import json
+import logging
+import logging.handlers
 import os
 import re
 import time
@@ -29,7 +31,6 @@ from .adapters import (
     ReloadStrategy, 
     RESTView,
     UpdatesStrategy, 
-    UnifyLogger, 
 )
 
 class RESTCol:
@@ -317,7 +318,19 @@ class RESTTable(TableDef):
                 f"Invalid refresh strategy '{self.refresh_strategy}' for table {self.name}"
             )
 
-    def query_resource(self, tableLoader, logger: UnifyLogger) -> Generator[AdapterQueryResult, None, None]:
+    def has_multivalue_parameters(self):
+        """ returns true if this table has multi-valued parameters (which means that this API resource requires
+            multiple API calls to satisfy. 
+        """
+        for pname, value in self.params.items():
+            sql_query = self.get_sql_query_param(pname, value)
+            if sql_query:
+                return True
+            if not isinstance(value, str) and isinstance(value, Iterable):
+                return True
+        return False
+
+    def query_resource(self, tableLoader, logger: logging.Logger) -> Generator[AdapterQueryResult, None, None]:
         for params_record in self.generate_param_values(tableLoader):
             if self.copy_params_to_output:
                 merge_cols = {k: params_record.get(k) for k in self.copy_params_to_output}
@@ -406,8 +419,7 @@ class RESTTable(TableDef):
         self, 
         tableLoader,
         orig_api_params={},
-        logger: UnifyLogger = None
-        ):
+        logger: logging.Logger= None):
         """
             Call a REST API given the provide api_params. Also handles pagination of the API.
         """
@@ -443,24 +455,20 @@ class RESTTable(TableDef):
                     show_params = {k:api_params[k]for k in list(api_params.keys())[0:5]}
                 else:
                     show_params = api_params
-                print(url, api_params)
+                logger.debug(url + " " + str(api_params))
                 r = session.get(url, params=api_params)
                 #print(r.text)
 
             if r.status_code >= 400:
                 print(r.text)
             if r.status_code == 404:
-                logger.log_table(self.name, UnifyLogger.ERROR, f"404 returned from {url}")
+                logger.error(f"%s 404 returned from {url}", self.name)
                 return
             if r.status_code == 401:
-                logger.log_table(self.name, UnifyLogger.ERROR, f"401 returned from {url}")
-                raise Exception("API call unauthorized: " + r.text)
+                logger.error(f"%s 401 returned from {url}", self.name)
+                raise RuntimeError("API call unauthorized: " + r.text)
             if r.status_code >= 400:
-                logger.log_table(
-                    self.name, 
-                    UnifyLogger.ERROR, 
-                    f"HTTP error {r.status_code} returned from {url}"
-                )
+                logger.error(f"%s HTTP error {r.status_code} returned from {url}")
                 return
 
             size_return = []
@@ -470,12 +478,12 @@ class RESTTable(TableDef):
 
             yield (json_result, size_return)
 
-            if not pager.next_page(size_return[0], json_result):
+            if len(size_return) == 0 or not pager.next_page(size_return[0], json_result):
                 break
 
             page += 1
             if page > self.max_pages:
-                print("Aborting table scan after {} pages", page-1)
+                logger.warning("Aborting table scan after %d pages", page-1)
                 break
 
     def interpolate_post_values(self, node, params: dict, remove_keys: list):
@@ -613,4 +621,31 @@ class RESTAdapter(Adapter):
             if self.auth_spec['params'][k] == v:
                 raise RuntimeError(f"Cannot validate auth for {self.name} adapter, missing required auth parameter: {k}")
         return True
-            
+
+    def test_connection(self, logger: logging.Logger):
+        # Used to verify valid auth for a new connection
+        class DetectErrorHandler(logging.NullHandler):
+            def __init__(self):
+                super().__init__()
+                self.saw_error = False
+                self.saw_msg = None
+
+            def handle(self, record):
+                if record.levelno >= logging.ERROR:
+                    self.saw_error = True
+                    self.saw_msg = record.msg
+                super().handle(record)
+
+        for table_spec in self.tables:
+            if not table_spec.has_multivalue_parameters():
+                detector = DetectErrorHandler()
+                logger.addHandler(detector)
+                for page in table_spec.query_resource(tableLoader=None, logger=logger):
+                    logger.removeHandler(detector)
+                    if detector.saw_error:
+                        raise RuntimeError(detector.saw_msg)
+                    return True #only need to test one request
+
+        # TODO: fallback to use a multi-paramed request
+        return True
+    

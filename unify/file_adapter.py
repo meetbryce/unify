@@ -1,4 +1,4 @@
-from logging import root
+import logging
 import inspect
 import os
 from pathlib import Path
@@ -7,7 +7,7 @@ import mimetypes
 
 import pandas as pd
 
-from .adapters import Adapter, AdapterQueryResult, OutputLogger, UnifyLogger, StorageManager, TableDef
+from .adapters import Adapter, AdapterQueryResult, OutputLogger, StorageManager, TableDef
 
 class LocalFileTableSpec(TableDef):
     # Represents a Google Sheet as a queryable Table spec to Unify.
@@ -21,7 +21,7 @@ class LocalFileTableSpec(TableDef):
     def get_table_source(self):
         return self.file_uri
 
-    def query_resource(self, tableLoader, logger: UnifyLogger):
+    def query_resource(self, tableLoader, logger: logging.Logger):
         path = Path(self.file_uri)
 
         size_return = []

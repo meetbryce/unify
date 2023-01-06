@@ -57,14 +57,8 @@ from signaling import Signal
 from .schemata import Queries
 from .storage_manager import StorageManager
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-class MyFilter:
-    def filter(self, record):
-        record.msg = "[clickhouse] " + record.msg
-        return True
+logger: logging.Logger = logging.getLogger('unify')
 
-logger.addFilter(MyFilter())
 UNIFY_META_SCHEMA = 'unify_schema'
 
 # Patch SQLA Cursor class which doesn't work will with SQL Inserts on Clickhouse
@@ -190,7 +184,6 @@ class DBManager(contextlib.AbstractContextManager):
         self.signals[signal].emit(**kwargs)
 
     def _on_schema_create(self, dbmgr, schema):
-        print(f"ON SCHEMA CREATE for {schema}: ")
         session = Session(bind=self.engine)
         session.query(Schemata).filter(Schemata.name == schema).delete()
         session.add(Schemata(name=schema, type="schema"))
@@ -211,7 +204,6 @@ class DBManager(contextlib.AbstractContextManager):
         session.commit()
         t = SchemataTable(table_name=table.table_root(), table_schema=table.schema())
         opts = table.table_opts()
-        print(f"SAVING meta for table {table} with ops: {opts}")
         for key in ['description', 'source', 'connection']:
             if key in opts:
                 setattr(t, key, opts[key])
@@ -220,7 +212,6 @@ class DBManager(contextlib.AbstractContextManager):
         session.expire_all()
 
     def _on_table_rename(self, **kwargs):
-        print(f"RENAME TABLE: {kwargs}")
         old_table = kwargs['old_table']
         new_table = kwargs['new_table']
         session = Session(bind=self.engine)
@@ -403,7 +394,7 @@ class DuckDBWrapper(DBManager):
     def __init__(self):
         super().__init__()
         if not DuckDBWrapper.ALERTED:
-            print(f"Connecting to local DuckDB database")
+            logger.debug(f"Connecting to local DuckDB database")
             DuckDBWrapper.ALERTED = True
 
     def __enter__(self) -> DBManager:
@@ -647,7 +638,7 @@ class ClickhouseWrapper(DBManager):
 
     @staticmethod
     def _connect_to_db():
-        print(f"Connecting to clickhouse database at: {os.environ['DATABASE_HOST']}")
+        logger.debug(f"Connecting to clickhouse database at: {os.environ['DATABASE_HOST']}")
         if 'DATABASE_HOST' not in os.environ:
             raise RuntimeError("DATABASE_HOST not set")
         if 'DATABASE_USER' not in os.environ:
@@ -704,7 +695,6 @@ class ClickhouseWrapper(DBManager):
                 query = sqlglot.parse_one(query, read='clickhouse')            
             except Exception as e:
                 msg = f"sqlglot parsing failed: {e}"
-                print(msg)
                 return f"/* {msg} */ {query}"
 
         # Look for creates or drops executed as raw sql
@@ -730,7 +720,6 @@ class ClickhouseWrapper(DBManager):
         newsql = query.transform(transformer).sql('clickhouse')
         if re.match(r"create\s+table", newsql, re.IGNORECASE) and not re.match("engine", newsql, re.IGNORECASE):
             newsql += " ENGINE = MergeTree()"
-        #print(f"REWROTE '{query}' as '{newsql}'")
         return newsql
 
     def rename_table(self, table: TableHandle, new_name: str):
@@ -931,8 +920,11 @@ class ClickhouseWrapper(DBManager):
 
     def drop_schema(self, schema, cascade: bool=False):        
         if cascade:
-            # delete tables in the schema
-            pass
+            try:
+                for table in super().list_tables(schema)['table_name']:
+                    self.drop_table(TableHandle(table, schema))
+            except KeyError:
+                pass
         self._send_signal(signal=DBSignals.SCHEMA_DROP, schema=schema)
 
     def _on_schema_drop(self, dbmgr, schema):

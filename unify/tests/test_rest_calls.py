@@ -1,12 +1,14 @@
 import sys
-
+import logging
 import pytest
 import requests
 import requests_mock
 
 from mocksvc.mocksvc import MockSvc
-from unify.adapters import Connection, Adapter, UnifyLogger
+from unify.adapters import Connection, Adapter
 from unify.rest_adapter import RESTAdapter
+
+logger = logging.getLogger(__name__)
 
 @pytest.fixture
 def connection():
@@ -18,17 +20,6 @@ def connection():
     
     connections = Connection.setup_connections(conn_list=config, storage_mgr_maker=lambda x: x)
     return connections[0]
-
-class SimpleLogger(UnifyLogger):
-    def __init__(self, adapter: Adapter):
-        self.adapter = adapter
-
-    def log_table(self, table: str, level: int, *args):
-        print(f"[{str(self.adapter)}: {table}] ", *args, file=sys.stderr)
-
-@pytest.fixture
-def logger(connection):
-    return SimpleLogger(connection.adapter)
 
 def test_mocksvc_config(connection):
     assert isinstance(connection.adapter, RESTAdapter)
@@ -67,7 +58,7 @@ def test_mocksvc_requests_mock():
             assert resp.status_code == 200
             assert len(resp.json()) == (100 if page < 11 else 27)
 
-def test_calling_rest_api(connection, logger):
+def test_calling_rest_api(connection):
     with requests_mock.Mocker() as mock:
         MockSvc.setup_mocksvc_api(mock)
 

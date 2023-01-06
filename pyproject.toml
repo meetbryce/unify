@@ -26,7 +26,16 @@ requests-aws4auth = "^1.1.2"
 persist-queue = "^0.8.0"
 pyzmq = "^24.0.1"
 google-auth-httplib2 = "^0.1.0"
+daemonocle = "^1.2.3"
+redmail = "^0.4.2"
+pytest = "^7.2.0"
+ipykernel = "^6.19.4"
+ipynbname = "^2021.3.2"
 
+
+[tool.poetry.group.dev.dependencies]
+pdb-attach = "^3.0.0"
+requests-mock = "^1.10.0"
 
 [build-system]
 requires = ["poetry-core"]

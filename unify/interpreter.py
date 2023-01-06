@@ -1,6 +1,7 @@
 import inspect
 import os
 import re
+import time
 import typing
 from typing import Dict
 
@@ -14,7 +15,7 @@ from lark.visitors import Visitor
 from lark.visitors import v_args
 
 from .adapters import Adapter, OutputLogger, Connection
-from .loading import TableLoader, TableExporter
+from .loading import TableLoader, TableExporter, LoaderJob, add_logging_handler
 from .db_wrapper import DBSignals, TableHandle, TableMissingException, dbmgr, SavedVar, RunSchedule, ColumnInfo
 from .file_adapter import LocalFileAdapter
 
@@ -58,8 +59,8 @@ class ParserVisitor(Visitor):
             self._the_command_args['table_schema_ref'] = ".".join(self._the_command_args['table_schema_ref'])
         return tree
 
-    def connections_command(self, tree):
-        self._the_command = 'connections_command'
+    def show_connections(self, tree):
+        self._the_command = 'show_connections'
         return tree
 
     def connect_command(self, tree):
@@ -106,6 +107,10 @@ class ParserVisitor(Visitor):
 
     def create_view_statement(self, tree):
         self._the_command = 'create_view_statement'
+
+    def delete_connection(self, tree):
+        self._the_command = 'delete_connection'
+        return tree
 
     def delete_schedule(self, tree):
         self._the_command = 'delete_schedule'
@@ -289,6 +294,10 @@ class ParserVisitor(Visitor):
     def show_variables(self, tree):
         self._the_command = "show_variables"
 
+    def system_command(self, tree):
+        self._the_command = "system_command"
+        self._the_command_args["command"] = collect_child_text("sys_command", tree, self._full_code)        
+
 
 class CommandContext:
     def __init__(self, command: str, input_func=None, get_notebook_func=None, interactive: bool=True):
@@ -353,7 +362,7 @@ class CommandInterpreter:
 
     def __init__(self, silence_errors=False):
         self.parser = None # defer loading grammar until we need it
-        self.loader = TableLoader(silence_errors)
+        self.loader: TableLoader = TableLoader(silence_errors, leader=True)
         self.adapters: dict[str, Adapter] = self.loader.adapters
         self.context: CommandContext = None
         self.session_vars: dict[str, object] = {}
@@ -392,11 +401,12 @@ class CommandInterpreter:
             self.skip_non_interactive,
             self.run_interp_commands
         ]
-        with dbmgr() as duck:
-            duck.register_for_signal(DBSignals.TABLE_DROP, self.on_table_drop)
-            duck.register_for_signal(DBSignals.TABLE_RENAME, self.on_table_rename)
+        with dbmgr() as db:
+            self._tenant_id = db.tenant_id
+            db.register_for_signal(DBSignals.TABLE_DROP, self.on_table_drop)
+            db.register_for_signal(DBSignals.TABLE_RENAME, self.on_table_rename)
 
-            self.duck = duck
+            self.duck = db
             for stage in pipeline:
                 if context.has_run:
                     break
@@ -591,8 +601,8 @@ class CommandInterpreter:
     def alter_table(self, table_ref, new_table):
         self.duck.rename_table(TableHandle(table_ref), new_table)
 
-    def connections_command(self):
-        """ connections - list all connections. Use 'connect' to create a new connection. """
+    def show_connections(self):
+        """ show connections - list all connections. Use 'connect' to create a new connection. """
         for c in self.loader.connections:
             self.print(f"Adapter {c.adapter.name} ({c.adapter.base_api_url}) - schema: {c.schema_name}")
 
@@ -607,12 +617,6 @@ class CommandInterpreter:
         adapter = adapter_tuple[0](adapter_tuple[1], None, "new_schema")
         
         print(f"Ok! Let's setup a new {adapter.name} connection.")
-        print("Please provide the configuration parameters:")
-        config_opts = adapter.get_config_parameters()
-        config_dict = {}
-        for opt, desc in config_opts.items():
-            config_dict[opt] = self.context.get_input(f"{opt} ({desc}): ")
-
         while True:
             schema = self.context.get_input(f"Specify the schema name ({adapter.name}): ")
             if schema == "":
@@ -622,9 +626,24 @@ class CommandInterpreter:
                 print("Schema name must be unique")
             else:
                 break
-        self.loader.add_connection(adapter.name, schema, config_dict)
-        self.adapters: dict[str, Adapter] = self.loader.adapters
-        print(f"New {adapter.name} connection created in schema {schema}")
+
+        while True:
+            print("Please provide the configuration parameters:")
+            config_opts = adapter.get_config_parameters()
+            config_dict = {}
+            for opt, desc in config_opts.items():
+                config_dict[opt] = self.context.get_input(f"{opt} ({desc}): ")
+
+            try:
+                print("Testing connection...")
+                self.loader.add_connection(adapter.name, schema, config_dict)
+                self.adapters: dict[str, Adapter] = self.loader.adapters
+                print(f"New {adapter.name} connection created in schema {schema}")
+                print("The following tables are available, use peek or select to load data:")
+                return self.show_tables(schema_ref=schema)
+            except RuntimeError as e:
+                print("Connection failed: " + str(e))
+
 
     def count_table(self, table_ref):
         """ count <table> - returns count of rows in a table """
@@ -910,6 +929,20 @@ class CommandInterpreter:
                 con = self.duck.engine
             )
 
+    def delete_connection(self):
+        """ delete connection - delete an existing connection and all it's data """
+        clist = []
+        for idx, c in enumerate(self.loader.connections):
+            clist.append(f"{idx+1}: Adapter {c.adapter.name} ({c.adapter.base_api_url}) - schema: {c.schema_name}")
+        number = self.context.get_input("\n".join(clist) + "\nChoose which connection to delete: ")
+        if number:
+            conn = self.loader.connections[int(number)-1]
+            print("!! WARNING: THIS WILL DELETE ALL TABLES SYNCHRONIZED FROM THIS CONNECTION !!")
+            match = self.context.get_input(f"Type the name of the schema ({conn.schema_name}) to confirm: ")
+            if match == conn.schema_name:
+                print(f"Removing connection '{conn.schema_name}'")
+                self.loader.delete_connection(conn)
+
     def delete_schedule(self, schedule_id):
         """ run delete <notebook> - Delete the schedule for the indicated notebook """
         with Session(bind=self.duck.engine) as session:
@@ -1022,12 +1055,15 @@ class CommandInterpreter:
         return self._execute_duck(self.context.command)
 
     def load_adapter_data(self, schema_name, table_name):
-        if self.loader.materialize_table(schema_name, table_name):
-            self.loader.create_views(schema_name, table_name)
-            return True
-        else:
-            self.print("Loading table...")
-            return False
+        loaded = self.loader.run_job(
+            LoaderJob(
+                self._tenant_id, 
+                LoaderJob.ACTION_LOAD_TABLE, 
+                TableHandle(table_name, schema_name)
+            )
+        )
+        self.print("Loading table...")
+        return loaded
 
     def select_query(self, fail_if_missing=False, **kwargs):
         """ select <columns> from <table> [where ...] [order by ...] [limit ...] [offset ...] """
@@ -1203,6 +1239,22 @@ class CommandInterpreter:
         # TODO: implement
         pass
 
+    def system_command(self, command: str):
+        if command == "status":
+            if self.loader.task_daemon_is_running():
+                self.print("Task daemon is running")
+            else:
+                self.print("Task daemon is not running")
+        elif command == "stop daemon":
+            self.print("Stopping task daemon...")
+            self.loader.stop_daemon();
+        elif command == "restart daemon":
+            self.print("Restarting task daemon...")
+            self.loader.stop_daemon()
+            time.sleep(1)
+            self.loader.start_daemon()
+
+
     #########
     ### FILE system commands
     #########
@@ -1219,3 +1271,6 @@ class CommandInterpreter:
         self.adapters[schema_ref].logger = self.context.logger
         for file in self.adapters[schema_ref].list_files(match_expr):
             self.print(file)
+
+def setup_job_log_handler(handler):
+    add_logging_handler(handler)

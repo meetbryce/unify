@@ -1,4 +1,4 @@
-from logging import root
+import logging
 import typing
 import re
 from datetime import datetime
@@ -9,7 +9,6 @@ from .adapters import (
     Adapter, 
     AdapterQueryResult, 
     OutputLogger, 
-    UnifyLogger,
     ReloadStrategy, 
     StorageManager, 
     TableDef, 
@@ -77,7 +76,7 @@ class PostgresTableSpec(TableDef):
         # Once we have the update column, then we will go query the updated records from the remote server
         # mapping, then yield those in batches to the normal table loader.
 
-    def query_resource(self, tableLoader, logger: UnifyLogger):
+    def query_resource(self, tableLoader, logger: logging.Logger):
         # We will implement the replication entirely within the database, rather than the
         # usual pattern of returning chunks of rows to insert.
         self.adapter.load_table(self.name)

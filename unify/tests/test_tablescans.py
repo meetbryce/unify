@@ -26,12 +26,12 @@ def test_tableloader(connections):
         loader = TableLoader(given_connections=connections)
 
         try:
-            loader.truncate_table("mocksvc.repos27")
+            loader.drop_table("mocksvc.repos27")
         except TableMissingException:
             pass
 
         assert loader.table_exists_in_db("mocksvc.repos27") == False
-        loader.materialize_table("mocksvc", "repos27")
+        loader.run_table_load_job("mocksvc", "repos27")
         loader.create_views("mocksvc", "repos27")
 
         assert loader.table_exists_in_db("mocksvc.repos27")
@@ -65,7 +65,7 @@ def test_updates_strategy(connections):
                 loader.truncate_table("mocksvc." + table)
             except:
                 pass
-            loader.materialize_table("mocksvc", table)
+            loader.run_table_load_job("mocksvc", table)
 
             assert loader.table_exists_in_db(f"mocksvc.{table}")
 
@@ -104,7 +104,7 @@ def test_reload_strategy(connections):
                 loader.truncate_table("mocksvc." + table)
             except:
                 pass
-            loader.materialize_table("mocksvc", table)
+            loader.run_table_load_job("mocksvc", table)
 
             assert loader.table_exists_in_db(f"mocksvc.{table}")
 

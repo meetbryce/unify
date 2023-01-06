@@ -73,6 +73,17 @@ class Connection:
             if conf is not None:
                 yaml.dump(conf, f, default_flow_style=False)
 
+    @staticmethod
+    def delete_connection_config(schema_name):
+        path = Connection.find_connections_config()
+        conf: list = yaml.safe_load(open(path))
+
+        conf = [conn for conn in conf if list(conn.keys())[0] != schema_name]
+
+        # write out the new config, but preserve comments from the old file
+        with open(path, "w") as f:
+            yaml.dump(conf, f, default_flow_style=False)
+
     @classmethod
     def setup_connections(cls, conn_list=None, connections_path=None, storage_mgr_maker=None):
         from .rest_adapter import RESTAdapter
@@ -138,7 +149,7 @@ class Connection:
 
     def test_connection(self):
         # Used to verify valid auth for a new connection
-        pass
+        self.adapter.test_connection(logger=logger)
 
 class OutputLogger:
     def __init__(self) -> None:
@@ -171,15 +182,6 @@ AdapterQueryResult = namedtuple(
     ['json','size_return','merge_cols'],
     defaults={None}
 )
-
-class UnifyLogger:
-    INFO = 1
-    WARNING = 2
-    ERROR = 3
-
-    def log_table(table: str, level: int, *args) -> None:
-        pass
-
 
 class TableDef:
     def __init__(self, name, description=None):
@@ -242,7 +244,7 @@ class TableDef:
     def strip_prefixes(self, value):
         self._strip_prefixes = value
 
-    def query_resource(self, tableLoader, logger: UnifyLogger) -> Generator[AdapterQueryResult, None, None]:
+    def query_resource(self, tableLoader, logger: logging.Logger) -> Generator[AdapterQueryResult, None, None]:
         """ Yields AdapterQueryResults for each page of an API endpoint """
         return None
 
@@ -287,7 +289,7 @@ class TableUpdater:
         """
         return False
 
-    def query_resource(self, tableLoader, logger: UnifyLogger) -> Generator[AdapterQueryResult, None, None]:
+    def query_resource(self, tableLoader, logger: logging.Logger) -> Generator[AdapterQueryResult, None, None]:
         """ Generator which yields AdapterQueryResults for all records updated
             since the `updates_since` timestamp.
         """
@@ -300,7 +302,7 @@ class ReloadStrategy(TableUpdater):
     def should_replace(self) -> bool:
         return True
 
-    def query_resource(self, tableLoader, logger: UnifyLogger):
+    def query_resource(self, tableLoader, logger: logging.Logger):
         """ Just delegate to the TableDef like a first load. """
         for query_result in self.table_def.query_resource(tableLoader, logger):
             yield query_result
@@ -329,7 +331,7 @@ class UpdatesStrategy(TableUpdater):
                 f"Table '{self.table_def.name}' missing 'params' for 'updates' refresh strategy")
 
 
-    def query_resource(self, tableLoader, logger: UnifyLogger):
+    def query_resource(self, tableLoader, logger: logging.Logger):
         # Need interpolate the checkpoint time into the GET request
         # parameters, using the right format for the source system
 
@@ -368,6 +370,9 @@ class Adapter:
     def get_config_parameters(self):
         """ Returns a dict mapping config parameter names to descriptions. """       
         return {}
+
+    def test_connection(self, logger: logging.Logger):
+        pass
 
     @staticmethod
     def convert_string_to_table_name(title: str):

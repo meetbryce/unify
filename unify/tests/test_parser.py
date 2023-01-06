@@ -66,6 +66,15 @@ def test_show_commands(visitor, parser):
     verify_parse(v, p, "show_files", query="show files like '*.csv'",
                 args={"match_expr": "*.csv"})
 
+    verify_parse(v, p, "show_connections", query="show connections")
+
+def test_system(visitor, parser):
+    v = visitor
+    p = parser
+
+    verify_parse(v, p, "system_command", query="system status", args={"command": "status"})
+    verify_parse(v, p, "system_command", query="system stop daemon", args={"command": "stop daemon"})
+
 def test_select(visitor, parser):
     v = visitor
     p = parser
