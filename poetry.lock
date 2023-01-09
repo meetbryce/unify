@@ -178,21 +178,6 @@ files = [
 unicode-backport = ["unicodedata2"]
 
 [[package]]
-name = "click"
-version = "8.1.3"
-description = "Composable command line interface toolkit"
-category = "main"
-optional = false
-python-versions = ">=3.7"
-files = [
-    {file = "click-8.1.3-py3-none-any.whl", hash = "sha256:bb4d8133cb15a609f44e8213d9b391b0809795062913b383c62be0ee95b1db48"},
-    {file = "click-8.1.3.tar.gz", hash = "sha256:7682dc8afb30297001674575ea00d1814d808d6a36af415a82bd481d37ba7b8e"},
-]
-
-[package.dependencies]
-colorama = {version = "*", markers = "platform_system == \"Windows\""}
-
-[[package]]
 name = "clickhouse-driver"
 version = "0.2.5"
 description = "Python driver with native interface for ClickHouse"
@@ -350,24 +335,6 @@ traitlets = ">=5.3"
 
 [package.extras]
 test = ["pytest"]
-
-[[package]]
-name = "daemonocle"
-version = "1.2.3"
-description = "A Python library for creating super fancy Unix daemons"
-category = "main"
-optional = false
-python-versions = ">=3.6"
-files = [
-    {file = "daemonocle-1.2.3.tar.gz", hash = "sha256:741ce6abc37c85ca396379a0d45710ac27ab5f17eeaadbc64a0f5cc4c4f666ea"},
-]
-
-[package.dependencies]
-click = "*"
-psutil = "*"
-
-[package.extras]
-test = ["coveralls", "flake8", "flake8-bugbear", "flake8-isort", "pytest", "pytest-cov"]
 
 [[package]]
 name = "debugpy"
@@ -2079,4 +2046,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "e5059d64982b996cb90f54462bbd76952a7e660d90609c237eb0649b464c4c41"
+content-hash = "6859c6464fff156565962e15ec5c0833246739b39c996544f9934f98745a54f5"

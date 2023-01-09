@@ -28,21 +28,26 @@ class LoaderJobHandler(logging.Handler):
 
     def emit(self, record):
         global job_record
-        #if '_job_id' in record.__dict__ and '_table_root' in record.__dict__:
         job_record = record
-        #print("!!JOB LOG:", record)
         print("", end="", flush=True)
 
     @staticmethod
     def toolbar():
         global job_record
         if job_record:
-            if hasattr(job_record, '_table_root'):
-                return f"[Loading {job_record._schema}:{job_record._table_root}] {job_record.msg} "
+            if hasattr(job_record, '_rows_loaded'):
+                row_count = f"- {job_record._rows_loaded} rows"
             else:
-                return job_record.msg % job_record.args
+                row_count = ""
+            if hasattr(job_record, '_table_root'):
+                return f"[Loading {job_record._schema}:{job_record._table_root} {row_count}] {job_record.msg} "
+            else:
+                try:
+                    return job_record.msg % job_record.args
+                except:
+                    return job_record.msg
         else:
-            return "Not loading"
+            return "No log record"
 
 setup_job_log_handler(LoaderJobHandler())
 
@@ -74,13 +79,13 @@ class UnifyRepl:
                     try:
                         cmd = session.prompt("> ", 
                             auto_suggest=suggester, 
-                            completer=completer, 
+                            completer=self.interpreter.get_prompt_completer(), 
                             bottom_toolbar=LoaderJobHandler.toolbar,
                             refresh_interval=1.0,
                         )
                         if cmd.strip() == "":
                             continue
-                        context: CommandContext = self.interpreter.run_command(cmd)
+                        context: CommandContext = self.interpreter.run_command(cmd, input_func=session.prompt)
                         outputs, df = [context.logger.get_output(), context.result]
                         print("\n".join(outputs))
                         if isinstance(df, pd.DataFrame):

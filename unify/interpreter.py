@@ -1,13 +1,15 @@
 import inspect
 import os
+from pprint import pprint
 import re
 import time
 import typing
-from typing import Dict
+from typing import Dict, Generator
 
 import pandas as pd
 from sqlalchemy.orm.session import Session
 from sqlalchemy import select
+from prompt_toolkit.completion import NestedCompleter
 
 import lark
 from lark.lark import Lark
@@ -298,7 +300,6 @@ class ParserVisitor(Visitor):
         self._the_command = "system_command"
         self._the_command_args["command"] = collect_child_text("sys_command", tree, self._full_code)        
 
-
 class CommandContext:
     def __init__(self, command: str, input_func=None, get_notebook_func=None, interactive: bool=True):
         self.has_run = False
@@ -587,6 +588,47 @@ class CommandInterpreter:
             query = query.command
         return self.duck.execute(query, context=self.context)
 
+    def get_prompt_completer(self):
+        schema_lists = {}
+        with dbmgr() as db:
+            result = {}
+            for m in self.get_help_messages():
+                m = m.replace("[", "").replace("]", "")
+                match = re.match(r"([\w<> ]+)\s*[\-\[']", m)
+                if match:
+                    command_words = match.group(1).split()
+                    wc = len(command_words)
+                    if wc == 1:
+                        if command_words[0] not in result:
+                            result[command_words[0]] = {}
+                    elif wc > 1:
+                        cur_dict = result
+                        for idx, word in enumerate(command_words):
+                            if word == "<schema>":
+                                if word not in schema_lists:
+                                    schema_lists[word] = db.list_schemas()['schema_name']
+                                for schema in schema_lists[word]:
+                                    cur_dict[schema]=None 
+                            if word == "<table>":
+                                if word not in schema_lists:
+                                    schema_lists[word] = db.list_tables().apply(
+                                        lambda x: f"{x.table_schema}.{x.table_name}", axis=1
+                                    )
+                                for table in schema_lists[word]:
+                                    cur_dict[table]=None 
+                            if idx < (wc - 1):
+                                if word not in cur_dict:
+                                    cur_dict[word] = {}
+                                cur_dict = cur_dict[word]
+                            else:
+                                try:
+                                    if word not in cur_dict:
+                                        cur_dict[word] = {}
+                                except:
+                                    pass
+        #pprint(result)
+        return NestedCompleter.from_nested_dict(result)   
+
     def print(self, *args):
         self.context.logger.print(*args)
 
@@ -649,6 +691,14 @@ class CommandInterpreter:
         """ count <table> - returns count of rows in a table """
         return self._execute_duck(f"select count(*) from {table_ref}")
 
+    def get_help_messages(self) -> Generator[str, None, None]:
+        for f in sorted(inspect.getmembers(self.__class__, inspect.isfunction)):
+            if f[0] in ['help','__init__']:
+                continue
+            doc = inspect.getdoc(f[1])
+            if doc:
+                yield doc
+
     def help(self, help_choice):
         """ help - show this message 
         help schemas - overview of schemas
@@ -659,12 +709,8 @@ class CommandInterpreter:
         if help_choice is None:
             for l in inspect.getdoc(self.help).splitlines():
                 self.print(l)
-            for f in sorted(inspect.getmembers(self.__class__, inspect.isfunction)):
-                if f[0] in ['help','__init__']:
-                    continue
-                doc = inspect.getdoc(f[1])
-                if doc:
-                    self.print(doc)
+            for m in self.get_help_messages():
+                self.print(m)
             return
         helps = {
             "schemas": """Every connected system is represented in the Unify database as a schema.
@@ -713,8 +759,8 @@ class CommandInterpreter:
             # note that Adpater will be signaled in the on_table_drop callback
 
     def drop_schema(self, schema_ref, cascade: bool):
-        """ drop <schema> [cascade] - removes the entire schema from the database """
-        val = input(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)? ")
+        """ drop schema <schema> [cascade] - removes the entire schema from the database """
+        val = self.context.get_input(f"Are you sure you want to drop the schema '{schema_ref}' (y/n)? ")
         if val == "y":
             return self.duck.drop_schema(schema_ref, cascade)
 
@@ -1039,15 +1085,15 @@ class CommandInterpreter:
             return self.show_tables(table_ref)
 
     def create_statement(self):
-        """ create table <table> ... """
+        """ create table 'table' ... - create a new table """
         return self._execute_duck(self.context.command)
 
     def create_view_statement(self):
-        """ create view <view> ... """
+        """ create view 'view' ... - create a new view """
         return self._execute_duck(self.context.command)
 
     def insert_statement(self):
-        """ insert into <table> ... """
+        """ insert into <table> ... - insert records into a table """
         return self._execute_duck(self.context.command)
 
     def delete_statement(self):
@@ -1062,7 +1108,6 @@ class CommandInterpreter:
                 TableHandle(table_name, schema_name)
             )
         )
-        self.print("Loading table...")
         return loaded
 
     def select_query(self, fail_if_missing=False, **kwargs):
@@ -1075,8 +1120,15 @@ class CommandInterpreter:
                 self.print(e)
                 return
             schema, table_root = e.table.split(".")
+            print("Loading table...")
             if self.load_adapter_data(schema, table_root):
                 return self.select_query(fail_if_missing=True)
+            else:
+                for x in range(10):
+                    try:
+                        return self._execute_duck(self.context.command)
+                    except TableMissingException:
+                        time.sleep(1.0)
 
     def select_for_writing(self, select_query, adapter_ref, file_ref):
         if adapter_ref in self.adapters:

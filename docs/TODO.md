@@ -5,6 +5,8 @@
 1. Create proper install package
 1. Create a basic usage tutorial
 1. Add background task processing
+   - Persist log messages and support "show logs ..." command to view them
+1. Add command completion based on current schemas and tables
 
 ### FileAdapter
 
@@ -40,6 +42,7 @@
 1. Fix date handling in charts (requires strings right now)
 1. Automatically unpack TAR and compressed files
 1. Add support for PRSQL syntax
+1. Re-implement Postgres adapter to use EXPORT and COPY instead of native Clickhouse support
 
 ## Jupyter integration
 

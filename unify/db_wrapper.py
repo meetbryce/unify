@@ -119,6 +119,9 @@ class TableHandle:
     def __repr__(self) -> str:
         return "TableHandle(" + str(self) + ")"
 
+    def __eq__(self, other: object) -> bool:
+        return str(self) == str(other)
+
     def set_opt(self, key: str, value: str):
         self._table_opts[key] = value
 
@@ -366,6 +369,9 @@ class DBManager(contextlib.AbstractContextManager):
             Columns will include: table_name, table_schema, connection, decription, source, created
         """
         session = Session(bind=self.engine)
+        query = session.query(SchemataTable)
+        if schema:
+            query = query.filter(SchemataTable.table_schema == schema)
         records = [
             {
                 'table_name': table.table_name,
@@ -374,9 +380,9 @@ class DBManager(contextlib.AbstractContextManager):
                 'description': table.description,
                 'source': table.source,
                 'created': table.created
-            } for table in session.query(SchemataTable).filter(SchemataTable.table_schema == schema)
+            } for table in query.order_by('table_schema', 'table_name')
         ]
-        return pd.DataFrame(records)
+        return pd.DataFrame(records)[['table_schema', 'table_name', 'connection', 'created']]
 
     @classmethod
     def get_sqlalchemy_table_args(cls, primary_key=None, schema=None):
