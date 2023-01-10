@@ -382,7 +382,10 @@ class DBManager(contextlib.AbstractContextManager):
                 'created': table.created
             } for table in query.order_by('table_schema', 'table_name')
         ]
-        return pd.DataFrame(records)[['table_schema', 'table_name', 'connection', 'created']]
+        df = pd.DataFrame(records)
+        if df.shape[0] > 0:
+            df = df[['table_schema', 'table_name', 'connection', 'created']]
+        return df
 
     @classmethod
     def get_sqlalchemy_table_args(cls, primary_key=None, schema=None):
@@ -711,6 +714,9 @@ class ClickhouseWrapper(DBManager):
 
         def transformer(node):
             if isinstance(node, (sqlglot.exp.Table, sqlglot.exp.Column)):
+                if re.search(r"\(.*\)", str(node)):
+                    # ignore function calls
+                    return node
                 if isinstance(node, sqlglot.exp.Table):
                     if "." not in str(node):
                         # Coerce unqualified table references into 'default' schema

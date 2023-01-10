@@ -398,11 +398,25 @@ def dump_duck():
 	#duck = duckdb.connect('/tmp/duckmeta', read_only=False)
 	#dump_tables(duck)
 
-MODE = 1
+def atlas_query():
+	session = requests.Session()
+	session.auth = ("scott@tatari.tv", "IWaomeSnHaXvJYE0Cp1O9D83")
 
-def tryit():
-	print("MODE ", MODE)
+	body = """
+		{
+			"operationName":"ProjectDirectoryEmbedTQL",
+			"variables": {
+				"tql":"(archived = false) AND ((watcher = '5ddc151305eece0d09200c65'))",
+				"sort":["NAME_ASC"],
+				"workspaceId":"V29ya3NwYWNlOjIxNjI",
+				"first":40
+			},
+			"query":"query ProjectDirectoryEmbedTQL($tql: String!, $workspaceId: ID, $after: String, $first: Int, $sort: [ProjectSortEnum]) {\n  projectSearch: projectTql(first: $first, after: $after, q: $tql, workspaceId: $workspaceId, sort: $sort) {\n    count\n    pageInfo {\n      hasNextPage\n      startCursor\n      endCursor\n      __typename\n    }\n    edges {\n      node {\n        ...ProjectListRowEmbedFragment\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment ProjectListRowEmbedFragment on Project {\n  id\n  uuid\n  name\n  key\n  private\n  creationDate\n  targetDate\n  targetDateConfidence\n  iconUrl {\n    square {\n      light\n      dark\n      __typename\n    }\n    __typename\n  }\n  newPhase {\n    id\n    displayName\n    name\n    __typename\n  }\n  status {\n    id\n    displayName\n    name\n    __typename\n  }\n  owner {\n    ...UserFields\n    __typename\n  }\n  __typename\n}\n\nfragment UserFields on User {\n  id\n  aaid\n  pii {\n    name\n    nickname\n    picture\n    accountStatus\n    email\n    extendedProfile {\n      jobTitle\n      __typename\n    }\n    __typename\n  }\n  __typename\n}\n"
+		}
+	"""
+	url = "https://team.atlassian.com/gateway/api/watermelon/graphql?operationName=ProjectDirectoryEmbedTQL"
+	r = session.post(url, data=body)
+	
+	print(r.json())
 
-tryit()
-
-
+atlas_query()

@@ -22,6 +22,9 @@ logger.setLevel(logging.DEBUG)
 global job_record
 job_record = None
 
+if os.environ.get('UNIFY_SYNCHRONOUS'):
+    logger.addHandler(logging.StreamHandler(sys.stdout))
+
 class LoaderJobHandler(logging.Handler):  
     def __init__(self):
         super().__init__()

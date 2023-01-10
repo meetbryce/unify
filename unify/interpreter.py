@@ -749,7 +749,7 @@ class CommandInterpreter:
         self.print("File not found")
              
     def drop_table(self, table_ref):
-        """ drop <table> - removes the table from the database """
+        """ drop table <table> - removes the table from the database """
         if self.context.interactive:
             val = self.context.get_input(f"Are you sure you want to drop the table '{table_ref}' (y/n)? ")
         else:

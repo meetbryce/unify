@@ -59,6 +59,10 @@ paging:
 # The strptime format for parsing timestamps
 dateParser: '%Y-%m-%dT%H:%M:%SZ'
 
+# Rate limiting. Use throttle:sleep to add a pause between API calls
+throttle:
+  sleep: 5  # number of seconds to pause after each API call
+  
 #
 # Table definitions
 #
