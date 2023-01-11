@@ -1,0 +1,9 @@
+# Simple demonstration for an API that returns a list of Universities
+name: publicapis
+base_url: https://api.publicapis.org
+auth:
+  type: NONE
+tables:
+  - name: entries
+    resource_path: /entries
+    result_body_path: entries

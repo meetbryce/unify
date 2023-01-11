@@ -1,0 +1,14 @@
+enabled: true
+name: reddit
+base_url: https://tradestie.com/api/v1/apps
+throttle:
+  sleep: 4
+auth:
+  type: NONE
+tables:
+  - name: sentiment
+    resource_path: /reddit
+    params:
+      date: sql@(SELECT arrayJoin(arrayMap(x -> cast(toDate(x) as char), timeSlots(now() - interval 6 month, toUInt32(60*60*24*180), 60*60*24))))
+    copy_params_to_output: [date]
+

@@ -10,6 +10,7 @@ import subprocess
 from pprint import pprint
 import re
 import sys
+import traceback
 import typing
 from typing import Dict
 import psutil
@@ -73,6 +74,7 @@ class LoaderJob:
             self._table_root = None
         self._parameters = parameters
         self._rows_loaded = 0
+        self._canceled = False
 
     @property
     def tenant_id(self):
@@ -97,6 +99,10 @@ class LoaderJob:
     def parameters(self):
         return self._parameters
 
+    @property 
+    def canceled(self):
+        return self._canceled
+
     def __eq__(self, other):
         return self._job_id == other._job_id
 
@@ -105,6 +111,9 @@ class LoaderJob:
 
     def incr_row_count(self, count):
         self._rows_loaded += count
+
+    def cancel(self):
+        self._canceled = True
 
 
 class BaseTableScan(Thread):
@@ -597,7 +606,8 @@ class TableLoadSignaler(logging.Handler):
         self.load_event_queue = queue.SimpleQueue()
 
     def emit(self, record):
-        if hasattr(record, '_table_root') and hasattr(record, '_schema'):
+        if hasattr(record, '_table_root') and hasattr(record, '_schema') and \
+            record._table_root is not None and record._schema is not None:
             table = TableHandle(record._table_root, record._schema)
             if record.msg == 'done':
                 self.load_event_queue.put({"event": "done", "table":table})
@@ -720,6 +730,9 @@ class TableLoader:
                     break
                 time.sleep(1)
 
+    def cancel_all_jobs(self):
+        self.job_queue.put(LoaderJob(tenant_id=None, action=LoaderJob.ACTION_CANCEL))
+
     def get_pid_path(self):
         return os.path.join(os.path.dirname(__file__), "unify_daemon.pid")
 
@@ -754,6 +767,9 @@ class TableLoader:
             return self.tables[table]
         else:
             schema, table_root = table.split(".")
+            if schema not in self.adapters:
+                logger.critical(f"Adapter {schema} not found - maybe you need to restart the job daemon?")
+                return
             table_spec = self.adapters[schema].lookupTable(table_root)
             tmgr = TableMgr(schema, self.adapters[schema], table_spec)
             self.tables[tmgr.name] = tmgr
@@ -906,14 +922,18 @@ class TableLoader:
         with open(pidfile, "w") as f:
             f.write(str(os.getpid()))
 
+        self.running_jobs = []
         while True:
             job = self.job_queue.get()
             try:
                 logger.debug(f"Running job: {job}")
+                self.running_jobs.append(job)
                 self._handle_job(job)
+                self.running_jobs.remove(job)
                 logger.debug("done")
             except Exception as e:
-                logger.error(f"Error running job {job}: {e}")
+                self.running_jobs.remove(job)
+                logger.exception(f"Error running job {job}: {e}", exc_info=True)
             self.job_queue.task_done()
 
     """ Async worker does any slow TableLoader tasks """
@@ -924,6 +944,9 @@ class TableLoader:
             self.materialize_table(job.table, job=job)
         elif job.action == LoaderJob.ACTION_REFRESH_TABLE:
             self.tables[table_ref].refresh_table(tableLoader=self, job=job)
+        elif job.action == LoaderJob.ACTION_CANCEL:
+            for job in self.running_jobs:
+                job.cancel()
         elif job.action == LoaderJob.ACTION_STOP_DAEMON:
             logger.debug("Daemon quitting")
             os.remove(self.get_pid_path())

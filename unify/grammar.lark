@@ -37,6 +37,7 @@ command: show_tables
          | help_last
          | connect_command
          | system_command
+         | open_command
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
 
@@ -138,7 +139,11 @@ connect_command: "connect"
 
 system_command: "system" WS sys_command
 
-sys_command: "status" | "stop daemon" | "restart daemon"
+open_command: "open" WS open_target
+
+open_target: ANY
+
+sys_command: "status" | "stop daemon" | "restart daemon" | "cancel"
 
 file_path: SINGLE_QUOTED_STRING | /\S+/
 

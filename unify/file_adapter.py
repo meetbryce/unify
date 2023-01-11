@@ -3,9 +3,12 @@ import inspect
 import os
 from pathlib import Path
 import subprocess
+from typing import Optional
 import mimetypes
+from urllib.parse import urlparse
 
 import pandas as pd
+import requests
 
 from .adapters import Adapter, AdapterQueryResult, OutputLogger, StorageManager, TableDef
 
@@ -22,7 +25,7 @@ class LocalFileTableSpec(TableDef):
         return self.file_uri
 
     def query_resource(self, tableLoader, logger: logging.Logger):
-        path = Path(self.file_uri)
+        path = self.file_uri
 
         size_return = []
         kwargs = {}
@@ -55,6 +58,7 @@ class LocalFileAdapter(Adapter):
         self.root_path = Path(root_path)
         self.logger: OutputLogger = None
         self.tables = None
+        self.file_info_cache = {}
 
     def list_tables(self):
         if not self.tables:
@@ -82,26 +86,28 @@ class LocalFileAdapter(Adapter):
             match = match.replace('%', '*')
         return [f.name for f in self.root_path.glob(match)]
 
-    def _resolve_path(self, path: str):
-        userp = Path(path)
-        if path.startswith("/"):
-            return userp
-        else:
-            return self.root_path.joinpath(path)
-
     def can_import_file(self, path):
+        # If path is a URL, then try to determine the file type of the file. We basically
+        # have to guess if it is something we can parse
+        parts = urlparse(path)
+        if parts.scheme in ['http', 'https']:
+            response = requests.head(path)
+            content_type = response.headers.get('content-type')
+            self.file_info_cache[path] = content_type
+            if self.determine_pandas_reader(path, mime=content_type, local_file=False):
+                return True
+            return False            
         # Path will be whatever the user entered. Either it will be a path relative
         # to the system root, or it could be absolute in which case it needs to
         # start with our same root
-        userp = self._resolve_path(path)
-        return userp.is_relative_to(self.root_path) and userp.exists()
+        return os.path.exists(path)
 
     def peek_file(self, file_uri: str, line_count: int, logger: OutputLogger):
-        file_path = self._resolve_path(file_uri)
-        reader = self.determine_pandas_reader(file_path)
+        file_path: Path = Path(file_uri)
+        reader = self.determine_pandas_reader(file_path.as_posix())
 
         if reader == pd.read_csv:
-            with open(self._resolve_path(file_uri)) as f:
+            with open(file_path) as f:
                 for x in range(line_count):
                     line: str = f.readline()
                     if not line:
@@ -115,43 +121,44 @@ class LocalFileAdapter(Adapter):
             return df
 
     def import_file(self, file_uri: str, options: list=[]):
-        file_path = self._resolve_path(file_uri)
-        if not file_path.exists():
-            raise RuntimeError(f"Cannot find file '{file_uri}'")
-
-        reader = self.determine_pandas_reader(file_path)
+        reader = self.determine_pandas_reader(file_uri)
         if reader is None:
             raise RuntimeError(f"Cannot determine type of contents for '{file_uri}'")
 
         # Now create an empty table record which we will fill via the table scan later
-        table_name = LocalFileAdapter.convert_string_to_table_name(file_path.stem)
+        table_name = LocalFileAdapter.convert_string_to_table_name(Path(file_uri).stem)
         self.storage.put_object(
             'tables', 
             table_name,
-            {'file_uri': file_path.as_uri(), 'reader_name': reader.__name__, 'options': options}
+            {'file_uri': file_uri, 'reader_name': reader.__name__, 'options': options}
         )
         self.tables = None # force re-calc
         return table_name
 
-    def determine_pandas_reader(self, file_uri: Path):
-        res = mimetypes.guess_type(file_uri.as_posix())
-        mime = None
-        if res[0] is None:
-            # Fall back to using 'file' system command
-            res = subprocess.check_output(["file", "-b", file_uri])
-            mime = res.decode("utf8").strip().lower()
-        else:
-            mime = res[0]
-        if 'csv' in mime:
-            return pd.read_csv
-        elif 'spreadsheetml' in mime or 'excel' in mime:
-            return pd.read_excel
-        elif 'xml' in mime:
-            return pd.read_xml
-        elif 'parquet' in mime:
-            return pd.read_parquet
-        else:
-            return None
+    def determine_pandas_reader(self, file_uri: str, mime:Optional[str]=None, local_file=True):
+        # For remote files we already ran HEAD and grabbed the content type and cached it
+        if file_uri in self.file_info_cache:
+            mime = self.file_info_cache[file_uri]
+        if mime is None:
+            res = mimetypes.guess_type(file_uri)
+            if res[0] is None and local_file:
+                # Fall back to using 'file' system command
+                res = subprocess.check_output(["file", "-b", file_uri])
+                mime = res.decode("utf8").strip().lower()
+            else:
+                mime = res[0]
+        if mime is not None:
+            if 'csv' in mime:
+                return pd.read_csv
+            elif 'spreadsheetml' in mime or 'excel' in mime:
+                return pd.read_excel
+            elif 'xml' in mime:
+                return pd.read_xml
+            elif 'parquet' in mime:
+                return pd.read_parquet
+            elif 'json' in mime:
+                return pd.read_json
+        return None
 
     # Exporting data
     def create_output_table(self, file_name, output_logger: OutputLogger, overwrite=False, opts={}):

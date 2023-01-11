@@ -789,6 +789,10 @@ class ClickhouseWrapper(DBManager):
                 m = re.search(r"Syntax error[^.]+.", e.message)
                 if m:
                     raise QuerySyntaxException(m.group(0))
+            elif e.code == 47:
+                m = re.search(r"DB::Exception.*(Stack)?", e.message)
+                if m:
+                    raise QuerySyntaxException(m.group(0))
             elif "<Empty trace>" in e.message:
                 e.message += " (while executing: " + query + ")"
                 raise e

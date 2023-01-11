@@ -4,12 +4,13 @@ from pprint import pprint
 import re
 import time
 import typing
-from typing import Dict, Generator
+from typing import Dict, Generator, Iterable
 
 import pandas as pd
 from sqlalchemy.orm.session import Session
 from sqlalchemy import select
-from prompt_toolkit.completion import NestedCompleter
+from prompt_toolkit.completion import NestedCompleter, Completer, CompleteEvent, Completion
+from prompt_toolkit.document import Document
 
 import lark
 from lark.lark import Lark
@@ -20,6 +21,7 @@ from .adapters import Adapter, OutputLogger, Connection
 from .loading import TableLoader, TableExporter, LoaderJob, add_logging_handler
 from .db_wrapper import DBSignals, TableHandle, TableMissingException, dbmgr, SavedVar, RunSchedule, ColumnInfo
 from .file_adapter import LocalFileAdapter
+from .metabase_setup import MetabaseSetup
 
 from .parsing_utils import (
     find_subtree, 
@@ -188,6 +190,10 @@ class ParserVisitor(Visitor):
         if filter:
             self._the_command_args['match_expr'] = filter.strip()
 
+    def open_command(self, tree):
+        self._the_command = 'open_command'
+        self._the_command_args['open_target'] = collect_child_text("open_target", tree, full_code=self._full_code).strip("'")
+
     def peek_table(self, tree):
         self._the_command = 'peek_table'
         self._the_command_args['qualifier'] = \
@@ -351,6 +357,26 @@ class CommandContext:
 
     def set_recent_tables(self, tables: list[TableHandle]):
         self.recent_tables.extend(tables)
+
+
+class TableListCompleter(Completer):
+    def __init__(self, table_list) -> None:
+        super().__init__()
+        self._table_list = table_list
+
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterable[Completion]:
+        if document.text.endswith("from ") or document.text.endswith("from"):
+            offset = document.text.endswith(" ") and "" or " "
+            for table in self._table_list:
+                yield Completion(offset + table, start_position=0)
+        elif re.match(r".*from\s+\S+$", document.text):
+            prefix = document.text.split()[-1]
+            for table in self._table_list:
+                if table.startswith(prefix):
+                    yield Completion(table[len(prefix):], start_position=0)
+
 
 class CommandInterpreter:
     """
@@ -627,6 +653,7 @@ class CommandInterpreter:
                                 except:
                                     pass
         #pprint(result)
+        result["select"] = TableListCompleter(schema_lists["<table>"])
         return NestedCompleter.from_nested_dict(result)   
 
     def print(self, *args):
@@ -689,7 +716,7 @@ class CommandInterpreter:
 
     def count_table(self, table_ref):
         """ count <table> - returns count of rows in a table """
-        return self._execute_duck(f"select count(*) from {table_ref}")
+        return self._execute_duck(f"select count(*) as count from {table_ref}")
 
     def get_help_messages(self) -> Generator[str, None, None]:
         for f in sorted(inspect.getmembers(self.__class__, inspect.isfunction)):
@@ -738,7 +765,10 @@ class CommandInterpreter:
     def import_command(self, file_path: str, options: list=[]):
         """ import URL | file path - imports a file or spreadsheet as a new table """
         # See if any of our adapters want to import the indicated file
-        for schema, adapter in self.adapters.items():
+        # Use FileAdapter as last resort
+        adapters = sorted(list(self.adapters.items()), key=lambda x: x[1].name == 'files' and 1 or 0)
+
+        for schema, adapter in adapters:
             if adapter.can_import_file(file_path):
                 adapter.logger = self.context.logger
                 table_root = adapter.import_file(file_path, options=options) # might want to run this in the background
@@ -834,6 +864,41 @@ class CommandInterpreter:
     def on_table_rename(self, dbmgr, old_table, new_table):
         if old_table.schema() in self.adapters:
             self.adapters[old_table.schema()].rename_table(old_table.table_root(), new_table.table_root())
+
+    def open_command(self, open_target: str):
+        if open_target == "metabase":
+            return self.open_metabase()
+
+    def open_metabase(self):
+        """ open metabase - install and open Metabase to analyze your data """
+        ms: MetabaseSetup = MetabaseSetup(os.path.expanduser("~/unify"), self.context.get_input)
+        if ms.mb_is_running():
+            return ms.open_metabase()
+        if ms.mb_is_installed():
+            ms.launch_metabase()
+            return ms.open_metabase()
+            
+        choice = self.context.get_input("Do you want to install and run Metabase (y/n)? ")
+        if choice != 'y':
+            return
+        ms.ensure_java_installed()
+        ms.ensure_metabase_installed()
+        print("Please enter info to create your local Metabase account:")
+        email = self.context.get_input("Enter your email address: ")
+        while True:
+            password = self.context.get_input("Choose a Metabase login password: ")
+            password2 = self.context.get_input("Confirm the password: ")
+            if password == password2:
+                break
+        if ms.launch_metabase():
+            ms.setup_metabase(
+                ch_host="localhost", 
+                ch_database=self.duck.tenant_db, 
+                ch_user="default", 
+                ch_password = None,
+                mb_password=password,
+                mb_email=email)
+            ms.open_metabase()
 
     def peek_table(self, qualifier, peek_object, line_count=20, build_stats=True, debug=False):
         # Get column weights and widths.
@@ -1305,6 +1370,9 @@ class CommandInterpreter:
             self.loader.stop_daemon()
             time.sleep(1)
             self.loader.start_daemon()
+        elif command == "cancel":
+            self.print("Cancelling background jobs...")
+            self.loader.cancel_all_jobs()
 
 
     #########

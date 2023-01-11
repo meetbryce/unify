@@ -1,0 +1,15 @@
+name: tenders_guru
+base_url: https://tenders.guru/api
+auth:
+  type: NONE
+paging:
+  strategy: pageAndCount
+  page_param: page
+  count_param: per_count
+  page_size: 100
+tables:
+  - name: spain
+    resource_path: /es/tenders
+    result_body_path: data
+    supports_paging: True
+    

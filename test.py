@@ -13,6 +13,8 @@ import uuid
 import logging
 from pprint import pprint
 from datetime import datetime
+import shutil
+import subprocess
 
 if False:
 	print(__file__)
@@ -418,5 +420,50 @@ def atlas_query():
 	r = session.post(url, data=body)
 	
 	print(r.json())
+
+def run_metabase():
+	use_docker = True
+	if use_docker:
+		# with docker
+		if shutil.which("docker") is None:
+			raise Exception("docker is not installed")
+		# Grab metabase images
+		subprocess.check_output(["docker", "pull", "metabase/metabase:latest"])
+
+	else:
+		# Use java native
+		if shutil.which("java") is None:
+			choice = input("Do you want to install Java (y/n)?")
+			if choice != "y":
+				return
+			# Download OpenJDK MacOSX tgz
+			# https://github.com/adoptium/temurin11-binaries/releases/download/jdk-11.0.17%2B8/OpenJDK11U-jdk_aarch64_mac_hotspot_11.0.17_8.tar.gz
+			# Untar JDK into HOME
+
+		# Make a directory for Metabase, and download JAR into it
+		# Download Metabase JAR: https://downloads.metabase.com/v0.45.1/metabase.jar
+		# Now download Clickhouse jar into the right place
+
+		# Prompt for email, password for Metabase login
+	
+		# Run java -jar metabase.jar in a new terminal window
+
+		# Get the Metabase setup token
+		r2 = requests.get("http://localhost:3000/api/session/properties")
+		token = r2.json()["setup-token"]
+
+		# Now hit /api/setup to setup Metabase
+		# https://www.metabase.com/docs/latest/api/setup#post-apisetup		
+		# Register the admin user with the token
+		# TODO: Add Clickhouse engine setup
+		r = requests.post("http://localhost:3000/api/setup", json={
+			"token": token, "user": {"email":user, "password":pw}, "prefs":{"site_name":"Unify"}})
+
+		# Now open Metabase at http://localhost:3000
+
+# execute docker and return the output
+def docker_exec(container, cmd):
+		return subprocess.check_output(
+		["docker", "exec", container, "bash", "-c", cmd]	
 
 atlas_query()

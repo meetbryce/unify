@@ -11,6 +11,7 @@
 ### FileAdapter
 
 1. Add support for remote URLs and TAR file listing
+1. Import remote files, including a JSON API result
 
 ## Unsorted
 

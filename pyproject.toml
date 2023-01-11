@@ -30,6 +30,9 @@ redmail = "^0.4.2"
 pytest = "^7.2.0"
 ipykernel = "^6.19.4"
 ipynbname = "^2021.3.2"
+altair = "^4.2.0"
+altair-viewer = "^0.4.0"
+nb2mail = {git = "https://github.com/scottpersinger/nb2mail.git"}
 
 
 [tool.poetry.group.dev.dependencies]

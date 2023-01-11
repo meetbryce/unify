@@ -10,9 +10,6 @@ import threading
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
-from prompt_toolkit.completion import NestedCompleter
-from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.shortcuts import ProgressBar
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from .interpreter import CommandInterpreter, CommandContext, setup_job_log_handler
@@ -53,17 +50,6 @@ class LoaderJobHandler(logging.Handler):
             return "No log record"
 
 setup_job_log_handler(LoaderJobHandler())
-
-completer = NestedCompleter.from_nested_dict({
-    'show': {
-        'schemas': None,
-        'connections': None,
-        'tables': {
-            'from': None
-        }
-    },
-    'exit': None,
-})
 
 class UnifyRepl:
     def __init__(self, interpreter: CommandInterpreter, wide_display=False):

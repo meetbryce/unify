@@ -68,6 +68,12 @@ def test_show_commands(visitor, parser):
 
     verify_parse(v, p, "show_connections", query="show connections")
 
+def test_open_command(visitor, parser):
+    v = visitor
+    p = parser
+
+    verify_parse(v, p, "open_command", query="open metabase", args={"open_target": "metabase"})
+
 def test_system(visitor, parser):
     v = visitor
     p = parser
