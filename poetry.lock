@@ -1836,21 +1836,6 @@ files = [
 ]
 
 [[package]]
-name = "persist-queue"
-version = "0.8.0"
-description = "A thread-safe disk based persistent queue in Python."
-category = "main"
-optional = false
-python-versions = "*"
-files = [
-    {file = "persist-queue-0.8.0.tar.gz", hash = "sha256:bdaa4dcfc4b20a9ce1f5cb6da3116b6cb8fe37527d991fd242856ef2cccd218e"},
-    {file = "persist_queue-0.8.0-py2.py3-none-any.whl", hash = "sha256:d0ce1798b457fc233973efe7c262eb5e80642bebe0c05abbe5611ee223511d5f"},
-]
-
-[package.extras]
-extra = ["DBUtils (<3.0.0)", "PyMySQL", "msgpack (>=0.5.6)"]
-
-[[package]]
 name = "pexpect"
 version = "4.8.0"
 description = "Pexpect allows easy control of interactive console applications."
@@ -3088,4 +3073,4 @@ testing = ["flake8 (<5)", "func-timeout", "jaraco.functools", "jaraco.itertools"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "793ba91fbea29d153992063618825c106ac0bc4e527cd3f151759e648665d3a7"
+content-hash = "aacb34ffca65e83130ac5432c2ce696fc18032ef936de1d34206bfa8a80bbe13"

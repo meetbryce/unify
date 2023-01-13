@@ -24,7 +24,6 @@ import pyarrow as pa
 import numpy as np
 
 # Background tasks
-import persistqueue
 from prompt_toolkit.shortcuts import ProgressBar
 from prompt_toolkit.key_binding import KeyBindings
 
@@ -52,7 +51,6 @@ from unify.file_adapter import LocalFileAdapter
 from unify.zmq_logging import ZeroMQSocketHandler, ZeroMQSocketListener
 
 logger: logging.Logger = logging.getLogger('unify')
-persistqueue.sqlbase.TICK_FOR_WAIT = 3
 
 def add_logging_handler(handler):
     logger.addHandler(handler)
@@ -83,7 +81,7 @@ class LoaderJob:
     @staticmethod
     def load_table_job(schema: str, table_root: str):
         return LoaderJob(None, LoaderJob.ACTION_LOAD_TABLE, TableHandle(table_root, schema))
-        
+
     @property
     def tenant_id(self):
         return self._tenant_id
@@ -172,59 +170,7 @@ class BaseTableScan(Thread):
         # FIXME: We should generalize a pattern for adapters to transform table results rather than
         # passing specific parameters like this
         self.strip_prefixes = strip_prefixes
-        self.analyzed_columns = []
         self.loader_job: LoaderJob = job
-
-    def analyze_columns(self, df: pd.DataFrame):
-        # Analyze a page of rows and extract useful column intelligence information for 
-        # potential use later, such as by the `peek` command.
-        if os.environ.get('UNIFY_SKIP_COLUMN_INTEL'):
-            return
-        for order, column in enumerate(df.columns):
-            lowercol = column.lower()
-            attrs = {
-                "name": column,
-                "type_str": pd.api.types.infer_dtype(df[column]),
-                "url": False,
-                "key": False,
-                "order": order
-            }
-            if re.search("key|id", lowercol) and len(lowercol) <= 6:
-                attrs["key"] = True
-            elif re.search("key[_ -]|[_ -]key|id[_ -]|[_ -]id", lowercol) and len(lowercol) < 12:
-                attrs["key"] = True
-            width = math.ceil(sum([len(str(v)) for v in df[column].values]) / df.shape[0])
-            attrs["col_width"] = width
-            rows = df[column].sample(min(25, df.shape[0])).values
-            for row in rows:
-                if isinstance(row, str) and re.match("^http[s]*:/", row, re.IGNORECASE):
-                    attrs["url"] = True
-            name_width = len(column) + column.count("_")
-            attrs["name_width"] = name_width
-            entropy = df[column].value_counts().size / (float)(df.shape[0])
-            attrs["entropy"] = entropy
-
-            self.analyzed_columns.append(ColumnInfo(
-                table_schema = self.table_handle.schema(),
-                table_name = self.table_handle.table_root(),
-                name = column,
-                attrs = attrs
-            ))
-
-    def save_analyzed_columns(self):
-        if os.environ.get('UNIFY_SKIP_COLUMN_INTEL'):
-            return
-        for col in self.analyzed_columns:
-            self.session.add(col)
-        self.session.commit()
-
-    def clear_analyzed_columns(self, table_ref):
-        table_handle = TableHandle(table_ref)
-        self.session.query(ColumnInfo).filter(
-            ColumnInfo.table_schema == table_handle.schema(),
-            ColumnInfo.table_name == table_handle.table_root()
-        ).delete()
-        self.session.commit()
 
     def cleanup_df_page(self, df, cols_to_drop=[]) -> pd.DataFrame:
         # Performs a set of cleaning/coercion operations before we write a set of rows
@@ -381,11 +327,7 @@ class BaseTableScan(Thread):
     def get_query_mgr(self):
         return self.tableMgr.table_spec
 
-    def scan_start_handler(self):
-        pass
-
     def perform_scan(self, duck: DBManager):
-        self.scan_start_handler()
         progress_iter = self.loader_job.get_progress_iter()
         self.loader_job.set_progress_title(f"Loading data for table: {self.tableMgr.name}")
 
@@ -464,10 +406,6 @@ class BaseTableScan(Thread):
     def _flush_rows_to_db_catch_error(self, duck: DBManager, tableMgr, next_df, page, flush_count):
         try:
             self._flush_rows_to_db(duck, tableMgr, next_df, page, flush_count)
-            if len(self.analyzed_columns) == 0:
-                self.analyze_columns(next_df)
-                if len(self.analyzed_columns) > 0:
-                    self.save_analyzed_columns()
             
         except Exception as e:
             # "Core dump" the bad page
@@ -478,9 +416,6 @@ class BaseTableScan(Thread):
             raise
 
 class InitialTableLoad(BaseTableScan):
-    def scan_start_handler(self):
-        self.clear_analyzed_columns(self.table_ref)
-
     def _flush_rows_to_db(self, duck: DBManager, tableMgr, next_df, page, flush_count):
         ## Default version works when loading a new table
         if page <= flush_count:
@@ -667,8 +602,6 @@ class TableLoader:
         3. Table exists in the local db.
     """
     def __init__(self, silence_errors=False, given_connections: list[Connection]=[], leader=False):
-        self.job_queue: persistqueue.SQLiteQueue = persistqueue.SQLiteQueue(os.path.expanduser("~/unify/unfiysql.db"), auto_commit=True)
-
         with dbmgr() as duck:
             try:
                 if given_connections:
@@ -696,59 +629,53 @@ class TableLoader:
             )
             duck.create_schema('files')
 
-            if leader:
-                # Connections defines the set of schemas we will create in the database.
-                # For each connection/schema then we will define the tables as defined
-                # in the REST spec for the target system.
-                for conn in self.connections:
-                    duck.create_schema(conn.schema_name)
-                    for t in conn.adapter.list_tables():
-                        tmgr = TableMgr(conn.schema_name, conn.adapter, t)
-                        self.tables[tmgr.name] = tmgr
+            # Connections defines the set of schemas we will create in the database.
+            # For each connection/schema then we will define the tables as defined
+            # in the REST spec for the target system.
+            for conn in self.connections:
+                duck.create_schema(conn.schema_name)
+                for t in conn.adapter.list_tables():
+                    tmgr = TableMgr(conn.schema_name, conn.adapter, t)
+                    self.tables[tmgr.name] = tmgr
 
-    def setup_task_daemon(self):
-        # The handler will actually print the log messages
-        #handler = logging.StreamHandler()
-        #logger.addHandler(handler)
+# Loading jobs
 
-        # The listener runs the dispatch thread, and passes events to the handler. We
-        # don't pass the queue as the listener will make a ZMQ internally.
-        listener = ZeroMQSocketListener(*logger.handlers)
-        listener.start()
+    def run_table_load_job(self, schema, table_root, run_async=True):
+        self.run_job(LoaderJob("", LoaderJob.ACTION_LOAD_TABLE, TableHandle(table_root, schema=schema)), run_async)
 
-        if not self.task_daemon_is_running():
-            self.start_daemon()
-
-    def task_daemon_is_running(self):
-        pid_file = self.get_pid_path()
-        if os.path.exists(pid_file):
-            pid = int(open(pid_file).read())
-            try:
-                process = psutil.Process(pid)
-                if process.status() == 'running':
-                    return True
-            except:
-                pass
-        return False
-
-    def start_daemon(self):
-        # Exec the task daemon
-        logger.debug("Starting the task daemon...")
-        p = subprocess.Popen(["python", __file__], start_new_session=True)
-
-    def stop_daemon(self):
-        if self.task_daemon_is_running():
-            self.job_queue.put(LoaderJob(tenant_id=None, action=LoaderJob.ACTION_STOP_DAEMON))
-            while True:
-                if not self.task_daemon_is_running():
+    def _handle_job(self, job: LoaderJob, run_async: bool=True):
+        t = threading.Thread(target=self._dispatch_job, args=(job,))
+        if run_async:
+            t.daemon = True
+            t.start()
+            
+            while t.is_alive():
+                t.join(timeout=0.2)
+                if job._backgrounded:
                     break
-                time.sleep(1)
+        else:
+            t.run()
 
-    def cancel_all_jobs(self):
-        self.job_queue.put(LoaderJob(tenant_id=None, action=LoaderJob.ACTION_CANCEL))
+    """ Async worker does any slow TableLoader tasks """
+    def _dispatch_job(self, job: LoaderJob):
+        kb = KeyBindings()
+        @kb.add('<any>')
+        def _(event):
+            print("Finishing in background...")
+            job.background()
 
-    def get_pid_path(self):
-        return os.path.join(os.path.dirname(__file__), "unify_daemon.pid")
+        if job.action == LoaderJob.ACTION_LOAD_TABLE and job.table:
+            bottom = f"Loading {str(job.table)}. Press any key to move job to the background."
+            with ProgressBar(key_bindings=kb, title=f"Loading {str(job.table)}...", bottom_toolbar=bottom) as pb:
+                job.progress_bar = pb
+                self.materialize_table(job=job)
+        elif job.action == LoaderJob.ACTION_REFRESH_TABLE:
+            self.tables[str(job.table)].refresh_table(tableLoader=self, job=job)
+        elif job.action == LoaderJob.ACTION_CANCEL:
+            # FIXME: allow canceling loading jobs
+            pass
+        else:
+            raise RuntimeError("Uknown job action: " + job.action)
 
     def add_connection(self, adapter_name: str, schema_name: str, opts: dict):
         with dbmgr() as db:
@@ -825,19 +752,6 @@ class TableLoader:
                     duck.execute(f"CREATE VIEW {tmgr.schema}.{view.name} AS {query}")
 
 
-    def analyze_columns(self, table_ref):
-        with dbmgr() as duck:
-            duck.register_for_signal(DBSignals.TABLE_LOADED, self.on_table_loaded)
-            tmgr = self._get_table_mgr(table_ref)
-            scanner = InitialTableLoad(tableLoader=self, tableMgr=tmgr)
-            scanner._set_duck(duck)
-            # Load a df page from the table
-            for df in self.read_table_rows(table_ref, limit=25):
-                scanner.clear_analyzed_columns(table_ref)
-                scanner.analyze_columns(df)
-                scanner.save_analyzed_columns()
-                break
-
     def refresh_table(self, table_ref, run_async=True):
         self.run_job(LoaderJob("", LoaderJob.ACTION_REFRESH_TABLE, TableHandle(table_ref)), run_async=run_async)
 
@@ -909,87 +823,63 @@ class TableLoader:
             self.create_views(job.table.schema(), job.table.table_root())
             return tmgr.has_data()
 ##
-### Job dispatching
+### Refresh daemon
 ##
+    def setup_task_daemon(self):
+        # The handler will actually print the log messages
+        #handler = logging.StreamHandler()
+        #logger.addHandler(handler)
+
+        # The listener runs the dispatch thread, and passes events to the handler. We
+        # don't pass the queue as the listener will make a ZMQ internally.
+        listener = ZeroMQSocketListener(*logger.handlers)
+        listener.start()
+
+        if not self.task_daemon_is_running():
+            self.start_daemon()
+
+    def get_pid_path(self):
+        return os.path.join(os.path.dirname(__file__), "unify_daemon.pid")
+
+    def task_daemon_is_running(self):
+        pid_file = self.get_pid_path()
+        if os.path.exists(pid_file):
+            pid = int(open(pid_file).read())
+            try:
+                process = psutil.Process(pid)
+                if process.status() == 'running':
+                    return True
+            except:
+                pass
+        return False
+
+    def start_daemon(self):
+        # Exec the task daemon
+        logger.debug("Starting the task daemon...")
+        p = subprocess.Popen(["python", __file__], start_new_session=True)
+
+    def stop_daemon(self):
+        if self.task_daemon_is_running():
+            # FIXME: just send SIGINT to the daemon
+            while True:
+                if not self.task_daemon_is_running():
+                    break
+                time.sleep(1)
+
+
     def run_job(self, job: LoaderJob, run_async=True):
         """ Runs the loading job as specified. Returns True if the job was executed
             or False if the job will run asynchronously.
         """
         logger.debug(f"Running job: {job}")
-        socket_log_handler.set_job(job)
         self._handle_job(job, run_async)
         return True
-
-    def run_table_load_job(self, schema, table_root, run_async=True):
-        self.run_job(LoaderJob("", LoaderJob.ACTION_LOAD_TABLE, TableHandle(table_root, schema=schema)), run_async)
-
-    def job_loop(self):
-        pidfile = self.get_pid_path()
-        with open(pidfile, "w") as f:
-            f.write(str(os.getpid()))
-
-        self.running_jobs = []
-        while True:
-            job = self.job_queue.get()
-            try:
-                logger.debug(f"Running job: {job}")
-                self.running_jobs.append(job)
-                self._handle_job(job)
-                self.running_jobs.remove(job)
-                logger.debug("done")
-            except Exception as e:
-                self.running_jobs.remove(job)
-                logger.exception(f"Error running job {job}: {e}", exc_info=True)
-            self.job_queue.task_done()
-
-    def _handle_job(self, job: LoaderJob, run_async: bool=True):
-        t = threading.Thread(target=self._dispatch_job, args=(job,))
-        if run_async:
-            t.daemon = True
-            t.start()
-            
-            while t.is_alive():
-                t.join(timeout=0.2)
-                if job._backgrounded:
-                    break
-        else:
-            t.run()
-
-    """ Async worker does any slow TableLoader tasks """
-    def _dispatch_job(self, job: LoaderJob):
-        socket_log_handler.set_job(job)
-
-        kb = KeyBindings()
-        @kb.add('<any>')
-        def _(event):
-            print("Finishing in background...")
-            job.background()
-
-        if job.action == LoaderJob.ACTION_LOAD_TABLE and job.table:
-            bottom = f"Loading {str(job.table)}. Press any key to move job to the background."
-            with ProgressBar(key_bindings=kb, title=f"Loading {str(job.table)}...", bottom_toolbar=bottom) as pb:
-                job.progress_bar = pb
-                self.materialize_table(job=job)
-        elif job.action == LoaderJob.ACTION_REFRESH_TABLE:
-            self.tables[str(job.table)].refresh_table(tableLoader=self, job=job)
-        elif job.action == LoaderJob.ACTION_CANCEL:
-            for job in self.running_jobs:
-                job.cancel()
-        elif job.action == LoaderJob.ACTION_STOP_DAEMON:
-            logger.debug("Daemon quitting")
-            os.remove(self.get_pid_path())
-            sys.exit(0)
-        else:
-            raise RuntimeError("Uknown job action: " + job.action)
-
-socket_log_handler: ZeroMQSocketHandler = ZeroMQSocketHandler()
 
 
 if __name__ == "__main__":
     import pdb_attach
     pdb_attach.listen(50000) 
 
-    logger.addHandler(socket_log_handler)
     logger.setLevel(logging.DEBUG)
     logger.debug("Starting Unify worker...")
     worker: TableLoader = TableLoader()

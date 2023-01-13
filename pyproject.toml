@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "unify"
-version = "0.1.0"
-description = "Personal data warehouse"
+name = "unifydb"
+version = "0.2.0"
+description = "Your personal data warehouse"
 authors = ["Scott Persinger <scottpersinger@gmail.com>"]
 readme = "README.md"
 
@@ -23,7 +23,6 @@ google-api-python-client = "^2.70.0"
 sqlalchemy = "^1.4.45"
 clickhouse-sqlalchemy = "^0.2.3"
 requests-aws4auth = "^1.1.2"
-persist-queue = "^0.8.0"
 pyzmq = "^24.0.1"
 google-auth-httplib2 = "^0.1.0"
 redmail = "^0.4.2"

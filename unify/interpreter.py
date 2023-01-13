@@ -948,67 +948,8 @@ class CommandInterpreter:
                     return adapter.peek_file(file_path, line_count, self.context.logger)
             return
 
-        schema, table_root = peek_object.split(".")
-        with Session(bind=self.duck.engine) as session:
-            cols = session.query(ColumnInfo).filter(
-                ColumnInfo.table_name == table_root,
-                ColumnInfo.table_schema == schema
-            ).all()
-            if len(cols) == 0:
-                if build_stats:
-                    self._analyze_columns(peek_object)
-                    return self.peek_table(peek_object, line_count=line_count, build_stats=False)
-                else:
-                    self.print(f"Can't peek at {peek_object} because no column stats are available.")
-                    return
-
-        cols = sorted(cols, key=lambda col: col.column_weight, reverse=True)
-        # Take columns until our max width
-
-        if debug:
-            for c in cols:
-                print(f"{c.name} - {c.column_weight} - {c.attrs}")
-
-        use_cols = []
-        total_width = 0
-        date_used = False 
-
-        def is_date(types):
-            return "date" in types or "time" in types
-
-        for col in cols:
-            typest = col.attrs["type_str"]
-            column_name = col.name
-            display_name = col.name
-            column_width = col.width
-            if is_date(typest):
-                if not date_used:
-                    date_used = True
-                    column_name = self.duck.get_short_date_cast(col.name)
-                    display_name = col.name
-                    column_width = 14
-                else:
-                    continue
-            if typest == "string" and column_width > 50:
-                column_name = f"substring({column_name}, 1, 50)"
-
-            if typest == 'boolean':
-                continue
-
-            if column_width < len(display_name) and len(display_name) > 15:
-                # column name will be longer than the values, so let's shorten it
-                display_name = display_name[0:7] + "..." + display_name[-7:]
-
-            if (total_width + max(column_width, len(display_name))) > 100:
-                continue # keep adding smaller cols
-
-            use_cols.append((column_name, display_name))
-            total_width += max(column_width, len(display_name))
-
-        col_list = ", ".join([f"{pair[0]} as \"{pair[1]}\"" for pair in use_cols])
-        sql = f"select {col_list} from {peek_object} limit {line_count}"
-        print(sql)
-        return self._execute_duck(sql)
+        # Need to re-implement this without relying on our "pre-analyzed" column list which
+        # wasn't worth the effort precalculate it.
 
     def refresh_table(self, table_ref):
         """ refresh table <table> - updates the rows in a table from the source adapter """
