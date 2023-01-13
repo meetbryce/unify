@@ -2,9 +2,12 @@ import inspect
 import os
 from pprint import pprint
 import re
+import functools
 import time
+import threading
 import typing
 from typing import Dict, Generator, Iterable
+import webbrowser
 
 import pandas as pd
 from sqlalchemy.orm.session import Session
@@ -16,6 +19,9 @@ import lark
 from lark.lark import Lark
 from lark.visitors import Visitor
 from lark.visitors import v_args
+
+from http.server import HTTPServer
+from ReadEm.serve import MDRequestHandler
 
 from .adapters import Adapter, OutputLogger, Connection
 from .loading import TableLoader, TableExporter, LoaderJob, add_logging_handler
@@ -906,6 +912,16 @@ class CommandInterpreter:
     def open_command(self, open_target: str):
         if open_target == "metabase":
             return self.open_metabase()
+        elif open_target == "tutorial":
+            docsdir = os.path.join(os.path.dirname(__file__), '../docs')
+            Handler = functools.partial(MDRequestHandler, directory=docsdir)
+            setattr(MDRequestHandler, 'log_message', lambda *args: None)
+            http = HTTPServer(('127.0.0.1', 9010), Handler)
+            self.print("Docs server listening on port 9010...")
+            t = threading.Thread(target=http.serve_forever, daemon=True)
+            t.start()
+            webbrowser.open("http://localhost:9010/TUTORIAL.md")
+
 
     def open_metabase(self):
         """ open metabase - install and open Metabase to analyze your data """

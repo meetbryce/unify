@@ -4,6 +4,14 @@ version = "0.2.0"
 description = "Your personal data warehouse"
 authors = ["Scott Persinger <scottpersinger@gmail.com>"]
 readme = "README.md"
+license = "Elastic-2.0"
+homepage = "https://github.com/scottpersinger/unify"
+repository = "https://github.com/scottpersinger/unify"
+documentation = "https://github.com/scottpersinger/unify/docs"
+packages = [
+    { include = "unify" },
+    { include = "gsheets_unify_adapter" },
+]
 
 [tool.poetry.dependencies]
 python = "^3.9"
@@ -32,6 +40,7 @@ ipynbname = "^2021.3.2"
 altair = "^4.2.0"
 altair-viewer = "^0.4.0"
 nb2mail = {git = "https://github.com/scottpersinger/nb2mail.git"}
+readem = "^1.0.2"
 
 
 [tool.poetry.group.dev.dependencies]

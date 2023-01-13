@@ -96,7 +96,7 @@ class Connection:
             klass = RESTAdapter
             if 'class' in spec:
                 if spec['class'].lower() == 'gsheetsadapter':
-                    from gsheets.gsheets_adapter import GSheetsAdapter
+                    from gsheets_unify_adapter.gsheets_adapter import GSheetsAdapter
                     klass = GSheetsAdapter
                 elif spec['class'].lower() == 'postgresadapter':
                     from .postgres_adapter import PostgresAdapter

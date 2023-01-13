@@ -1399,6 +1399,24 @@ nearley = ["js2py"]
 regex = ["regex"]
 
 [[package]]
+name = "markdown"
+version = "3.4.1"
+description = "Python implementation of Markdown."
+category = "main"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "Markdown-3.4.1-py3-none-any.whl", hash = "sha256:08fb8465cffd03d10b9dd34a5c3fea908e20391a2a90b88d66362cb05beed186"},
+    {file = "Markdown-3.4.1.tar.gz", hash = "sha256:3b809086bb6efad416156e00a0da66fe47618a5d6918dd688f53f40c8e4cfeff"},
+]
+
+[package.dependencies]
+importlib-metadata = {version = ">=4.4", markers = "python_version < \"3.10\""}
+
+[package.extras]
+testing = ["coverage", "pyyaml"]
+
+[[package]]
 name = "markupsafe"
 version = "2.1.1"
 description = "Safely add untrusted strings to HTML/XML markup."
@@ -2501,6 +2519,21 @@ packaging = "*"
 test = ["pytest (>=6,!=7.0.0,!=7.0.1)", "pytest-cov (>=3.0.0)", "pytest-qt"]
 
 [[package]]
+name = "readem"
+version = "1.0.2"
+description = "Python HTTP Server for markdown files."
+category = "main"
+optional = false
+python-versions = ">=3"
+files = [
+    {file = "ReadEm-1.0.2-py3-none-any.whl", hash = "sha256:08fbc69e879378b331df0411f14c7735023341eb0f3113ddcf7d3ab45e3e672e"},
+    {file = "ReadEm-1.0.2.tar.gz", hash = "sha256:bb377365bd1eab0bb1177f794ef13bf13594b08a6d7b05bacaece19dea46c1c0"},
+]
+
+[package.dependencies]
+Markdown = "*"
+
+[[package]]
 name = "redmail"
 version = "0.4.2"
 description = "Email sending library"
@@ -3073,4 +3106,4 @@ testing = ["flake8 (<5)", "func-timeout", "jaraco.functools", "jaraco.itertools"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "aacb34ffca65e83130ac5432c2ce696fc18032ef936de1d34206bfa8a80bbe13"
+content-hash = "03c4929dfc8e0a2ae85e5c042dae57aa780e8a76f7b4d3a4d5b01a6492cfad6a"

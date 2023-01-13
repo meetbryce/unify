@@ -17,4 +17,6 @@ if 'UNIFY_HOME' not in os.environ:
 from .interpreter import CommandInterpreter, CommandContext
 from .db_wrapper import dbmgr
 
+__version__ = "0.2.0"
+
 
