@@ -9,7 +9,7 @@ from typing import Dict, Generator, Iterable
 import pandas as pd
 from sqlalchemy.orm.session import Session
 from sqlalchemy import select
-from prompt_toolkit.completion import NestedCompleter, Completer, CompleteEvent, Completion
+from prompt_toolkit.completion import NestedCompleter, WordCompleter, Completer, CompleteEvent, Completion
 from prompt_toolkit.document import Document
 
 import lark
@@ -372,10 +372,45 @@ class TableListCompleter(Completer):
             for table in self._table_list:
                 yield Completion(offset + table, start_position=0)
         elif re.match(r".*from\s+\S+$", document.text):
-            prefix = document.text.split()[-1]
+            prefix = document.text.split(" ")[-1]
             for table in self._table_list:
                 if table.startswith(prefix):
                     yield Completion(table[len(prefix):], start_position=0)
+
+class DottedWordCompleter(NestedCompleter):
+    # Unfortuante monkey patch so NestedCompleter configures the final WordCompleter
+    # to allow dots in words instead of considering it a separator.
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterable[Completion]:
+        # Split document.
+        text = document.text_before_cursor.lstrip()
+        stripped_len = len(document.text_before_cursor) - len(text)
+
+        # If there is a space, check for the first term, and use a
+        # subcompleter.
+        if " " in text:
+            first_term = text.split(" ")[0]
+            completer = self.options.get(first_term)
+
+            # If we have a sub completer, use this for the completions.
+            if completer is not None:
+                remaining_text = text[len(first_term) :].lstrip()
+                move_cursor = len(text) - len(remaining_text) + stripped_len
+
+                new_document = Document(
+                    remaining_text,
+                    cursor_position=document.cursor_position - move_cursor,
+                )
+
+                yield from completer.get_completions(new_document, complete_event)
+
+        # No space in the input: behave exactly like `WordCompleter`.
+        else:
+            completer = WordCompleter(
+                list(self.options.keys()), ignore_case=self.ignore_case, WORD=True
+            )
+            yield from completer.get_completions(document, complete_event)
 
 
 class CommandInterpreter:
@@ -654,7 +689,10 @@ class CommandInterpreter:
                                     pass
         #pprint(result)
         result["select"] = TableListCompleter(schema_lists["<table>"])
-        return NestedCompleter.from_nested_dict(result)   
+        result["move"] = {"left.first": None, 
+        "right": None, "up": None, "down": None}
+        return DottedWordCompleter.from_nested_dict(result)
+
 
     def print(self, *args):
         self.context.logger.print(*args)

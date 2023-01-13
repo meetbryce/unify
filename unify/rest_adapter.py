@@ -445,10 +445,10 @@ class RESTTable(TableDef):
             
             if self.post:
                 remove_keys = []
-                post = self.interpolate_post_values(self.post, api_params, remove_keys)
+                post = self.interpolate_post_values(self.post, api_params, remove_keys, logger)
                 for k in remove_keys:
                     api_params.pop(k, None)
-                print("POST ", url, api_params, post)
+                logger.debug("POST %s %s", url, api_params, post)
                 r = session.post(url, params=api_params, json=post)
             else:
                 if len(api_params.keys()) > 4:
@@ -457,7 +457,6 @@ class RESTTable(TableDef):
                     show_params = api_params
                 logger.debug(url + " " + str(api_params))
                 r = session.get(url, params=api_params)
-                #print(r.text)
 
             if r.status_code >= 400:
                 print(r.text)
@@ -486,7 +485,7 @@ class RESTTable(TableDef):
                 logger.warning("Aborting table scan after %d pages", page-1)
                 break
 
-    def interpolate_post_values(self, node, params: dict, remove_keys: list):
+    def interpolate_post_values(self, node, params: dict, remove_keys: list, logger: logging.Logger):
         """ Substitutes parameters into a request POST body by finding
             ${var} references. Returns a copy of the POST body with the substituted
             values.
@@ -502,15 +501,15 @@ class RESTTable(TableDef):
                     remove_keys.append(k)
             if isinstance(node, str) and re.match(r"\$\{[a-zA-Z0-9_-]+\}", node):
                 # remove key references not supplied in params
-                print("Removing undefined reference: ", node)
+                logger.debug("Removing undefined reference: %s", node)
                 node = None
             return node
         elif isinstance(node, list):
-            return [self.interpolate_post_values(v, params, remove_keys) for v in node]
+            return [self.interpolate_post_values(v, params, remove_keys, logger) for v in node]
         elif isinstance(node, dict):
             dup = node.copy()
             for key, value in node.items():
-                dup[key] = self.interpolate_post_values(value, params, remove_keys)
+                dup[key] = self.interpolate_post_values(value, params, remove_keys, logger)
             return dup
         else:
             # Non-strings just return as is

@@ -15,6 +15,10 @@ from pprint import pprint
 from datetime import datetime
 import shutil
 import subprocess
+from prompt_toolkit.shortcuts import ProgressBar
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit import HTML
+from prompt_toolkit.patch_stdout import patch_stdout
 
 if False:
 	print(__file__)
@@ -464,6 +468,51 @@ def run_metabase():
 # execute docker and return the output
 def docker_exec(container, cmd):
 		return subprocess.check_output(
-		["docker", "exec", container, "bash", "-c", cmd]	
+		["docker", "exec", container, "bash", "-c", cmd]).decode("utf-8")
 
-atlas_query()
+def test_progress_bar():
+	kb = KeyBindings()
+	cancel = [False]
+
+	@kb.add('x')
+	def _(event):
+		print("Canceling...")
+		cancel[0] = True
+
+	with ProgressBar(key_bindings=kb, title="This is the top title") as pb:
+		for i in pb(range(10), total=10):
+			pb.title = f"Title {i}"
+			#print(i)
+			time.sleep(0.5)
+			if cancel[0]:
+				break
+
+test_progress_bar()
+
+
+bottom_toolbar = HTML(' <b>[f]</b> Print "f" <b>[x]</b> Abort.')
+
+# Create custom key bindings first.
+kb = KeyBindings()
+cancel = [False]
+
+@kb.add('f')
+def _(event):
+    print('You pressed `f`.')
+
+@kb.add('x')
+def _(event):
+    " Send Abort (control-c) signal. "
+    cancel[0] = True
+    #os.kill(os.getpid(), signal.SIGINT)
+
+# Use `patch_stdout`, to make sure that prints go above the
+# application.
+with patch_stdout():
+    with ProgressBar(key_bindings=kb, bottom_toolbar=bottom_toolbar) as pb:
+        for i in pb(range(800)):
+            time.sleep(.01)
+
+            # Stop when the cancel flag has been set.
+            if cancel[0]:
+                break

@@ -6,6 +6,7 @@ import subprocess
 from typing import Optional
 import mimetypes
 from urllib.parse import urlparse
+import time
 
 import pandas as pd
 import requests
@@ -47,6 +48,7 @@ class LocalFileTableSpec(TableDef):
                     chunk.dropna(axis='columns', how='all', inplace=True)
                     yield AdapterQueryResult(json=chunk, size_return=size_return)
         else:
+            logger.warn("File loader does not support chunking.")
             df = method(path, **kwargs)
             yield AdapterQueryResult(json=df, size_return=size_return)
 
@@ -93,6 +95,9 @@ class LocalFileAdapter(Adapter):
         if parts.scheme in ['http', 'https']:
             response = requests.head(path)
             content_type = response.headers.get('content-type')
+            if content_type.startswith("text/html"):
+                # Try to guess a reasonable type from the file name
+                content_type = None # let determine_pandas_reader guess the type
             self.file_info_cache[path] = content_type
             if self.determine_pandas_reader(path, mime=content_type, local_file=False):
                 return True
@@ -140,7 +145,10 @@ class LocalFileAdapter(Adapter):
         if file_uri in self.file_info_cache:
             mime = self.file_info_cache[file_uri]
         if mime is None:
-            res = mimetypes.guess_type(file_uri)
+            if file_uri.startswith("http"):
+                res = mimetypes.guess_type(urlparse(file_uri).path)
+            else:
+                res = mimetypes.guess_type(file_uri)
             if res[0] is None and local_file:
                 # Fall back to using 'file' system command
                 res = subprocess.check_output(["file", "-b", file_uri])

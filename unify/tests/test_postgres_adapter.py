@@ -3,7 +3,7 @@ from datetime import datetime
 
 from unify.adapters import Connection
 from unify.postgres_adapter import PostgresAdapter
-from unify.loading import TableLoader
+from unify.loading import TableLoader, LoaderJob
 from unify.db_wrapper import TableMissingException, TableHandle
 from unify.sqla_storage_manager import UnifyDBStorageManager
 from unify import dbmgr
@@ -34,7 +34,7 @@ def test_postgres_adapter(connection):
         loader.truncate_table("postgres.actor")
     except TableMissingException:
         pass
-    loader.materialize_table(TableHandle("actor", "postgres"))
+    loader.materialize_table(LoaderJob.load_table_job("postgres", "actor"))
 
     # Test our update strategy
     pg_adapter: PostgresAdapter = connection.adapter

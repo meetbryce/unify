@@ -5,6 +5,7 @@ import logging
 import math
 import os
 from threading import Thread
+import threading
 import queue
 import subprocess
 from pprint import pprint
@@ -24,6 +25,8 @@ import numpy as np
 
 # Background tasks
 import persistqueue
+from prompt_toolkit.shortcuts import ProgressBar
+from prompt_toolkit.key_binding import KeyBindings
 
 from sqlalchemy.orm.session import Session
 
@@ -50,7 +53,6 @@ from unify.zmq_logging import ZeroMQSocketHandler, ZeroMQSocketListener
 
 logger: logging.Logger = logging.getLogger('unify')
 persistqueue.sqlbase.TICK_FOR_WAIT = 3
-SYNCHRONOUS_MODE = os.environ.get('UNIFY_SYNCHRONOUS', False)
 
 def add_logging_handler(handler):
     logger.addHandler(handler)
@@ -75,7 +77,13 @@ class LoaderJob:
         self._parameters = parameters
         self._rows_loaded = 0
         self._canceled = False
+        self._progress_bar: ProgressBar = None
+        self._backgrounded = False
 
+    @staticmethod
+    def load_table_job(schema: str, table_root: str):
+        return LoaderJob(None, LoaderJob.ACTION_LOAD_TABLE, TableHandle(table_root, schema))
+        
     @property
     def tenant_id(self):
         return self._tenant_id
@@ -102,6 +110,38 @@ class LoaderJob:
     @property 
     def canceled(self):
         return self._canceled
+
+    def background(self):
+        if self._progress_bar:
+            self._progress_bar.counters[0].done = True
+            self._progress_bar.app.exit()
+        self._backgrounded = True
+
+    @property
+    def progress_bar(self) -> ProgressBar:
+        return self._progress_bar
+
+    @progress_bar.setter
+    def progress_bar(self, pb):
+        self._progress_bar = pb
+
+    def set_progress_title(self, title: str):
+        if self._progress_bar:
+            self._progress_bar.title = title
+
+    def set_progress_count(self, count):
+        if self._progress_bar and len(self._progress_bar.counters) > 0:
+            if count == (self._progress_bar.counters[0].total+1):
+                self._progress_bar.counters[0].total = self._progress_bar.counters[0].total*10
+
+    def get_progress_iter(self):
+        if self._progress_bar:
+            return self._progress_bar
+        else:
+            def noop(gen, *args, **kwargs):
+                for i in gen:
+                    yield i
+            return noop
 
     def __eq__(self, other):
         return self._job_id == other._job_id
@@ -283,7 +323,13 @@ class BaseTableScan(Thread):
             self.session = Session(bind=duck.engine)
             with warnings.catch_warnings():
                 warnings.simplefilter(action='ignore', category=FutureWarning)
-                self.perform_scan(duck)
+                try:
+                    self.perform_scan(duck)
+                except ValueError as e:
+                    if 'list.remove' in str(e):
+                        pass # ignore error from ProgressBar being closed
+                    else:
+                        raise
             self.session.close()
 
     def save_scan_record(self, values: dict):
@@ -338,9 +384,10 @@ class BaseTableScan(Thread):
     def scan_start_handler(self):
         pass
 
-    def perform_scan(self, duck):
+    def perform_scan(self, duck: DBManager):
         self.scan_start_handler()
-        logger.debug("Running table scan for: %s", self.tableMgr.name)
+        progress_iter = self.loader_job.get_progress_iter()
+        self.loader_job.set_progress_title(f"Loading data for table: {self.tableMgr.name}")
 
         scan_start = time.time()
         self.save_scan_record({"scan_start": scan_start})
@@ -352,7 +399,7 @@ class BaseTableScan(Thread):
 
         resource_query_mgr: TableDef = self.get_query_mgr()
 
-        for query_result in resource_query_mgr.query_resource(self.tableLoader, logger):
+        for query_result in progress_iter(resource_query_mgr.query_resource(self.tableLoader, logger), total=10, remove_when_done=True):
             json_page = query_result.json
             size_return = query_result.size_return
             record_path = self.tableMgr.table_spec.result_body_path
@@ -404,6 +451,7 @@ class BaseTableScan(Thread):
                 row_buffer_df = row_buffer_df[0:0] # clear flushed rows, but keep columns
 
             page += 1
+            self.loader_job.set_progress_count(page)
 
         if row_buffer_df is not None and row_buffer_df.shape[0] > 0:
             self._flush_rows_to_db_catch_error(duck, self.tableMgr, row_buffer_df, page, page_flush_count)
@@ -440,7 +488,10 @@ class InitialTableLoad(BaseTableScan):
             self.create_table_with_first_page(duck, next_df, tableMgr.schema, tableMgr.table_spec.name)
         else:
             next_df = self.cleanup_df_page(next_df)
-            logger.debug(f"Saving page {page} with {next_df.shape[1]} columns and {next_df.shape[0]} rows")
+            msg = f"Saved {self.loader_job._rows_loaded} rows ({next_df.shape[1]} data columns)"
+            if self.loader_job and self.loader_job.progress_bar:
+                self.loader_job.progress_bar.title = msg
+            logger.info(msg)
             duck.append_dataframe_to_table(
                 next_df, 
                 TableHandle(tableMgr.table_spec.name, tableMgr.schema)
@@ -600,33 +651,6 @@ class TableMgr:
         scanner = TableUpdateScan(self, tableLoader=tableLoader, select=self.table_spec.select_list, job=job)
         scanner.run()
 
-class TableLoadSignaler(logging.Handler):
-    def __init__(self):
-        super().__init__()
-        self.load_event_queue = queue.SimpleQueue()
-
-    def emit(self, record):
-        if hasattr(record, '_table_root') and hasattr(record, '_schema') and \
-            record._table_root is not None and record._schema is not None:
-            table = TableHandle(record._table_root, record._schema)
-            if record.msg == 'done':
-                self.load_event_queue.put({"event": "done", "table":table})
-            elif hasattr(record, '_rows_loaded'):
-                self.load_event_queue.put({"event": "rows", "table":table, "rows_loaded": record._rows_loaded})
-
-    def wait_for_table_data(self, table: TableHandle, timeout=30):
-        print("Signaler looking for table: ", table)
-        try:
-            while True:
-                event = self.load_event_queue.get(timeout=timeout)
-                if event['event'] == 'done' and event['table'] == table:
-                    return True
-                elif event['event'] == 'rows' and event['table'] == table:
-                    return True
-        except queue.Empty:
-            return False
-
-
 
 class TableLoader:
     """ Master loader class. This class can load the data for any table, either by 
@@ -637,8 +661,6 @@ class TableLoader:
         Loading jobs can be executed synchronously or asynchronously. In either case they will
         go through the job queue, but in synchronous mode the job will be executed immediately.
 
-        Set UNIFY_SYNCHRONOUS env var to make jobs run immediately.
-
         Tables can be in 4 states:
         1. Unknown (schema and table name never registered)
         2. Never queried. Call the Adapter to query the data and store it to local db.
@@ -646,8 +668,6 @@ class TableLoader:
     """
     def __init__(self, silence_errors=False, given_connections: list[Connection]=[], leader=False):
         self.job_queue: persistqueue.SQLiteQueue = persistqueue.SQLiteQueue(os.path.expanduser("~/unify/unfiysql.db"), auto_commit=True)
-        self.signaler = TableLoadSignaler()
-        logger.addHandler(self.signaler)
 
         with dbmgr() as duck:
             try:
@@ -677,9 +697,6 @@ class TableLoader:
             duck.create_schema('files')
 
             if leader:
-                if not SYNCHRONOUS_MODE:
-                    self.setup_task_daemon()
-
                 # Connections defines the set of schemas we will create in the database.
                 # For each connection/schema then we will define the tables as defined
                 # in the REST spec for the target system.
@@ -688,9 +705,6 @@ class TableLoader:
                     for t in conn.adapter.list_tables():
                         tmgr = TableMgr(conn.schema_name, conn.adapter, t)
                         self.tables[tmgr.name] = tmgr
-
-    def wait_for_table_data(self, table: TableHandle, timeout=30):
-        return self.signaler.wait_for_table_data(table, timeout=timeout)
 
     def setup_task_daemon(self):
         # The handler will actually print the log messages
@@ -824,8 +838,8 @@ class TableLoader:
                 scanner.save_analyzed_columns()
                 break
 
-    def refresh_table(self, table_ref):
-        self.run_job(LoaderJob("", LoaderJob.ACTION_REFRESH_TABLE, TableHandle(table_ref)))
+    def refresh_table(self, table_ref, run_async=True):
+        self.run_job(LoaderJob("", LoaderJob.ACTION_REFRESH_TABLE, TableHandle(table_ref)), run_async=run_async)
 
     def query_table(self, schema: str, query: str):
         def transformer(node):
@@ -884,38 +898,30 @@ class TableLoader:
         except TableMissingException:
             return False
 
-    def materialize_table(self, table: TableHandle, job: LoaderJob):
+    def materialize_table(self, job: LoaderJob):
         with dbmgr() as duck:
-            qual = str(table)
+            qual = str(job.table)
             try:
                 tmgr = self._get_table_mgr(qual)
             except KeyError:
                 raise TableMissingException(qual)
             tmgr.load_table(tableLoader=self, job=job)
-            self.create_views(table.schema(), table.table_root())
+            self.create_views(job.table.schema(), job.table.table_root())
             return tmgr.has_data()
 ##
 ### Job dispatching
 ##
-    def run_job(self, job: LoaderJob):
+    def run_job(self, job: LoaderJob, run_async=True):
         """ Runs the loading job as specified. Returns True if the job was executed
             or False if the job will run asynchronously.
         """
-        self.job_queue.put(job)
-        if SYNCHRONOUS_MODE:
-            while True:
-                try:
-                    job = self.job_queue.get_nowait()
-                    logger.debug(f"Running job: {job}")
-                    socket_log_handler.set_job(job)
-                    self._handle_job(job)
-                    return True
-                except persistqueue.exceptions.Empty:
-                    break
-        return False
+        logger.debug(f"Running job: {job}")
+        socket_log_handler.set_job(job)
+        self._handle_job(job, run_async)
+        return True
 
-    def run_table_load_job(self, schema, table_root):
-        self.run_job(LoaderJob("", LoaderJob.ACTION_LOAD_TABLE, TableHandle(table_root, schema=schema)))
+    def run_table_load_job(self, schema, table_root, run_async=True):
+        self.run_job(LoaderJob("", LoaderJob.ACTION_LOAD_TABLE, TableHandle(table_root, schema=schema)), run_async)
 
     def job_loop(self):
         pidfile = self.get_pid_path()
@@ -936,14 +942,36 @@ class TableLoader:
                 logger.exception(f"Error running job {job}: {e}", exc_info=True)
             self.job_queue.task_done()
 
+    def _handle_job(self, job: LoaderJob, run_async: bool=True):
+        t = threading.Thread(target=self._dispatch_job, args=(job,))
+        if run_async:
+            t.daemon = True
+            t.start()
+            
+            while t.is_alive():
+                t.join(timeout=0.2)
+                if job._backgrounded:
+                    break
+        else:
+            t.run()
+
     """ Async worker does any slow TableLoader tasks """
-    def _handle_job(self, job: LoaderJob):
+    def _dispatch_job(self, job: LoaderJob):
         socket_log_handler.set_job(job)
 
+        kb = KeyBindings()
+        @kb.add('<any>')
+        def _(event):
+            print("Finishing in background...")
+            job.background()
+
         if job.action == LoaderJob.ACTION_LOAD_TABLE and job.table:
-            self.materialize_table(job.table, job=job)
+            bottom = f"Loading {str(job.table)}. Press any key to move job to the background."
+            with ProgressBar(key_bindings=kb, title=f"Loading {str(job.table)}...", bottom_toolbar=bottom) as pb:
+                job.progress_bar = pb
+                self.materialize_table(job=job)
         elif job.action == LoaderJob.ACTION_REFRESH_TABLE:
-            self.tables[table_ref].refresh_table(tableLoader=self, job=job)
+            self.tables[str(job.table)].refresh_table(tableLoader=self, job=job)
         elif job.action == LoaderJob.ACTION_CANCEL:
             for job in self.running_jobs:
                 job.cancel()

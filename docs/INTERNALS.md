@@ -61,53 +61,51 @@ Most connections will re-use our RESTAdapter.
 
 ## Background tasks
 
-Unify offloads long-running tasks which load data from connected systems onto a background task
-runner. This lets the user continue interacting with the database while data is being loaded.
+Loading tables can take a long time. However, the process can also be error-prone, and running
+loading jobs async is much harder to debug.
 
-We don't want to use a simple sub-process of the main process, because then the loader will
-die if the user exits the command process. Instead we want a daemon process which is started
-automatically and keeps running even if the command process exits. The daemon process needs
-to communicate detailed job status back to the command process. We use a simple ZeroMQ
-queue to do this.
+Therefore by default the interpreter runs loading jobs in the command process, but on a
+background thread. The command process waits by default and shows a progress bar while
+the lob job is running. The user can "push" the job to background in which case the command
+process simply stops waiting for the loading thread.
 
-We use a SQLite database to keep our loading task queue. This allows those tasks to be persistent.
-If the loader daemon is offline, we can still queue tasks and they will get processed when
-the daemon starts again. The daemon also implements a simple scheduler so that "table refresh"
-tasks can get scheduled. The intention is that as long as you let the daemon run then your
-tables will automatically get refreshed.
-
-The daemon process uses the multiprocessing package to manage a pool of "loading task" workers.
-This allows us to manage the parallelism of the loaders.
-
-So the table loading flow looks like:
+This works well, and allows the user to load multiple tables simultaneously. 
 
     command process 
-          | starts daemon            -> daemon process
-          |                                 | starts workers  --> worker(s)
-    "select * from table"                   |                       |
-          | -> enqueue job to sqlite        | poll sqlite           |
-          |                                 | grab task             |
-          |                                 |   send to worker ->   |
-          |                                 |                       | starts loading data
-          |                                 |   <-- loading task status (via multiprocessing.Queue)
-          | <- loading status (via ZeroMQ)  |                       |
+          | starts loading thread
+          |    wrapped by a ProgressBar    -> loading thread
+          |                                 |   starts loading data
+          |    waits on thread       ->     |
+          |    <User escape>                |
+          | <- return to command prompt     |   data continues loading
 
-Loader requests are serialized as `LoaderJob` instances. Each job identifies the tenant, the
-action type, and the relevant table. The daemon will publish `LoaderStatus` events that reference
-a loader job so the Command process can track status.
+However, we still want "background loading" for table refresh jobs. So we can run
+the loader process as a separate daemon. The daemon simply cycles through all 
+tables and attempts to keep them up to date. The daemon also observes the current
+system load and tries to only run load jobs when load is low.
 
-The action `cancel` can be sent by the Command process to cancel a loading job. This action will
-be interpreted by the daemon and the relevant loader job will be canceled.
+## Loading log
 
-We have "system" commands in the interpreter for controlling the daemon:
+The system maintains two tables which record an audit history of table loading.
 
-    > system status
-    ..Data loading daemon is running
-    ..Tasks:
-       Loading table: github.pulls
-       Refreshing table: jira.issues
+`information_schema.loading_jobs` - this table keeps a log of table creation+loading
+jobs. Long running jobs create a _start and _end record.
+    id 
+    parent_id   (links _end records to _start records)
+    timestamp
+    table_schema
+    table_name
+    adapter_name
+    action (create, load_start, load_end, refresh_start, refresh_end, truncate, drop)
+    numrows
+    status (success, error)
+    error_message
 
-    > system stop daemon
-    ..Data loading daemon stopping.
-
-
+`information_schema.loading_log`
+    loading_job_id - reference to a loading_jobs record
+    timestamp
+    table_schema
+    table_name
+    adapter_name
+    message
+    level (matches python.logging levels)

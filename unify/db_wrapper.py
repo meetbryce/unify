@@ -35,6 +35,7 @@ import pickle
 import re
 import time
 import typing
+import threading
 from typing import Union, Any
 import uuid
 from venv import create
@@ -633,6 +634,7 @@ class ClickhouseWrapper(DBManager):
         self.tenant_id: Union[str,None] = None
         self.tenant_db: Union[str,None] = None
         self.engine: Union[str,None] = None
+        self.lock = threading.RLock()
 
     def dialect(self):
         return "clickhouse"
@@ -1011,11 +1013,16 @@ class ClickhouseWrapper(DBManager):
             )
 
     def append_dataframe_to_table(self, value: pd.DataFrame, table: TableHandle):
+        with self.lock:
+            self._append_dataframe_to_table(value, table)
+
+    def _append_dataframe_to_table(self, value: pd.DataFrame, table: TableHandle):
         # There is a problem where a REST API returns a boolean column, but the first page 
         # of results is all nulls. In that case the type inference will have failed and we
         # will have defaulted to type the column as a string. We need to detect this case
         # and either coerce the bool column or fix the column type. For now we are doing
         # the former.
+        self.lock.acquire()
 
         # Use pyarrow for convenience, but type info probably already exists on the dataframe
         real_table = CHTableHandle(table, tenant_id=self.tenant_id)
@@ -1035,7 +1042,7 @@ class ClickhouseWrapper(DBManager):
                 if db_type.lower() == "string" or db_type.lower().startswith("varchar"):
                     # Corece bool values to string
                     value[col] = value[col].astype(str)
-                    logger.critical("Coercing bool/date column {} to string".format(col))
+                    logger.debug("Coercing bool/date column {} to string".format(col))
 
         self.client.insert_dataframe(
             f"INSERT INTO {real_table} VALUES", 

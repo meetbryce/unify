@@ -1,81 +1,31 @@
 enabled: true
 name: stripe
 base_url: https://api.stripe.com
-dateParser: unixtimestamp
+paging:
+  strategy: pagerToken
+  token_param: starting_after
+  count_param: limit
+  pager_token_path: data[-1:].id
+  page_size: 100
+
 pageMaxArg: limit
 page_cursor_arg: starting_after
 next_page_token: data[-1:].id
 auth:
   type: BASIC
-  uservar: STRIPE_TEST_KEY
-polling_interval_secs: 1800
+  params:
+    username: Enter your Stripe API key
+    password: Enter blank
 tables:
   - name: charges
     query_resource: GET /v1/charges
     result_body_path: data
-    columns:
-      - name: id
-        key: True
-      - name: object
-      - name: amount
-        type: BIGINT
-      - name: currency
-      - name: customer
-      - name: calculated_statement_descriptor
-      - name: description
-      - name: livemode
-        type: BOOLEAN
-      - name: paid
-        type: BOOLEAN
-      - name: payment_method
-      - name: status
-      - name: created
-        type: BIGINT      
+    supports_paging: true
   - name: payment_intents
     query_resource: GET /v1/payment_intents
     result_body_path: data
-    columns:
-      - name: id
-      - name: object
-      - name: amount
-        type: BIGINT
-      - name: currency
-      - name: customer
-      - name: description
+    supports_paging: true
   - name: customers
     query_resource: GET /v1/customers
-    json_response: |
-        {
-          "object": "list",
-          "url": "/v1/customers",
-          "has_more": false,
-          "data": [
-            {
-              "*id": "cus_AJ6mqoWgCYI0wY",
-              "*object": "customer",
-              "*address": "",
-              "*balance": 0,
-              "*created": 1489793598,
-              "*currency": "usd",
-              "*default_source": "card_19yUZO2eZvKYlo2CJty7ZtLt",
-              "delinquent": true,
-              "*description": "Sample user",
-              "discount": null,
-              "*email": "norval@example.com",
-              "invoice_prefix": "19837A7",
-              "invoice_settings": {
-                "custom_fields": null,
-                "default_payment_method": null,
-                "footer": null
-              },
-              "*livemode": false,
-              "metadata": {},
-              "*name": "",
-              "*next_invoice_sequence": 56748,
-              "*phone": "",
-              "preferred_locales": [],
-              "shipping": null,
-              "tax_exempt": "none"
-            }
-          ]
-        }
+    result_body_path: data
+    supports_paging: true

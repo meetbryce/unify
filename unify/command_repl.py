@@ -4,8 +4,6 @@ import os
 import sys
 import pandas as pd
 import traceback
-import time
-import threading
 
 from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
@@ -15,12 +13,9 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from .interpreter import CommandInterpreter, CommandContext, setup_job_log_handler
 
 logger: logging.Logger = logging.getLogger('unify')
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 global job_record
 job_record = None
-
-if os.environ.get('UNIFY_SYNCHRONOUS'):
-    logger.addHandler(logging.StreamHandler(sys.stdout))
 
 class LoaderJobHandler(logging.Handler):  
     def __init__(self):
@@ -43,7 +38,7 @@ class LoaderJobHandler(logging.Handler):
                 return f"[Loading {job_record._schema}:{job_record._table_root} {row_count}] {job_record.msg} "
             else:
                 try:
-                    return job_record.msg % job_record.args
+                    return (job_record.msg + row_count) % job_record.args
                 except:
                     return job_record.msg
         else:
