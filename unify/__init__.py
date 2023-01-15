@@ -13,6 +13,8 @@ import os
 
 if 'UNIFY_HOME' not in os.environ:
     os.environ['UNIFY_HOME'] = os.path.expanduser("~/unify")
+if 'DATABASE_BACKEND' not in os.environ:
+    os.environ['DATABASE_BACKEND'] = 'duckdb'       
     
 from .interpreter import CommandInterpreter, CommandContext
 from .db_wrapper import dbmgr

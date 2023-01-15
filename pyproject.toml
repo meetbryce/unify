@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "unifydb"
-version = "0.2.0"
+version = "0.2.1"
 description = "Your personal data warehouse"
 authors = ["Scott Persinger <scottpersinger@gmail.com>"]
 readme = "README.md"
@@ -11,8 +11,10 @@ documentation = "https://github.com/scottpersinger/unify/docs"
 packages = [
     { include = "unify" },
     { include = "gsheets_unify_adapter" },
+    { include = "unify_kernel" },
 ]
-
+include = ["rest_specs/*", "docs/*"]
+    
 [tool.poetry.dependencies]
 python = "^3.9"
 pandas = "^1.5.2"
@@ -39,8 +41,9 @@ ipykernel = "^6.19.4"
 ipynbname = "^2021.3.2"
 altair = "^4.2.0"
 altair-viewer = "^0.4.0"
-nb2mail = {git = "https://github.com/scottpersinger/nb2mail.git"}
 readem = "^1.0.2"
+nb2mail-unify = "^0.6"
+duckdb-engine = "^0.6.8"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -50,3 +53,6 @@ requests-mock = "^1.10.0"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+unify = 'unify:main'

@@ -1,5 +1,5 @@
 import base64
-import io
+import importlib
 import os
 import yaml
 import requests
@@ -66,7 +66,7 @@ def test_connector():
     assert "options" in conn_config
 
 def test_rest_basic_auth():
-    spec = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "../../rest_specs/github_spec.yaml")))
+    spec = yaml.load(importlib.resources.read_text("unify.rest_specs", "github_spec.yaml"), Loader=yaml.FullLoader)
     schema = "github"
 
     username = "scottpersinger@gmail.com"
@@ -87,7 +87,7 @@ def test_rest_basic_auth():
     assert prepped.headers['Authorization'] == f"Basic {encoded}"
 
 def test_rest_headers_auth():
-    spec = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "../../rest_specs/hubspot_spec.yaml")))
+    spec = yaml.load(importlib.resources.read_text("unify.rest_specs", "hubspot_spec.yaml"), Loader=yaml.FullLoader)
     schema = "hubspot"
 
     bearer_token = "hubspot123"

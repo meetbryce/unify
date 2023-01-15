@@ -756,6 +756,7 @@ class TableLoader:
         self.run_job(LoaderJob("", LoaderJob.ACTION_REFRESH_TABLE, TableHandle(table_ref)), run_async=run_async)
 
     def query_table(self, schema: str, query: str):
+        # Generally this will be called re-entrant from parent table load that does a "sql@" query for parameters
         def transformer(node):
             if isinstance(node, sqlglot.exp.Table):
                 if "." in str(node):
@@ -764,7 +765,8 @@ class TableLoader:
                 if not self.table_exists_in_db(table):
                     tmgr = self.tables[table]
                     # TODO: Might want a timeout for large parent tables
-                    tmgr.load_table(tableLoader=self)
+                    job = LoaderJob("", LoaderJob.ACTION_LOAD_TABLE, TableHandle(table))
+                    tmgr.load_table(tableLoader=self, job=job)
                 return sqlglot.parse_one(schema + "." + str(node))    
             return node
 

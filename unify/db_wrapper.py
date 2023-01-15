@@ -143,7 +143,7 @@ class DBManager(contextlib.AbstractContextManager):
     def __init__(self) -> None:
         super().__init__()
         self.signals : typing.Dict[str, Signal] = {}
-        self.DATA_HOME = os.path.join(os.path.dirname(__file__), "data")
+        self.DATA_HOME = os.path.join(os.environ['UNIFY_HOME'], "data")
         os.makedirs(self.DATA_HOME, exist_ok=True)
 
     def _setup_signals(self):
@@ -403,6 +403,8 @@ class DuckDBWrapper(DBManager):
 
     def __init__(self):
         super().__init__()
+        self.tenant_id = os.environ['DATABASE_USER']
+        self.tenant_db = f"tenant_{self.tenant_id}"
         if not DuckDBWrapper.ALERTED:
             logger.debug(f"Connecting to local DuckDB database")
             DuckDBWrapper.ALERTED = True
@@ -455,7 +457,7 @@ class DuckDBWrapper(DBManager):
                 self._send_signal(dml['signal'], table=TableHandle(dml['table']))
 
             return df
-        except RuntimeError as e:
+        except duckdb.CatalogException as e:
             if re.search(r"Table.+ does not exist", str(e)):
                 raise TableMissingException(self.extract_missing_table(query, e))
             else:
@@ -474,10 +476,17 @@ class DuckDBWrapper(DBManager):
             query = f"delete from {table} where {where_clause}"
         self.execute(query)
 
-    def create_schema(self, schema) -> duckdb.DuckDBPyConnection:
-        res: duckdb.DuckDBPyConnection = self.execute(f"create schema if not exists {schema}")
+    def create_schema(self, schema) -> pd.DataFrame:
+        query = f"create schema if not exists {schema}"
+        df: pd.DataFrame = DuckDBWrapper.DUCK_CONN.execute(query).df()
         self._send_signal(signal=DBSignals.SCHEMA_CREATE, schema=schema)
-        return res
+        return df
+
+    def drop_schema(self, schema, cascade: bool=False) -> pd.DataFrame:
+        query = f"drop schema if exists {schema}" + (" cascade" if cascade else "")
+        df: pd.DataFrame = DuckDBWrapper.DUCK_CONN.execute(query).df()
+        self._send_signal(signal=DBSignals.SCHEMA_DROP, schema=schema)
+        return df
 
     def create_table(self, table: TableHandle, columns: dict):
         new_cols = {}

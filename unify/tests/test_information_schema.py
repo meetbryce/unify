@@ -17,12 +17,11 @@ def db():
     with dbmgr() as _db:
         yield _db
 
-@pytest.mark.skip(reason="")
 def test_schemas(db: DBManager):
     db.create_schema("myscheme1")
     scs = db.list_schemas()   
     assert 'myscheme1' in scs['schema_name'].tolist()
-
+    
     db.drop_schema("myscheme1")
     time.sleep(0.5)
     assert 'myscheme1' not in db.list_schemas()['schema_name'].tolist()

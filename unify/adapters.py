@@ -1,3 +1,4 @@
+import importlib.resources
 import glob
 import os
 import re
@@ -89,8 +90,15 @@ class Connection:
         from .rest_adapter import RESTAdapter
 
         adapter_table = {}
-        for f in glob.glob(os.path.join(os.path.dirname(__file__), "../rest_specs/*spec.yaml")):
-            spec = yaml.load(open(f), Loader=yaml.FullLoader)
+
+        for f in importlib.resources.contents("unify.rest_specs"):
+            if not (f.endswith("spec.yml")  or f.endswith("spec.yaml")):
+                continue
+            try:
+                spec = yaml.load(importlib.resources.read_text("unify.rest_specs", f), Loader=yaml.FullLoader)
+            except Exception as e:
+                print(f"Error loading adapter spec {f}: {e}")
+                continue
             if spec.get('enabled') == False:
                 continue
             klass = RESTAdapter

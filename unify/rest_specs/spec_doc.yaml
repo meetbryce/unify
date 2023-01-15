@@ -234,7 +234,7 @@ tables:
 # In fact table references should never include a schema qualification.
 #
 # The "views" property is a list of dictionaries, which each dict defines a view.
-- views:
+views:
   - name: simple_orders # the name of the view
     # a single or list of multiple tables that the view selects from.
     from: raw_orders_table 

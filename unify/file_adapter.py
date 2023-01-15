@@ -48,7 +48,7 @@ class LocalFileTableSpec(TableDef):
                     chunk.dropna(axis='columns', how='all', inplace=True)
                     yield AdapterQueryResult(json=chunk, size_return=size_return)
         else:
-            logger.warn("File loader does not support chunking.")
+            logger.warning("File loader does not support chunking.")
             df = method(path, **kwargs)
             yield AdapterQueryResult(json=df, size_return=size_return)
 

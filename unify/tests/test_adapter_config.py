@@ -1,3 +1,4 @@
+import importlib
 import yaml
 import os
 import pytest
@@ -6,7 +7,7 @@ from unify.adapters import Adapter, Connection, RESTView, OutputLogger
 from unify.rest_adapter import RESTAdapter
 
 def test_basic_auth_config():
-    spec = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "../../rest_specs/github_spec.yaml")))
+    spec = yaml.load(importlib.resources.read_text("unify.rest_specs", "github_spec.yaml"), Loader=yaml.FullLoader)
     schema = "github"
 
     bad_parameters = {"foo":"bar"}
@@ -30,7 +31,7 @@ def test_basic_auth_config():
 
     
 def test_headers_auth_config():
-    spec = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "../../rest_specs/hubspot_spec.yaml")))
+    spec = yaml.load(importlib.resources.read_text("unify.rest_specs", "hubspot_spec.yaml"), Loader=yaml.FullLoader)
     schema = "hubspot"
 
     bad_params = {"foo":"bar"}

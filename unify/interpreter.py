@@ -25,7 +25,16 @@ from ReadEm.serve import MDRequestHandler
 
 from .adapters import Adapter, OutputLogger, Connection
 from .loading import TableLoader, TableExporter, LoaderJob, add_logging_handler
-from .db_wrapper import DBSignals, TableHandle, TableMissingException, dbmgr, SavedVar, RunSchedule, ColumnInfo
+from .db_wrapper import (
+    DBSignals, 
+    TableHandle, 
+    TableMissingException, 
+    dbmgr, 
+    SavedVar, 
+    RunSchedule, 
+    ColumnInfo, 
+    UNIFY_META_SCHEMA
+)
 from .file_adapter import LocalFileAdapter
 from .metabase_setup import MetabaseSetup
 
@@ -1080,7 +1089,7 @@ class CommandInterpreter:
                 else:
                     # Maybe it was stored as full table
                     table_name = "var_" + LocalFileAdapter.convert_string_to_table_name(name)
-                    return self.duck.execute(f"select * from meta.{table_name}")
+                    return self.duck.execute(f"select * from {UNIFY_META_SCHEMA}.{table_name}")
         else:
             return self.session_vars[name]
 
@@ -1088,7 +1097,7 @@ class CommandInterpreter:
         if is_global:
             if isinstance(value, pd.DataFrame):
                 table_name = "var_" + LocalFileAdapter.convert_string_to_table_name(name)
-                self.duck.write_dataframe_as_table(value, TableHandle(table_name, "meta"))
+                self.duck.write_dataframe_as_table(value, TableHandle(table_name, UNIFY_META_SCHEMA))
             with Session(bind=self.duck.engine) as session:
                 session.query(SavedVar).filter(SavedVar.name==name).delete()
                 session.commit()
