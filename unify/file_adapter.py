@@ -61,6 +61,7 @@ class LocalFileAdapter(Adapter):
         self.logger: OutputLogger = None
         self.tables = None
         self.file_info_cache = {}
+        os.makedirs(self.root_path, exist_ok=True)
 
     def list_tables(self):
         if not self.tables:

@@ -30,6 +30,7 @@ if 'DATABASE_USER' not in os.environ:
     os.environ['DATABASE_USER'] = os.getenv('USER', 'default')
 
 if not os.path.exists(conf_path):
+    os.makedirs(os.environ['UNIFY_HOME'], exist_ok=True)
     with open(conf_path, 'w') as f:
         for var in [key for key in os.environ.keys() if key.startswith("DATABASE")]:
             f.write(f"{var}={os.environ[var]}\n")
@@ -37,6 +38,6 @@ if not os.path.exists(conf_path):
 from .interpreter import CommandInterpreter, CommandContext
 from .db_wrapper import dbmgr
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 
 

@@ -21,9 +21,6 @@ from lark.lark import Lark
 from lark.visitors import Visitor
 from lark.visitors import v_args
 
-from http.server import HTTPServer
-from ReadEm.serve import MDRequestHandler
-
 from .adapters import Adapter, OutputLogger, Connection
 from .loading import TableLoader, TableExporter, LoaderJob, add_logging_handler
 from .db_wrapper import (
@@ -454,6 +451,16 @@ class CommandInterpreter:
             'run_notebook_command'
         ]
         self.recent_tables: list[TableHandle] = []
+        if not Connection.connections_config_exists():
+            print("""
+Welcome to Unify! 
+Use 'help' to list available commands.
+Use 'open tutorial' to open the tutorial docs.
+Use the 'connect' command to create a new connection to load data, or use 'import' to import data.
+            """)
+        else:
+            print("Welome to Unify. Use 'help' to list available commands.")
+            print(f"[Using {os.getenv('DATABASE_BACKEND')} database]")
 
     def run_command(
         self, 
@@ -925,23 +932,14 @@ class CommandInterpreter:
             self.adapters[old_table.schema()].rename_table(old_table.table_root(), new_table.table_root())
 
     def open_command(self, open_target: str):
-        """
-            open metabase - open Metabase for visual analysis
-            open tutorial - open the tutorial in a browser
-        """
         if open_target == "metabase":
             return self.open_metabase()
         elif open_target == "tutorial":
-            with importlib.resources.path("unify.docs", "TUTORIAL.md") as p:
-                docsdir =os.path.dirname(p)
-                Handler = functools.partial(MDRequestHandler, directory=docsdir)
-                setattr(MDRequestHandler, 'log_message', lambda *args: None)
-                http = HTTPServer(('127.0.0.1', 9010), Handler)
-                self.print("Docs server listening on port 9010...")
-                t = threading.Thread(target=http.serve_forever, daemon=True)
-                t.start()
-                webbrowser.open("http://localhost:9010/TUTORIAL.md")
+            return self.open_tutorial()
 
+    def open_tutorial(self):
+        """ open tutorial - open the tutorial in a browser """
+        webbrowser.open("https://github.com/scottpersinger/unify/blob/main/docs/TUTORIAL.md")
 
     def open_metabase(self):
         """ open metabase - install and open Metabase to analyze your data """
@@ -1243,38 +1241,6 @@ class CommandInterpreter:
         self.loader.truncate_table(table_schema_ref)
         self.print("Table cleared: ", table_schema_ref)
 
-    def old_create_chart_with_matplot(
-        self, 
-        chart_name=None, 
-        chart_type=None, 
-        chart_source=None, 
-        chart_where=None,
-        chart_params={}):
-        """ create chart from <$var or table> as <chart_type> where x = <col> and y = <col> [opts] - see 'help charts' for info """
-        # FIXME: observe chart_source
-        if "x" not in chart_params:
-            raise RuntimeError("Missing 'x' column parameter for chart X axis")
-        df = self._last_result
-        if df is None:
-            raise RuntimeError("No query result available")
-        plt.rcParams["figure.figsize"]=10,8
-        plt.rcParams['figure.dpi'] = 100 
-        if chart_type == "pie_chart":
-            df = df.set_index(chart_params["x"])
-        kind = ParserVisitor.MATPLOT_CHART_MAP[chart_type]
-        title = chart_params.get("title", "")
-
-        fig, ax = plt.subplots()
-
-        df.plot(x = chart_params["x"], y = chart_params.get("y"), kind=kind,
-                title=title, stacked=chart_params.get("stacked", False))
-        plt.tight_layout()
-        
-        imgdata = io.BytesIO()
-        plt.savefig(imgdata, format='png')
-        imgdata.seek(0)
-        return {"mime_type": "image/png", "data": imgdata.getvalue()}
-
     def create_chart(
         self, 
         chart_name=None, 
@@ -1298,21 +1264,12 @@ class CommandInterpreter:
             )
             return chart
 
-            self._last_result = pd.DataFrame({
-                'a': ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'],
-                'b': [28, 55, 43, 91, 81, 53, 19, 87, 52]
-            })
-            chart_type = "bar_chart"
-            chart_params["x"] = 'a'
-            chart_params["y"] = 'b'           
-
         if chart_source:
             if chart_source.startswith('$'):
                 df = self._get_variable(chart_source[1:])
             df = self._execute_duck(f"select * from {chart_source}")
         else:
             df = self._last_result
-        print(df)
 
         if df is None or df.shape[0] == 0:
             raise RuntimeError("No recent query, or query returned no rows")

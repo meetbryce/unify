@@ -31,33 +31,24 @@ class Connection:
         self.is_valid = self.adapter.validate()
 
     @staticmethod
-    def find_connections_config():
-        trylist = [
-            os.path.expanduser("~/unify/unify_connections.yaml"),
-            os.path.expanduser("~/unify_connections.yaml"),
-            os.path.realpath("./unify_connections.yaml")
-        ]
-        if 'UNIFY_CONNECTIONS' in os.environ:
-            trylist.insert(0, os.environ['UNIFY_CONNECTIONS'])
-        for p in trylist:
-            if os.path.exists(p):
-                logger.info("Loading connections config from: {}".format(p))
-                return p
-        raise RuntimeError("Could not find unify_connections.yaml in HOME or current directory.")
+    def connections_config_path():
+        return os.path.expanduser("~/unify/unify_connections.yaml")
 
     @staticmethod
+    def connections_config_exists():
+        return os.path.exists(Connection.connections_config_path())
+        
+    @staticmethod
     def load_connections_config():
-        return yaml.safe_load(open(Connection.find_connections_config()))
+        return yaml.safe_load(open(Connection.connections_config_path()))
 
     @staticmethod
     def update_connections_config(schema_name, adapter_name, options):
-        path = None
+        path = Connection.connections_config_path()
         try:
-            path = Connection.find_connections_config()
             conf = yaml.safe_load(open(path))
             orig_lines = open(path).readlines()
-        except RuntimeError:
-            path = os.path.expanduser("~/unify/unify_connections.yaml")
+        except FileNotFoundError:
             conf = []
             orig_lines = []
 
@@ -76,7 +67,7 @@ class Connection:
 
     @staticmethod
     def delete_connection_config(schema_name):
-        path = Connection.find_connections_config()
+        path = Connection.connections_config_path()
         conf: list = yaml.safe_load(open(path))
 
         conf = [conn for conn in conf if list(conn.keys())[0] != schema_name]
@@ -120,8 +111,8 @@ class Connection:
         else:
             try:
                 connections = Connection.load_connections_config()
-            except RuntimeError:
-                print("Warning, no connections config file found")
+            except FileNotFoundError:
+                #print("Warning, no connections config file found. Use 'connect' command to create one.")
                 connections = []
         result = []
         # Instantiate each adapter, resolve auth vars, and validate the connection

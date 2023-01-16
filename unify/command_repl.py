@@ -3,6 +3,7 @@ import pydoc
 import os
 import sys
 import pandas as pd
+import threading
 import traceback
 
 from prompt_toolkit import prompt, PromptSession
@@ -89,8 +90,8 @@ class UnifyRepl:
                                 else:
                                     print(df.to_string(**fmt_opts))
                         elif 'altair' in str(type(df)): # instead of isinstance(altair.Chart) we can avoid loading altari at the start
-                            df.show()
-                            sys.exit(0)
+                            t = threading.Thread(target=df.show)
+                            t.start()
                         elif df is not None:
                             print(df)
                     except RuntimeError as e:

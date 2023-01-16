@@ -19,7 +19,7 @@ and it's installation is quite easy.*
 
 Start Unify:
 
-    $ python -m unify
+    $ unify
     Welcome to Unify - your personal data warehouse. Use 'help' for help.
     >
 
@@ -32,7 +32,7 @@ Get an overview of available commands:
 
 Let's start by adding some data to the warehouse. Let's import some CSV data that contains information about electric vehicle sales:
 
-    > import import https://data.wa.gov/api/views/f6w7-q2d2/rows.csv?accessType=DOWNLOAD
+    > import https://data.wa.gov/api/views/f6w7-q2d2/rows.csv?accessType=DOWNLOAD
 
 The data import happens immediately and 10 rows of the resulting table are automatically displayed:
 
@@ -200,7 +200,7 @@ JIRA JIRA is a proprietary issue tracking product th... OAuth      1 unknown htt
 >
 ```
 Once we create a query with some interesting results we can work with it easily.
-We can *export the table* to a file (or Google Sheet if we create a GSheet connection):
+We can *export the table* to a file (or Google Sheet if we create a GSheets connection):
 ```sql
 > export publicapis.entries to files 'api_entries.csv'
 > show files

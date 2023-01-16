@@ -5,7 +5,8 @@ import pandas as pd
 from .interpreter import CommandInterpreter
 from .command_repl import UnifyRepl
 
-if __name__ == '__main__':
+    
+def main():
     if '-silent' in sys.argv:
         silent = True
     else:
@@ -24,3 +25,7 @@ if __name__ == '__main__':
             sys.exit(0)
 
     UnifyRepl(interpreter).loop()
+
+if __name__ == '__main__':
+    main()
+    

@@ -66,8 +66,7 @@ tables:
         type: VARCHAR
       - name: key
         key: true
-# 'transitions' table extracts the transition history of all issues
-  - name: test_transitions
+  - name: transitions
     query_resource: GET /rest/api/3/search
     supports_paging: False
     params:
