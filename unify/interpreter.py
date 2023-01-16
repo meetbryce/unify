@@ -1,3 +1,4 @@
+import importlib.resources
 import inspect
 import os
 from pprint import pprint
@@ -27,6 +28,7 @@ from .adapters import Adapter, OutputLogger, Connection
 from .loading import TableLoader, TableExporter, LoaderJob, add_logging_handler
 from .db_wrapper import (
     DBSignals, 
+    DuckDBWrapper,
     TableHandle, 
     TableMissingException, 
     dbmgr, 
@@ -777,7 +779,10 @@ class CommandInterpreter:
                 continue
             doc = inspect.getdoc(f[1])
             if doc:
-                yield doc
+                lines = doc.splitlines()
+                for line in lines:
+                    if line.strip():
+                        yield line
 
     def help(self, help_choice):
         """ help - show this message 
@@ -826,9 +831,10 @@ class CommandInterpreter:
                 adapter.logger = self.context.logger
                 table_root = adapter.import_file(file_path, options=options) # might want to run this in the background
                 table = schema + "." + table_root
-                context = self.run_command(f"select * from {table} limit 10")
+                self.context.command = f"select * from {table} limit 10"
+                self.context.result = self.select_query()
                 self.print(f"Imported file to table: {table}")
-                return context.result
+                return self.context.result
         self.print("File not found")
              
     def drop_table(self, table_ref):
@@ -919,22 +925,32 @@ class CommandInterpreter:
             self.adapters[old_table.schema()].rename_table(old_table.table_root(), new_table.table_root())
 
     def open_command(self, open_target: str):
+        """
+            open metabase - open Metabase for visual analysis
+            open tutorial - open the tutorial in a browser
+        """
         if open_target == "metabase":
             return self.open_metabase()
         elif open_target == "tutorial":
-            docsdir = os.path.join(os.path.dirname(__file__), '../docs')
-            Handler = functools.partial(MDRequestHandler, directory=docsdir)
-            setattr(MDRequestHandler, 'log_message', lambda *args: None)
-            http = HTTPServer(('127.0.0.1', 9010), Handler)
-            self.print("Docs server listening on port 9010...")
-            t = threading.Thread(target=http.serve_forever, daemon=True)
-            t.start()
-            webbrowser.open("http://localhost:9010/TUTORIAL.md")
+            with importlib.resources.path("unify.docs", "TUTORIAL.md") as p:
+                docsdir =os.path.dirname(p)
+                Handler = functools.partial(MDRequestHandler, directory=docsdir)
+                setattr(MDRequestHandler, 'log_message', lambda *args: None)
+                http = HTTPServer(('127.0.0.1', 9010), Handler)
+                self.print("Docs server listening on port 9010...")
+                t = threading.Thread(target=http.serve_forever, daemon=True)
+                t.start()
+                webbrowser.open("http://localhost:9010/TUTORIAL.md")
 
 
     def open_metabase(self):
         """ open metabase - install and open Metabase to analyze your data """
-        ms: MetabaseSetup = MetabaseSetup(os.path.expanduser("~/unify"), self.context.get_input)
+        ms: MetabaseSetup = MetabaseSetup(
+            unify_home=os.path.expanduser("~/unify"), 
+            prompt_func=self.context.get_input,
+            use_duckdb=isinstance(self.duck, DuckDBWrapper),
+            duck_db_path=getattr(self.duck, 'db_path', None)
+        )
         if ms.mb_is_running():
             return ms.open_metabase()
         if ms.mb_is_installed():

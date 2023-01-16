@@ -10,13 +10,15 @@ import webbrowser
 from prompt_toolkit.shortcuts import ProgressBar
 
 class MetabaseSetup:
-    def __init__(self, unify_home: str, prompt_func):
+    def __init__(self, unify_home: str="", prompt_func=None, use_duckdb: bool=False, duck_db_path: str=""):
         self.home = unify_home
         self.prompt = prompt_func
         self.jdk_dir = os.path.join(self.home, "jdk")
         os.makedirs(self.jdk_dir, exist_ok=True)
         self.metabase_dir = os.path.join(self.home, "metabase")
         os.makedirs(self.metabase_dir, exist_ok=True)
+        self.use_duckdb = use_duckdb
+        self.duck_db_path = duck_db_path
 
     def jdk_url(self) -> str:
         # TODO: Detect platform
@@ -33,6 +35,9 @@ class MetabaseSetup:
 
     def clickhouse_driver_url(self) -> str:
         return "https://github.com/enqueue/metabase-clickhouse-driver/releases/download/0.9.1/clickhouse.metabase-driver.jar"
+
+    def duckdb_driver_url(self) -> str:
+        return "https://github.com/AlexR2D2/metabase_duckdb_driver/releases/download/0.1.5/duckdb.metabase-driver.jar"
 
     def metabase_script(self) -> str:
         return os.path.join(self.metabase_dir, "metabase.sh")
@@ -118,15 +123,17 @@ MB_PLUGINS_DIR=./plugins; java -jar ./metabase.jar
 
     def setup_metabase(self, ch_host:str, ch_database: str, ch_user: str, ch_password: str,
                        mb_password: str, mb_email: str):
-        data = {
-            "token": self.mb_setup_token,
-            "user": {
-                "password_confirm": mb_password,
-                "password": mb_password,
-                "site_name": "Unify personal warehouse",
-                "email": mb_email,
-            },
-            "database": {
+        if self.use_duckdb:
+            database = {
+                "engine": "duckdb",
+                "name": "Unifydbd",
+                "details": {
+                    "database_file": self.duck_db_path
+                },
+                "is_full_sync": True
+                }
+        else:
+            database = {
                 "engine": "clickhouse",
                 "name": "unfiydb",
                 "details": {
@@ -150,7 +157,16 @@ MB_PLUGINS_DIR=./plugins; java -jar ./metabase.jar
                     "tunnel-enabled": False,
                     "advanced-options": False
                 }
+            }
+        data = {
+            "token": self.mb_setup_token,
+            "user": {
+                "password_confirm": mb_password,
+                "password": mb_password,
+                "site_name": "Unify personal warehouse",
+                "email": mb_email,
             },
+            "database": database,
             "invite": None,
             "prefs": {
                 "site_name": "Unify personal warehouse",
@@ -166,3 +182,4 @@ MB_PLUGINS_DIR=./plugins; java -jar ./metabase.jar
 
     def open_metabase(self):
         webbrowser.open("http://localhost:3000")
+

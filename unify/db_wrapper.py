@@ -403,6 +403,7 @@ class DuckDBWrapper(DBManager):
 
     def __init__(self):
         super().__init__()
+        self.db_path = os.path.join(self.DATA_HOME, "duckdata")
         self.tenant_id = os.environ['DATABASE_USER']
         self.tenant_db = f"tenant_{self.tenant_id}"
         if not DuckDBWrapper.ALERTED:
@@ -412,9 +413,7 @@ class DuckDBWrapper(DBManager):
     def __enter__(self) -> DBManager:
         DuckDBWrapper.REF_COUNTER += 1
         if DuckDBWrapper.DUCK_CONN is None:
-            db_path = os.path.join(self.DATA_HOME, "duckdata")
-
-            DuckDBWrapper.DUCK_ENGINE = create_engine("duckdb:///" + db_path)
+            DuckDBWrapper.DUCK_ENGINE = create_engine("duckdb:///" + self.db_path)
             DuckDBWrapper.DUCK_ENGINE.execute("CREATE SCHEMA IF NOT EXISTS " + UNIFY_META_SCHEMA)
             Base.metadata.create_all(DuckDBWrapper.DUCK_ENGINE)
 

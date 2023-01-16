@@ -7,20 +7,13 @@ for importing and analyzing data.
 
     pip install unifydb
 
-Choose your database backend. Unify supports Clickhouse or DuckDB. DuckDB is simpler to use
-as it runs in the main process. However, if you want to connect a BI tool to your warehouse
-then Clickhouse will be better supported.
+**Note: Choosing your database backend. **
 
-Set `DATABASE_BACKEND` in your environment:
-
-    export DATABASE_BACKEND=duckdb
-
-or if you installed Clickhouse:
-
-    export DATABASE_BACKEND=clickhouse
-    export DATABASE_HOST=localhost
-    export DATABASE_USER=default
-    export DATABASE_PASSWORD=""
+*Unify supports Clickhouse or DuckDB. DuckDB is "built-in" and 
+requires no setup. However, you can't access a DuckDB database from multiple processes easily.
+This means if you want to use an analysis tool (like Metabase) on your warehouse, then analysis
+has to happen separately from data loading. So Clickhouse is recommended for more flexible setups,
+and it's installation is quite easy.*
 
 ## Tutorial
 
@@ -37,39 +30,51 @@ Get an overview of available commands:
     help schemas - overview of schemas
     ...
 
-Let's start by adding some data to the warehouse. Let's import some CSV data that contains information restaurant menu items:
+Let's start by adding some data to the warehouse. Let's import some CSV data that contains information about electric vehicle sales:
 
-    > import https://github.com/scottpersinger/unify/blob/3914c19bc723ddfca3a0d4ae7f7a8219b9ed3c6c/sample_data/menu_dishes.csv
+    > import import https://data.wa.gov/api/views/f6w7-q2d2/rows.csv?accessType=DOWNLOAD
 
-[TODO: import by url]
+The data import happens immediately and 10 rows of the resulting table are automatically displayed:
 
-The data import happens in the background, but the first batch of data gets echoed to the screen:
-
-     id                             name  menus_appeared  times_appeared  first_appeared  last_appeared  lowest_price  highest_price
-      1       Consomme printaniere royal               8               8            1897           1927          0.20           0.40
-    2                    Chicken gumbo             111             117            1895           1960          0.10           0.80
-    3              Tomato aux croutons              14              14            1893           1917          0.25           0.40
-    4                  Onion au gratin              41              41            1900           1971          0.25           1.00
+```sql
+> import https://data.wa.gov/api/views/f6w7-q2d2/rows.csv?accessType=DOWNLOAD
+Loading table...
+Saved 114600 rows (17 data columns)
+Imported file to table: files.table_rows
+10 rows
+VIN (1-10)    County         City State  Postal Code  Model Year          Make     Model                  Electric Vehicle Type Clean Alternative Fuel Vehicle (CAFV) Eligibility  Electric Range  Base MSRP  Legislative District  DOL Vehicle ID            Vehicle Location                             Electric Utility  2020 Census Tract
+WDC0G5EB7K    Louisa      Bumpass    VA        23024        2019 MERCEDES-BENZ GLC-CLASS Plug-in Hybrid Electric Vehicle (PHEV)             Not eligible due to low battery range              10          0                   NaN       153874850  POINT (-77.73727 37.96459)                                          NaN        51109950101
+```
+Although 10 records are shown, we imported *114,600* total rows into a new table named `files.table_rows`.
 
 Now let's explore the data a little bit:
 
-    > count files.table_dish
+    > count files.table_rows
     1 row
         count_
-        428146
+        114600
 
 ```sql
-> show columns from files.table_dish
-    8 rows
-    column_name column_type default_type default_expression comment codec_expression ttl_expression
-    first_appeared    Int64                                                                        
-     highest_price    Float64                                                                        
-                id    Int64                                                                        
-     last_appeared    Int64                                                                        
-      lowest_price    Float64                                                                        
-    menus_appeared    Int64                                                                        
-              name    String                                                                        
-    times_appeared    Int64                     
+> show columns from files.table_rows
+17 rows
+                                      column_name column_type null  key default  extra
+                                       VIN (1-10)     VARCHAR  YES  NaN     NaN    NaN
+                                           County     VARCHAR  YES  NaN     NaN    NaN
+                                             City     VARCHAR  YES  NaN     NaN    NaN
+                                            State     VARCHAR  YES  NaN     NaN    NaN
+                                      Postal Code      BIGINT  YES  NaN     NaN    NaN
+                                       Model Year      BIGINT  YES  NaN     NaN    NaN
+                                             Make     VARCHAR  YES  NaN     NaN    NaN
+                                            Model     VARCHAR  YES  NaN     NaN    NaN
+                            Electric Vehicle Type     VARCHAR  YES  NaN     NaN    NaN
+Clean Alternative Fuel Vehicle (CAFV) Eligibility     VARCHAR  YES  NaN     NaN    NaN
+                                   Electric Range      BIGINT  YES  NaN     NaN    NaN
+                                        Base MSRP      BIGINT  YES  NaN     NaN    NaN
+                             Legislative District      DOUBLE  YES  NaN     NaN    NaN
+                                   DOL Vehicle ID      BIGINT  YES  NaN     NaN    NaN
+                                 Vehicle Location     VARCHAR  YES  NaN     NaN    NaN
+                                 Electric Utility     VARCHAR  YES  NaN     NaN    NaN
+                                2020 Census Tract      BIGINT  YES  NaN     NaN    NaN
 ```
 The `import` command has loaded our CSV into a new table. It places the table under the `files`
 schema because the FileAdapter was used to load the data.
@@ -78,12 +83,29 @@ The column names and types were inferred from the data in the CSV file. We can u
 the data:
 
 ```sql
-> select name, highest_price from files.table_dish order by highest_price desc limit 1
-1 row
-                            name  highest_price
-Cream cheese with bar-le-duc jelly        3050.00
+> select distinct(Make) from files.table_rows
+34 rows
+          Make
+ MERCEDES-BENZ
+         TESLA
+          FORD
+        NISSAN
+          AUDI
+           KIA
+...
+> select count(*) as count, Make from files.table_rows group by 2 order by count desc
+34 rows
+ count           Make
+ 52674          TESLA
+ 12839         NISSAN
+ 10273      CHEVROLET
+  6072           FORD
+  4756            BMW
+  4561            KIA
+  4445         TOYOTA
+  2719     VOLKSWAGEN
 ```
-Apparently the highest priced item in our data set is the $3000 cream cheese! 
+In our data set Tesla and Nissan sold the most electric vehicles.
 
 ## Creating connections
 
@@ -140,7 +162,7 @@ The *materialized* column shows that the `entries` table is available but no dat
 If we `select` from the table then it will automatically load the data from the API:
 
 ```sql
-> select * from publisapis.entries
+> select * from publicapis.entries
 Loading table...
     API                                        Description          Auth  HTTPS    
     0x API for querying token and pool stats across va...                    1   
@@ -177,7 +199,7 @@ JIRA JIRA is a proprietary issue tracking product th... OAuth      1 unknown htt
      1    User-Agent
 >
 ```
-Once we create a query with some interesting results we work with it easily.
+Once we create a query with some interesting results we can work with it easily.
 We can *export the table* to a file (or Google Sheet if we create a GSheet connection):
 ```sql
 > export publicapis.entries to files 'api_entries.csv'
@@ -192,6 +214,14 @@ Sent data to scottpersinger@gmail.com
 Or we can even draw our data as a chart:
 ```sql
 > create chart as bar_chart where x = Auth and y = count
+```
+To help keep our results straight, we can use *variables* to remember the results of queries:
+```sql
+> $ecars = select count(*) as count, Make from files.table_rows group by 2 order by count desc
+```
+and then refer to them later:
+```sql
+> create chart from $ecars as bar_chart where x = Make and y = count
 ```
 
 ### Graphical analysis

@@ -95,7 +95,7 @@ class LocalFileAdapter(Adapter):
         if parts.scheme in ['http', 'https']:
             response = requests.head(path)
             content_type = response.headers.get('content-type')
-            if content_type.startswith("text/html"):
+            if content_type and content_type.startswith("text/html"):
                 # Try to guess a reasonable type from the file name
                 content_type = None # let determine_pandas_reader guess the type
             self.file_info_cache[path] = content_type
