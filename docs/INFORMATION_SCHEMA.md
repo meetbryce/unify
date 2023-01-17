@@ -7,14 +7,14 @@ configuration information about the Unify database.
 
 `schemata` table
 
-Lists schemas defined in the tenant database and annoates the adapter information for them.
+Lists schemas defined in the tenant database and annoates the connector information for them.
 
 type      | name                | type_or_spec    | comment
 ---------- --------------------- -----------------  ---------------------------------------------
-adapter     github                github_spec.yaml  Help on the Github adapter
+connector     github                github_spec.yaml  Help on the Github connector
 connection  github                github
 connection  jira                  jira              Connection to our JIRA instance
-connnection files                 LocalFileAdapter  Connection for importing/exporting files
+connnection files                 LocalFileConnector  Connection for importing/exporting files
 
 `tables` table
 
@@ -25,12 +25,12 @@ projects_csv    files          files             daily at 07:00       'projects.
 
 This table stores critical metadata about each Unify managed table. This information could include:
 
-- The adapter and API/file source that created the table
+- The connector and API/file source that created the table
 - The refresh interval
 - The last refresh time and the record count from the refresh
 - The last refresh message if there was an error
 - A help comment describing the table
-- The "source" of the table, either a file URI or a REST adapter config block
+- The "source" of the table, either a file URI or a REST connector config block
 
 `connectionscans` table
 
@@ -42,10 +42,10 @@ id   | created    | table_name  | table_schema  | connection  | values (JSON blo
 guid   timestamp    pulls         github          github        json blob
 
 
-## Non-adapter tables
+## Non-connector tables
 
 Unify maintains table metadata even for tables and views that are NOT created by
-adapters. Any `SELECT .. INTO` or `CREATE VIEW` operation will update a record
+connectors. Any `SELECT .. INTO` or `CREATE VIEW` operation will update a record
 in `information_schema.tables` that tracks the population event for the table.
 
 ## Implementation
@@ -69,10 +69,10 @@ It's provenance, in reverse order, looks like:
      ancestor tables: jira_isses, pr_counts, github.coders
         
       jira_issues
-      -> loaded by the JIRA adapter, issues table
+      -> loaded by the JIRA connector, issues table
 
       pr_counts
-      -> CTE loaded by the Github adapter, pulls table
+      -> CTE loaded by the Github connector, pulls table
 
       github.coders
       -> create view as (select from $emps)
@@ -83,10 +83,10 @@ It's provenance, in reverse order, looks like:
            ancestor tables: github.users, gsheets.employees
 
            github.users
-           -> loaded by the Github adapter
+           -> loaded by the Github connector
            
            gsheets.employees
-           -> loaded from a spreadsheet by the GSheets adapter
+           -> loaded from a spreadsheet by the GSheets connector
 
 Now, whenever the system observes new data arriving at any of the source tables
 (employees, github.user, github.pulls, jira.issues) then it should be able to
@@ -117,7 +117,7 @@ And I want to generate these outputs on some kind of schedule (daily report, or 
 updated hourly).
 
 The generation of these reports should "pull" the dependent data through the system. That is,
-I should trace through the data sets used by the reports back ultimately to adapter tables, refresh the data from those adapters, then run any intermediate transformation steps, and
+I should trace through the data sets used by the reports back ultimately to connector tables, refresh the data from those connectors, then run any intermediate transformation steps, and
 then re-generate the report.
 
 So I have:

@@ -1,4 +1,4 @@
-# Test creation of views defined in Adapter specs
+# Test creation of views defined in Connector specs
 from distutils.cmd import Command
 import pytest
 import requests_mock
@@ -6,13 +6,13 @@ import requests_mock
 from mocksvc.mocksvc import MockSvc
 from unify.loading import TableLoader, dbmgr
 from unify.db_wrapper import dbmgr
-from unify.adapters import Connection
+from unify.connectors import Connection
 from unify import CommandInterpreter
 
 @pytest.fixture
 def connections():
     config = [{"mocksvc": 
-                {"adapter": "mocksvc",
+                {"connector": "mocksvc",
                 "options": {"username": "scott@example.com", "password": "abc123"}
                 }
             }]
@@ -31,10 +31,10 @@ def test_tableloader(connections, db):
         loader = TableLoader(given_connections=connections)
 
         conn = connections[0]
-        assert conn.adapter.name == 'mocksvc'
+        assert conn.connector.name == 'mocksvc'
 
-        adapter = conn.adapter
-        views = adapter.list_views()
+        connector = conn.connector
+        views = connector.list_views()
         assert len(views) >= 2
 
         assert 'repos_view' in views[0].name

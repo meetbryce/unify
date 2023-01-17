@@ -57,13 +57,13 @@ show_connections: "show connections"
 
 select_query: "select"i WS col_list WS "from"i WS table_list (WS where_clause)? (WS order_clause)? (WS limit_clause)?
 
-select_for_writing: select_query ">>" adapter_ref file_ref writing_args?
+select_for_writing: select_query ">>" connector_ref file_ref writing_args?
 
-adapter_ref: DOTTED_WORD | SINGLE_QUOTED_STRING
+connector_ref: DOTTED_WORD | SINGLE_QUOTED_STRING
 file_ref: SINGLE_QUOTED_STRING | PAREN_EXPR
 writing_args: ANY
 
-export_table: "export" WS table_ref WS "to" adapter_ref file_ref? (write_option)?
+export_table: "export" WS table_ref WS "to" connector_ref file_ref? (write_option)?
 
 write_option: OVERWRITE | APPEND
 OVERWRITE: "overwrite"

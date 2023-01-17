@@ -21,43 +21,43 @@ The parser uses the `lark` package. Find the grammer in [grammark.lark](grammar.
 
 ## Class model
 
-An `Adapter` is the manager object which implements a connection to a particular
-cloud system. The Adapter is a logical entity that is configured via the
-`adapter spec` YAML file. Each adapter has a name which identifies the cloud
+An `Connector` is the manager object which implements a connection to a particular
+cloud system. The Connector is a logical entity that is configured via the
+`connector spec` YAML file. Each connector has a name which identifies the cloud
 system that it connects to, like "Github" or "Salesforce".
 
-Some adapters will be implemented by a dedicated class, but most adapters are just
-configured instances of the generic RESTAdapter. This allows us to implement
-new adapters just by creating a new adapter spec YAML file. Spec files that omit
-the `class` property will use `RESTAdapter` by default.
+Some connectors will be implemented by a dedicated class, but most connectors are just
+configured instances of the generic RESTConnector. This allows us to implement
+new connectors just by creating a new connector spec YAML file. Spec files that omit
+the `class` property will use `RESTConnector` by default.
 
-Our list of `Adapters` is created by enumerating the spec files in the `rest_specs`
-directory and constructing an adapter instance for each one. Each adapter instance
-will have a class which inherits from the `Adapter` base class. Adapters define
+Our list of `Connectors` is created by enumerating the spec files in the `rest_specs`
+directory and constructing an connector instance for each one. Each connector instance
+will have a class which inherits from the `Connector` base class. Connectors define
 an authentication scheme including referencing a set of "auth variables" that
-must be supplied by the Connection to configure the adapter.
+must be supplied by the Connection to configure the connector.
 
 A `Connection` represents an active, authorized connection to a cloud system. A
 connection has a name which is also used as the schema name to organize the tables
-that pull data from that system. Each Connection references the Adapter which is
+that pull data from that system. Each Connection references the Connector which is
 used to talk to the source system. The Connection supplies account-specific authentication
-information to the Adapter.
+information to the Connector.
 
 There is a singular `Connection` class whose instances represent the list of active
 connections. These instances are configured via the `connections.yaml` file. The configuration
-also supplies values for the "auth vars" needed by the adapter. These can either be
+also supplies values for the "auth vars" needed by the connector. These can either be
 hard-coded values or references on env vars.
 
 We don't ever use "Connector" to avoid confusion!
 
-Each Adapter represents the data sets that it can produce via the `TableDef` class.
-So we ask the adapter for its "virtual tables" via `list_tables` and get a list of
+Each Connector represents the data sets that it can produce via the `TableDef` class.
+So we ask the connector for its "virtual tables" via `list_tables` and get a list of
 TableDefs back. To load the table (pull data from the underlying API and populate
 our local db) we use the `TableLoader` class from the `loading` module. This class implements
-re-usable logic for loading data from APIs, where the adapter's TableDef is responsible
+re-usable logic for loading data from APIs, where the connector's TableDef is responsible
 for talking to the specific API.
 
-Most connections will re-use our RESTAdapter.
+Most connections will re-use our RESTConnector.
 
 ## Background tasks
 
@@ -95,7 +95,7 @@ jobs. Long running jobs create a _start and _end record.
     timestamp
     table_schema
     table_name
-    adapter_name
+    connector_name
     action (create, load_start, load_end, refresh_start, refresh_end, truncate, drop)
     numrows
     status (success, error)
@@ -106,6 +106,6 @@ jobs. Long running jobs create a _start and _end record.
     timestamp
     table_schema
     table_name
-    adapter_name
+    connector_name
     message
     level (matches python.logging levels)

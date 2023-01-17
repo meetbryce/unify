@@ -1,6 +1,6 @@
 # Importing data
 
-The core functionality of Unify is to import data from connected cloud systems via Adapters.
+The core functionality of Unify is to import data from connected cloud systems via Connectors.
 We also support importing file data from local or cloud hosted file systems.
 
 Basic importing is handled either implicitly by `select`ing from a mapped table or by
@@ -13,7 +13,7 @@ data. Generally this can happen either on a fixed schedule or in response to som
 trigger. Repeated schedule should be the "default" mechanism.
 
 The refresh time and interval is configured on the local `table`. This config can be setup
-by default in the adapter:
+by default in the connector:
 
 tables:
   - name: orders

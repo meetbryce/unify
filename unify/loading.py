@@ -29,8 +29,8 @@ from prompt_toolkit.key_binding import KeyBindings
 
 from sqlalchemy.orm.session import Session
 
-from unify.rest_adapter import (
-    Adapter, 
+from unify.rest_connector import (
+    Connector, 
     RESTView,
     TableDef,
     TableUpdater,
@@ -46,7 +46,7 @@ from unify.db_wrapper import (
 )
 from unify.sqla_storage_manager import UnifyDBStorageManager
 
-from unify.adapters import Connection, OutputLogger
+from unify.connectors import Connection, OutputLogger
 from unify.file_adapter import LocalFileAdapter
 from unify.zmq_logging import ZeroMQSocketHandler, ZeroMQSocketListener
 
@@ -521,20 +521,20 @@ class TableExporter(Thread):
     def __init__(
         self, query: str=None, 
         table: str=None, 
-        adapter: Adapter=None, 
+        connector: Connector=None, 
         target_file: str=None,
         allow_overwrite=False,
         allow_append=False):
         self.query = query
         self.table = table
-        self.adapter: Adapter = adapter
+        self.connector: Connector = connector
         self.target_file = target_file
         self.overwrite = allow_overwrite
         self.append = allow_append
 
     def run(self, output_logger: OutputLogger):
         # Runs the query against DuckDB in chunks, and sends those chunks to the adapter
-        self.output_handle = self.adapter.create_output_table(self.target_file, output_logger, overwrite=self.overwrite)
+        self.output_handle = self.connector.create_output_table(self.target_file, output_logger, overwrite=self.overwrite)
 
         with dbmgr() as duck:
             if self.query:
@@ -543,21 +543,21 @@ class TableExporter(Thread):
                 r = duck.execute(f"select * from {self.table}")
 
             # FIXME: Use DF chunking and multiple pages
-            self.adapter.write_page(self.output_handle, r, output_logger, append=self.append, page_num=1)
+            self.connector.write_page(self.output_handle, r, output_logger, append=self.append, page_num=1)
 
-            self.adapter.close_output_table(self.output_handle)
+            self.connector.close_output_table(self.output_handle)
 
 
 TableLoader = typing.NewType("TableLoader", None)
 
 
 class TableMgr:
-    def __init__(self, schema, adapter, table_spec, auth = None, params={}):
+    def __init__(self, schema, connector, table_spec, auth = None, params={}):
         self.schema = schema
         if schema is None or table_spec.name is None:
             raise RuntimeError(f"Bad schema {schema} or missing table_spec name {table_spec}")
         self.name = schema + "." + table_spec.name
-        self.adapter = adapter
+        self.connector = connector
         self.table_spec: TableDef = table_spec
         self.synchronous_scanning = True
 
@@ -617,11 +617,11 @@ class TableLoader:
                     self.connections = []
             self.tables: dict[str, TableMgr] = {}
 
-            self.adapters: dict[str, Adapter] = dict(
-                [(conn.schema_name, conn.adapter) for conn in self.connections]
+            self.connectors: dict[str, Connector] = dict(
+                [(conn.schema_name, conn.connector) for conn in self.connections]
             )
             schema = 'files'
-            self.adapters[schema] = LocalFileAdapter(
+            self.connectors[schema] = LocalFileAdapter(
                 {'name':schema},
                 root_path=os.path.join(os.environ['UNIFY_HOME'], "files"),
                 storage=UnifyDBStorageManager(schema, duck),
@@ -634,8 +634,8 @@ class TableLoader:
             # in the REST spec for the target system.
             for conn in self.connections:
                 duck.create_schema(conn.schema_name)
-                for t in conn.adapter.list_tables():
-                    tmgr = TableMgr(conn.schema_name, conn.adapter, t)
+                for t in conn.connector.list_tables():
+                    tmgr = TableMgr(conn.schema_name, conn.connector, t)
                     self.tables[tmgr.name] = tmgr
 
 # Loading jobs
@@ -645,7 +645,7 @@ class TableLoader:
 
     def _handle_job(self, job: LoaderJob, run_async: bool=True):
         t = threading.Thread(target=self._dispatch_job, args=(job,))
-        if run_async:
+        if run_async and False:
             t.daemon = True
             t.start()
             
@@ -688,10 +688,10 @@ class TableLoader:
                 storage_mgr_maker=lambda schema: UnifyDBStorageManager(schema_name, db)
             )
             self.connections.append(conn)
-            self.adapters[schema_name] = conn.adapter
+            self.connectors[schema_name] = conn.connector
             db.create_schema(conn.schema_name)
-            for t in conn.adapter.list_tables():
-                tmgr = TableMgr(conn.schema_name, conn.adapter, t)
+            for t in conn.connector.list_tables():
+                tmgr = TableMgr(conn.schema_name, conn.connector, t)
                 self.tables[tmgr.name] = tmgr
 
     def delete_connection(self, connection):
@@ -699,7 +699,7 @@ class TableLoader:
             # Delete the connection from the database
             db.drop_schema(connection.schema_name, cascade=True)
             self.connections.remove(connection)
-            del self.adapters[connection.schema_name]
+            del self.connectors[connection.schema_name]
 
         Connection.delete_connection_config(connection.schema_name)
 
@@ -708,11 +708,12 @@ class TableLoader:
             return self.tables[table]
         else:
             schema, table_root = table.split(".")
-            if schema not in self.adapters:
-                logger.critical(f"Adapter {schema} not found - maybe you need to restart the job daemon?")
+            if schema not in self.connectors:
+                breakpoint()
+                logger.critical(f"Connector '{schema}' not found - maybe you need to restart the job daemon?")
                 return
-            table_spec = self.adapters[schema].lookupTable(table_root)
-            tmgr = TableMgr(schema, self.adapters[schema], table_spec)
+            table_spec = self.connectors[schema].lookupTable(table_root)
+            tmgr = TableMgr(schema, self.connectors[schema], table_spec)
             self.tables[tmgr.name] = tmgr
             return tmgr
 
@@ -732,7 +733,7 @@ class TableLoader:
         # (Re)create any views defined that depend on the the indicated table
         qual = schema + "." + table
         tmgr = self._get_table_mgr(qual)
-        views: typing.List[RESTView] = tmgr.adapter.list_views()
+        views: typing.List[RESTView] = tmgr.connector.list_views()
         if not views:
             return
         with dbmgr() as duck:

@@ -141,7 +141,7 @@ def test_chart_commands(visitor, parser):
     verify_parse(v, p, "create_chart", "create chart from AWS__actualized as bar_chart where x = 'monthdate(end_date):O' and y = total and color = svc_name")
 
 def test_export_commands(visitor, parser):
-    # grammar: select_for_writing: "select" ANY ">>" adapter_ref file_ref writing_args?
+    # grammar: select_for_writing: "select" ANY ">>" connector_ref file_ref writing_args?
     v = visitor
     p = parser
 
@@ -149,10 +149,10 @@ def test_export_commands(visitor, parser):
     sql = f"{select} >> gsheets 'foo'"
 
     verify_parse(v, p, "select_for_writing", sql,
-            args={"select_query":select, "adapter_ref": "gsheets", "file_ref": "foo"})
+            args={"select_query":select, "connector_ref": "gsheets", "file_ref": "foo"})
 
     verify_parse(v, p, "export_table", "export github.coders to gsheets 'Coders'",
-            args={"table_ref": "github.coders", "adapter_ref": "gsheets", "file_ref": "Coders"})
+            args={"table_ref": "github.coders", "connector_ref": "gsheets", "file_ref": "Coders"})
 
     verify_parse(v, p, "export_table", "export github.coders to gsheets 'Coders' overwrite",
             args={"write_option": "overwrite"})
@@ -164,10 +164,10 @@ def test_export_commands(visitor, parser):
             args={"write_option": "append", "file_ref": "('Coders' || current_date || '.txt')"})
 
     verify_parse(v, p, "export_table", "export coders to coders.csv",
-            args={"adapter_ref": None, "file_ref": "coders.csv"})
+            args={"connector_ref": None, "file_ref": "coders.csv"})
 
     verify_parse(v, p, "export_table", "export coders to 'subdir/coders.csv'",
-            args={"adapter_ref": None, "file_ref": "subdir/coders.csv"})
+            args={"connector_ref": None, "file_ref": "subdir/coders.csv"})
 
 def test_import_command(visitor, parser, gsheets_url):
     v = visitor
@@ -272,7 +272,7 @@ def test_peek_command(visitor, parser, gsheets_url):
         args={"qualifier": "file", "peek_object": gsheets_url})
 
 def test_select_parsing(visitor, parser):
-    # Mostly we just pass select queries through to the underlying database, but the RESTAdapter allows populating
+    # Mostly we just pass select queries through to the underlying database, but the RESTConnector allows populating
     # API parameters calls by issuing queries against parent tables. We want to be strict on query parsing in this
     # case so we rely on the command parser to parse the query
     v = visitor

@@ -4,8 +4,8 @@ import os
 import yaml
 import requests
 
-from unify.adapters import Adapter, Connection, RESTView, OutputLogger
-from unify.rest_adapter import RESTAdapter, RESTTable
+from unify.connectors import Connector, Connection, RESTView, OutputLogger
+from unify.rest_connector import RESTConnector, RESTTable
 
 def test_apispec_class():
     config = {
@@ -14,7 +14,7 @@ def test_apispec_class():
         "description":"GitHub API",
         "help": "This is the GitHub API"
     }
-    spec = RESTAdapter(config, None, schema_name="github")
+    spec = RESTConnector(config, None, schema_name="github")
     assert spec.name == "github"
     assert spec.base_url == "https://api.github.com"
     assert spec.help == config["help"]
@@ -36,7 +36,7 @@ def test_apispec_class():
     config['tables'] = tables
     config['views'] = views
 
-    spec = RESTAdapter(config, None, schema_name="github")
+    spec = RESTConnector(config, None, schema_name="github")
     assert len(spec.tables) == 2
     assert spec.tables[0].name == "repos"
     assert rest_tables[0].query_path == "/repos"
@@ -53,12 +53,13 @@ def test_apispec_class():
     assert v.from_list == 'repos'
 
 def test_connector():
+    # Note you must set GHUSER and GHPASSWORD env vars to valid values for this test to work
     fpath = os.path.join(os.path.dirname(__file__), "connections.yaml")
     connections = Connection.setup_connections(connections_path=fpath, storage_mgr_maker=lambda x: x)
     assert len(connections) > 0
 
-    assert connections[0].adapter is not None
-    assert isinstance(connections[0].adapter, Adapter)
+    assert connections[0].connector is not None
+    assert isinstance(connections[0].connector, Connector)
     # load yaml file from directory relative to current file
     config = yaml.load(open(fpath), Loader=yaml.FullLoader)
     conn_config = next(conn for conn in config if next(iter(conn.keys())) == "github")
@@ -72,12 +73,12 @@ def test_rest_basic_auth():
     username = "scottpersinger@gmail.com"
     password = "secret"
     good_params = {"username": username, "password": password}
-    adapter = RESTAdapter(spec, storage=None, schema_name=schema)
-    adapter.resolve_auth(schema, good_params)
+    connector = RESTConnector(spec, storage=None, schema_name=schema)
+    connector.resolve_auth(schema, good_params)
 
     session = requests.Session()
     request = requests.Request('GET', 'https://google.com')
-    adapter._setup_request_auth(session)
+    connector._setup_request_auth(session)
 
     prepped = session.prepare_request(request)
 
@@ -92,12 +93,12 @@ def test_rest_headers_auth():
 
     bearer_token = "hubspot123"
     good_params = {"bearer_token": bearer_token}
-    adapter = RESTAdapter(spec, storage=None, schema_name=schema)
-    adapter.resolve_auth(schema, good_params)
+    connector = RESTConnector(spec, storage=None, schema_name=schema)
+    connector.resolve_auth(schema, good_params)
 
     session = requests.Session()
     request = requests.Request('GET', 'https://google.com')
-    adapter._setup_request_auth(session)
+    connector._setup_request_auth(session)
 
     prepped = session.prepare_request(request)
 

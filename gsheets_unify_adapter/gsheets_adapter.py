@@ -20,7 +20,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 import pandas as pd
 
 # project
-from unify.adapters import Adapter, AdapterQueryResult, OutputLogger, StorageManager, TableDef
+from unify.connectors import Connector, ConnectorQueryResult, OutputLogger, StorageManager, TableDef
 from unify.parsing_utils import collect_child_strings, find_node_return_child
 from unify.schemata import LoadTableRequest
 
@@ -277,7 +277,7 @@ class GSheetsTableSpec(TableDef):
                 rowdict = dict(zip(cols, row))
                 results.append(rowdict)
         size_return = []
-        yield AdapterQueryResult(json=results, size_return=size_return)
+        yield ConnectorQueryResult(json=results, size_return=size_return)
 
 class HideOurInstanceVars:
     pass
@@ -337,7 +337,7 @@ class GsheetCommandParser(Visitor):
         return res
       
 
-class GSheetsAdapter(Adapter):
+class GSheetsAdapter(Connector):
     def __init__(self, spec, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
         self.auth = spec['auth'].copy()

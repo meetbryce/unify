@@ -18,15 +18,15 @@ Imports a CSV file.
 Exports the indicated table to a csv file.
 
 
-## Use of adapters
+## Use of connectors
 
-File import and export are implemented by Adapters which implement the `create_output_table` and
-the `import_file` methods. The Adapter is responsible for reading/writing the files and converting
+File import and export are implemented by Connectors which implement the `create_output_table` and
+the `import_file` methods. The Connector is responsible for reading/writing the files and converting
 between DataFrames for saving in the database.
 
-The special `LocalFileAdapter` implements reading and writing to files on the server filesystem.
+The special `LocalFileConnector` implements reading and writing to files on the server filesystem.
 
-Other sources of files are supported by other adapters:
+Other sources of files are supported by other connectors:
 
 ### S3
 
@@ -43,20 +43,20 @@ We support `show files` to show available files
 
     show files
     
-By default this shows files from the LocalFile adapter.
+By default this shows files from the LocalFile connector.
 
 Use:
 
-    show files <adapter>
+    show files <connector>
 
-to show a file listing from another adapter.
+to show a file listing from another connector.
 
 ## Mounting file systems
 
 For now you have to specify file mounts in the `connections.yaml` config file:
 
     - filemount:
-        adapter: s3
+        connector: s3
         path: /s3
         options:
             BUCKET_NAME: unify.bucket1
@@ -64,22 +64,22 @@ For now you have to specify file mounts in the `connections.yaml` config file:
             AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
             AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION
     - filemount:
-        adapter: local
+        connector: local
         mount: /{user}
 
 # Implementation
 
 Our `FileSystem` class implements the virtual filesystem. It gets configured with a set
-of `FileAdapters` which provide file interfaces to specific backends.
+of `FileConnectors` which provide file interfaces to specific backends.
 
-By default the server will add the `LocalFileAdapter` configured with a root unique
+By default the server will add the `LocalFileConnector` configured with a root unique
 to the current tenant. 
 
 For now we are using 'unison' to power the local file mounting. We will automatically
 run unison locally and ssh into the DATABASE_HOST box, and sync $HOME/unify/data between
 local host and server.
 
-Additional file systems can be mounted by configuring additional file adapters in the
+Additional file systems can be mounted by configuring additional file connectors in the
 config file.
 
 ## Installing Unison

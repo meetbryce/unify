@@ -9,7 +9,7 @@ def test_schemata():
         session = Session(bind=db.engine)
 
         github = Schemata(name="github", type="connection", description="Access to Github")
-        jiraa = Schemata(name="jira_adapter", type="adapter", description="Access to JIRA")
+        jiraa = Schemata(name="jira_connector", type="connector", description="Access to JIRA")
 
         session.add(github)
         session.add(jiraa)

@@ -6,7 +6,7 @@ import pytest
 
 from gsheets_unify_adapter.gsheets_adapter import GSheetsAdapter
 from unify.storage_manager import MemoryStorageManager
-from unify.adapters import Connection, OutputLogger
+from unify.connectors import Connection, OutputLogger
 
 @pytest.fixture
 def adapter():

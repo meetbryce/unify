@@ -77,7 +77,7 @@ Clean Alternative Fuel Vehicle (CAFV) Eligibility     VARCHAR  YES  NaN     NaN 
                                 2020 Census Tract      BIGINT  YES  NaN     NaN    NaN
 ```
 The `import` command has loaded our CSV into a new table. It places the table under the `files`
-schema because the FileAdapter was used to load the data.
+schema because the FileConnector was used to load the data.
 
 The column names and types were inferred from the data in the CSV file. We can use any SQL to analyze
 the data:
@@ -109,14 +109,14 @@ In our data set Tesla and Nissan sold the most electric vehicles.
 
 ## Creating connections
 
-The `files` adapter is automatically configured, but now lets connect to a real API and load some more 
-interesting data. Unify comes with a set of **adapters** for pulling table from different systems.
+The `files` connector is automatically configured, but now lets connect to a real API and load some more 
+interesting data. Unify comes with a set of **connectors** for pulling table from different systems.
 
 The site [Public APIs](https://publicapis.dev/) publishes a simple API which returns their curated list
 of publicly usable system APIs.  
 
-We have created a simple adapter for querying from this API. To use it, you first need to create
-a **connection**, which configures the adapter in your environment and binds it to a `schema` in your
+We have created a simple connector for querying from this API. To use it, you first need to create
+a **connection**, which configures the connector in your environment and binds it to a `schema` in your
 database:
 
 ```sql
@@ -127,9 +127,9 @@ database:
 4: publicapis
 ...
 ```
-Choose the `publicapis` adapter and finish the setup:
+Choose the `publicapis` connector and finish the setup:
 ```
-Pick an adapter: 4
+Pick an connector: 4
 Ok! Let's setup a new publicapis connection.
 Specify the schema name (publicapis):
 Please provide the configuration parameters:
@@ -142,8 +142,8 @@ table_name table_schema comment materialized
 >
 ```
 
-Because this adapter is so simple, there is no additional configuration other than specifying the adapter. 
-But for most adapters you will need to provide at least authentication credentials.
+Because this connector is so simple, there is no additional configuration other than specifying the connector. 
+But for most connectors you will need to provide at least authentication credentials.
 
 Once the connection is created, then the schema will be created in your database, but it will be empty:
 
@@ -152,7 +152,7 @@ Once the connection is created, then the schema will be created in your database
 files
 publicapis
 ```
-However, if you use `show tables` you will see the **available** tables from the adapter:
+However, if you use `show tables` you will see the **available** tables from the connector:
 ```sql
 > show tables from publicapis
 table_name table_schema comment materialized
@@ -226,8 +226,7 @@ and then refer to them later:
 
 ### Graphical analysis
 
-Unify has only primitive built-in charting features. But if you use Clickhouse as your database 
-backend then you can connect lots of popular Business Intelligence tools to the database.
+Unify has only primitive built-in charting features. But you can connect lots of popular Business Intelligence tools to the database.
 
 The easiest way to start is to use [Metabase](https://www.metabase.com/) - a popular open source
 BI tool.

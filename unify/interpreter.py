@@ -21,7 +21,7 @@ from lark.lark import Lark
 from lark.visitors import Visitor
 from lark.visitors import v_args
 
-from .adapters import Adapter, OutputLogger, Connection
+from .connectors import Connector, OutputLogger, Connection
 from .loading import TableLoader, TableExporter, LoaderJob, add_logging_handler
 from .db_wrapper import (
     DBSignals, 
@@ -170,13 +170,13 @@ class ParserVisitor(Visitor):
     def export_table(self, tree):
         self._the_command = "export_table"
         self._the_command_args['table_ref'] = collect_child_text("table_ref", tree, full_code=self._full_code)
-        self._the_command_args['adapter_ref'] = find_node_return_child("adapter_ref", tree)
+        self._the_command_args['connector_ref'] = find_node_return_child("connector_ref", tree)
         fileref = find_node_return_child("file_ref", tree)
         if fileref:
             self._the_command_args['file_ref'] = fileref.strip("'")
         else:
-            self._the_command_args['file_ref'] = self._the_command_args['adapter_ref'].strip("'")
-            self._the_command_args['adapter_ref'] = None
+            self._the_command_args['file_ref'] = self._the_command_args['connector_ref'].strip("'")
+            self._the_command_args['connector_ref'] = None
         self._the_command_args['write_option'] = find_node_return_child("write_option", tree)
 
     def help(self, tree):
@@ -278,7 +278,7 @@ class ParserVisitor(Visitor):
     
     def select_for_writing(self, tree):
         self._the_command = "select_for_writing"
-        self._the_command_args["adapter_ref"] = find_node_return_child("adapter_ref", tree)
+        self._the_command_args["connector_ref"] = find_node_return_child("connector_ref", tree)
         self._the_command_args["file_ref"] = find_node_return_child("file_ref", tree).strip("'")
         self._the_command_args["select_query"] = collect_child_text("select_query", tree, self._full_code)
 
@@ -439,7 +439,7 @@ class CommandInterpreter:
     def __init__(self, silence_errors=False):
         self.parser = None # defer loading grammar until we need it
         self.loader: TableLoader = TableLoader(silence_errors, leader=True)
-        self.adapters: dict[str, Adapter] = self.loader.adapters
+        self.connectors: dict[str, Connector] = self.loader.connectors
         self.context: CommandContext = None
         self.session_vars: dict[str, object] = {}
         self._email_helper = None
@@ -622,9 +622,9 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
         if m:
             first_word = m.group(1)
             rest_of_command = m.group(2)
-            if first_word in self.adapters:
+            if first_word in self.connectors:
                 logger: OutputLogger = OutputLogger()
-                handler: Adapter = self.adapters[first_word]
+                handler: Connector = self.connectors[first_word]
                 return handler.run_command(rest_of_command, logger)
 
     def replace_last_table_reference(self, context: CommandContext):
@@ -735,16 +735,16 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
     def show_connections(self):
         """ show connections - list all connections. Use 'connect' to create a new connection. """
         for c in self.loader.connections:
-            self.print(f"Adapter {c.adapter.name} ({c.adapter.base_api_url}) - schema: {c.schema_name}")
+            self.print(f"Connector {c.connector.name} ({c.connector.base_api_url}) - schema: {c.schema_name}")
 
     def connect_command(self):
         """ connect - connect to a new system. """
-        specs = sorted(Connection.ADAPTER_SPECS.keys())
+        specs = sorted(Connection.CONNECTOR_SPECS.keys())
         specs_print = "\n".join(f"{idx+1}: {name}" for idx, name in enumerate(specs))
         spec_number = self.context.get_input(specs_print + "\nPick an adapter: ")
         if spec_number == "":
             return
-        adapter_tuple = Connection.ADAPTER_SPECS[specs[int(spec_number)-1]]
+        adapter_tuple = Connection.CONNECTOR_SPECS[specs[int(spec_number)-1]]
         adapter = adapter_tuple[0](adapter_tuple[1], None, "new_schema")
         
         print(f"Ok! Let's setup a new {adapter.name} connection.")
@@ -753,7 +753,7 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
             if schema == "":
                 schema = adapter.name
 
-            if schema in self.adapters:
+            if schema in self.connectors:
                 print("Schema name must be unique")
             else:
                 break
@@ -768,7 +768,7 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
             try:
                 print("Testing connection...")
                 self.loader.add_connection(adapter.name, schema, config_dict)
-                self.adapters: dict[str, Adapter] = self.loader.adapters
+                self.connectors: dict[str, Connector] = self.loader.connectors
                 print(f"New {adapter.name} connection created in schema {schema}")
                 print("The following tables are available, use peek or select to load data:")
                 return self.show_tables(schema_ref=schema)
@@ -831,7 +831,7 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
         """ import URL | file path - imports a file or spreadsheet as a new table """
         # See if any of our adapters want to import the indicated file
         # Use FileAdapter as last resort
-        adapters = sorted(list(self.adapters.items()), key=lambda x: x[1].name == 'files' and 1 or 0)
+        adapters = sorted(list(self.connectors.items()), key=lambda x: x[1].name == 'files' and 1 or 0)
 
         for schema, adapter in adapters:
             if adapter.can_import_file(file_path):
@@ -891,21 +891,21 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
             fname = email_object.replace(".", "_") + ".csv"
             self._get_email_helper().send_table(df, fname, recipients, subject)
 
-    def export_table(self, adapter_ref, table_ref, file_ref, write_option=None):
+    def export_table(self, connector_ref, table_ref, file_ref, write_option=None):
         """ export <table> <adapter> <file> [append|overwrite] - export a table to a file """
         if file_ref.startswith("(") and file_ref.endswith(")"):
             # Evaluate an expression for the file name
             result = self.duck.execute(f"select {file_ref}").fetchone()[0]
             file_ref = result
 
-        if adapter_ref:
-            if adapter_ref in self.adapters:
-                adapter = self.adapters[adapter_ref]
+        if connector_ref:
+            if connector_ref in self.connectors:
+                adapter = self.connectors[connector_ref]
             else:
-                raise RuntimeError(f"Uknown adapter '{adapter_ref}'")
+                raise RuntimeError(f"Uknown adapter '{connector_ref}'")
         else:
             # assume a file export
-            adapter = self.adapters['files']
+            adapter = self.connectors['files']
 
         exporter = TableExporter(
             table=table_ref, 
@@ -924,12 +924,12 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
                 ColumnInfo.table_name == table.table_root(),
                 ColumnInfo.table_schema == table.schema()
             ).delete()
-        if table.schema() in self.adapters:
-            self.adapters[table.schema()].drop_table(table.table_root())
+        if table.schema() in self.connectors:
+            self.connectors[table.schema()].drop_table(table.table_root())
 
     def on_table_rename(self, dbmgr, old_table, new_table):
-        if old_table.schema() in self.adapters:
-            self.adapters[old_table.schema()].rename_table(old_table.table_root(), new_table.table_root())
+        if old_table.schema() in self.connectors:
+            self.connectors[old_table.schema()].rename_table(old_table.table_root(), new_table.table_root())
 
     def open_command(self, open_target: str):
         if open_target == "metabase":
@@ -981,7 +981,7 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
         # Get column weights and widths.
         if qualifier == 'file':
             # Peek at file instead of table
-            for schema, adapter in self.adapters.items():
+            for schema, adapter in self.connectors.items():
                 file_path = peek_object.strip("'")
                 if adapter.can_import_file(file_path):
                     return adapter.peek_file(file_path, line_count, self.context.logger)
@@ -1062,7 +1062,7 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
         """ delete connection - delete an existing connection and all it's data """
         clist = []
         for idx, c in enumerate(self.loader.connections):
-            clist.append(f"{idx+1}: Adapter {c.adapter.name} ({c.adapter.base_api_url}) - schema: {c.schema_name}")
+            clist.append(f"{idx+1}: Adapter {c.connector.name} ({c.connector.base_api_url}) - schema: {c.schema_name}")
         number = self.context.get_input("\n".join(clist) + "\nChoose which connection to delete: ")
         if number:
             conn = self.loader.connections[int(number)-1]
@@ -1128,8 +1128,8 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
         """ show tables [from <schema> [like '<expr>']] - list all tables or those from a schema """
         if schema_ref:
             records = []
-            if schema_ref in self.adapters:
-                for tableDef in self.adapters[schema_ref].list_tables():
+            if schema_ref in self.connectors:
+                for tableDef in self.connectors[schema_ref].list_tables():
                     records.append({
                         "table_name": tableDef.name,
                         "table_schema": schema_ref,
@@ -1213,14 +1213,14 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
                     except TableMissingException:
                         time.sleep(1.0)
 
-    def select_for_writing(self, select_query, adapter_ref, file_ref):
-        if adapter_ref in self.adapters:
-            adapter = self.adapter[adapter_ref]
+    def select_for_writing(self, select_query, connector_ref, file_ref):
+        if connector_ref in self.connectors:
+            adapter = self.connector[connector_ref]
             exporter = TableExporter(select_query, adapter, file_ref)
             exporter.run()
             self.print(f"Exported query result to '{file_ref}'")
         else:
-            self.print(f"Error, uknown adapter '{adapter_ref}'")
+            self.print(f"Error, uknown adapter '{connector_ref}'")
 
     def show_variable(self, var_ref):
         value = self._get_variable(var_ref)
@@ -1362,11 +1362,11 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
         if schema_ref is None:
             schema_ref = 'files'
 
-        if schema_ref not in self.adapters:
+        if schema_ref not in self.connectors:
             raise RuntimeError(f"Uknown schema '{schema_ref}'")
 
-        self.adapters[schema_ref].logger = self.context.logger
-        for file in self.adapters[schema_ref].list_files(match_expr):
+        self.connectors[schema_ref].logger = self.context.logger
+        for file in self.connectors[schema_ref].list_files(match_expr):
             self.print(file)
 
 def setup_job_log_handler(handler):

@@ -9,7 +9,7 @@ from unify import CommandInterpreter, CommandContext
 def interp():
     return CommandInterpreter()
 
-# Note that the LocalFilesAdapter setup assumes files appear in $UNIFY_HOME/files,
+# Note that the LocalFilesConnector setup assumes files appear in $UNIFY_HOME/files,
 # and our conftest.py set UNIFY_HOME to be the tests directory.
 #@pytest.mark.skip(reason="")
 def test_csv_import(interp: CommandInterpreter):

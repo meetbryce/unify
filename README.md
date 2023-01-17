@@ -3,8 +3,8 @@
 Unify is an experiment in building a "personal data warehouse". It integrates Extract-Transform-Load,
 plus analysis, into a single app and database which runs on your local machine.
 
-The primary interface to Unify is a command interface which mixes standard SQL and
-meta commands. Use `select` to query data, but you also have commands available for
+The primary interface to Unify is a command interface which mixes [standard SQL and
+meta](./docs/SQL_LANGUAGE.md) commands. Use `select` to query data, but you also have commands available for
 easily importing and exporting data, sending email, and drawing charts.
 
 Unify includes a set of *connectors* to popular SaaS systems, and allows you to easily
@@ -43,7 +43,7 @@ but works a lot better with other tools like BI tools.
 
 All configuration data is stored into `$HOME/unify`.
 
-Checkout the [tutorial](docs/TUTORIAL.md) to get an overview of using Unify to work with your data.
+**Checkout the [tutorial](docs/TUTORIAL.md) to get an overview of using Unify to work with your data.**
 
 ## Learning more
 

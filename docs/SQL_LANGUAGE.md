@@ -1,7 +1,7 @@
 # SQL Language
 
 Unify implements standard SQL plus a number of extensions for working with connected
-systems, adapters, and other features.
+systems, connectors, and other features.
 
 ## Help and information
  
@@ -97,9 +97,9 @@ format will be automatically detected.
 
 ## Writing to connected systems
 
-    export <schema>.<table> to [adapter] 'file name'|expr ["overwrite"|"append"]
+    export <schema>.<table> to [connector] 'file name'|expr ["overwrite"|"append"]
 
-This will export all rows of the indicated table to the connected system specified by the "adapter" name. Only certain connected systems support exporting data. Use the "overwrite" option to allow overwriting an existing file
+This will export all rows of the indicated table to the connected system specified by the "connector" name. Only certain connected systems support exporting data. Use the "overwrite" option to allow overwriting an existing file
 and its contents. Use the "append" option to append to any existing file.
 
     export hubspot.orders to s3 '/bucket1/order.csv'

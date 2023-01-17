@@ -8,7 +8,7 @@
    - Persist log messages and support "show logs ..." command to view them
 1. Add command completion based on current schemas and tables
 
-### FileAdapter
+### FileConnector
 
 1. Add support for remote URLs and TAR file listing
 1. Import remote files, including a JSON API result
@@ -18,8 +18,8 @@
 1. [done] Implement unit tests
 1. [done] Implement table refresh, with support for strategies
 1. [done] Implement scheduled automatic table refresh
-1. [done] Implement GSheets adapter
-1. Implement AWS Cost Reporting adapter
+1. [done] Implement GSheets connector
+1. Implement AWS Cost Reporting connector
    - [done] Need to support AWS authentication
    - [done] Support POSTing for REST API calls
    - [done] Support pulling the right values out of the result
@@ -36,14 +36,14 @@
 1. [done] Automagically show hyperlinks for URL content from tables
 1. Start working on "lineage" features that can show which notebook/code produced a table
 1. [done] Make sure date/float typing works properly on table load
-1. Add S3 adapter
-1. Add GDrive adapter
+1. Add S3 connector
+1. Add GDrive connector
 1. [done] Add annotation layer for tables/columns to schema support. 
 1. [done] implement CSV and parquest file import/export
 1. Fix date handling in charts (requires strings right now)
 1. Automatically unpack TAR and compressed files
 1. Add support for PRSQL syntax
-1. Re-implement Postgres adapter to use EXPORT and COPY instead of native Clickhouse support
+1. Re-implement Postgres connector to use EXPORT and COPY instead of native Clickhouse support
 
 ## Jupyter integration
 

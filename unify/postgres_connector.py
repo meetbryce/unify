@@ -5,9 +5,9 @@ from datetime import datetime
 
 import pandas as pd
 
-from .adapters import (
-    Adapter, 
-    AdapterQueryResult, 
+from .connectors import (
+    Connector, 
+    ConnectorQueryResult, 
     OutputLogger, 
     ReloadStrategy, 
     StorageManager, 
@@ -17,7 +17,7 @@ from .adapters import (
 from .db_wrapper import DBManager, TableHandle, CHTableHandle, DBSignals
  
 #######
-# A Replicating Postgres adapter which relies on Clickhouse/DuckDB's native PG protocol support to connect
+# A Replicating Postgres connector which relies on Clickhouse/DuckDB's native PG protocol support to connect
 # to a target postgres server and then replicate tables into the local warehouse.
 #  
 # -- Replicating large tables
@@ -35,14 +35,14 @@ from .db_wrapper import DBManager, TableHandle, CHTableHandle, DBSignals
 # Run the `create table as select * from file(<file>,CSV,<structure>) to import the data
 ########
 
-PostgresAdapter = typing.NewType("PostgresAdapter", None)
+PostgresConnector = typing.NewType("PostgresConnector", None)
 
 class PostgresTableSpec(TableDef):
     # Represents a Postgres table on the remote server
 
-    def __init__(self, table: str, adapter):
+    def __init__(self, table: str, connector):
         super().__init__(table)
-        self.adapter: PostgresAdapter = adapter
+        self.connector: PostgresConnector = connector
     
     def get_table_updater(self, updates_since: datetime) -> TableUpdater:
         # Our broad table update strategy looks like this:
@@ -56,8 +56,8 @@ class PostgresTableSpec(TableDef):
         return ReloadStrategy(self)
 
         # See if we can find a column to use for incremental updates
-        db: DBManager = self.adapter.db
-        table = TableHandle(self.schema_name, self.adapter.name)
+        db: DBManager = self.connector.db
+        table = TableHandle(self.schema_name, self.connector.name)
         cols = db.list_columns(table)
 
         # We have a few strategies:
@@ -79,10 +79,10 @@ class PostgresTableSpec(TableDef):
     def query_resource(self, tableLoader, logger: logging.Logger):
         # We will implement the replication entirely within the database, rather than the
         # usual pattern of returning chunks of rows to insert.
-        self.adapter.load_table(self.name)
-        yield AdapterQueryResult(json=pd.DataFrame(), size_return=[])
+        self.connector.load_table(self.name)
+        yield ConnectorQueryResult(json=pd.DataFrame(), size_return=[])
 
-class PostgresAdapter(Adapter):
+class PostgresConnector(Connector):
     def __init__(self, spec, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
         self.auth = spec.get('auth', {}).get('params').copy()

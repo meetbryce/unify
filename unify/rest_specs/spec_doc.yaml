@@ -1,5 +1,5 @@
 enabled: true
-# Name of this adapter. Connections will refer to this name in the connections.yaml config file.
+# Name of this connector. Connections will refer to this name in the connections.yaml config file.
 name: github
 # Base URL for the REST API
 base_url: https://api.github.com
@@ -114,7 +114,7 @@ tables:
     # You can specific a distinct paging strategy for a single API resource, otherwise will inherit
     # from top-level.
     paging:  # see 'paging' dict above
-    # Optional additional headers to supply to the API call. Below are examples from the AWS Costs Adapter.
+    # Optional additional headers to supply to the API call. Below are examples from the AWS Costs Connector.
     headers:
       Content-Type: application/x-amz-json-1.1
       X-Amz-Target: AWSInsightsIndexService.GetDimensionValues
@@ -164,11 +164,11 @@ tables:
     # table A.
     #
     # Since we support SQL queries for parent->child lookups, we can also use basic queries to
-    # dynamically populate a parameter. This is used in the AWS Costs adapter:
+    # dynamically populate a parameter. This is used in the AWS Costs connector:
     params:
       start_date: sql@(select cast((now() - interval 6 month) as date))
     # Any valid SQL functions can be used and the query can return a single or multiple values.
-    # Note that for security that the query can only refer to tables within the current adapter -
+    # Note that for security that the query can only refer to tables within the current connector -
     # you cannot query data from other schemas and in fact schema qualified table references
     # (like "select col from sch1.tab1") will raise an error. 
     #
@@ -222,15 +222,15 @@ tables:
 #
 # Defining Views
 # 
-# It is intended that Adapter tables reflect the exact structure of API responses from 
+# It is intended that Connector tables reflect the exact structure of API responses from 
 # the source system. Rather than trying to transform data in place, instead you can
 # simply create a VIEW against the raw data table. This VIEW will be re-created each time
-# the source table is loaded. This allows an Adapter author to create one or more "user friendly"
+# the source table is loaded. This allows an Connector author to create one or more "user friendly"
 # views of data from a source system. A view can select specific columns, rename them, cast
 # data to more usable types, or perform other types of transformations. You can join data together
 # from multiple tables, etc... 
 #
-# The only limitation is that views can only reference tables defined in the current Adapter.
+# The only limitation is that views can only reference tables defined in the current Connector.
 # In fact table references should never include a schema qualification.
 #
 # The "views" property is a list of dictionaries, which each dict defines a view.

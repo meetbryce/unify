@@ -1,16 +1,16 @@
 ---
 - github:
-    adapter: github
+    connector: github
     options:
       username: $GHUSER
       password: $GHTOKEN
 - mocksvc:
-    adapter: mocksvc
+    connector: mocksvc
     options:
       username: scott@example.com
       password: abc123
 - gsheets:
-    adapter: gsheets
+    connector: gsheets
     options:
       client_json_path: ~/unify/gauth_client_id.json
       client_creds_path: ~/unify/user_creds.json

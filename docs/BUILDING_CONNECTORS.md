@@ -1,10 +1,10 @@
-Unify expects most "adapters" to be implemented by the generic RESTAdapter, and configured via the YAML spec file. 
+Unify expects most "connectors" to be implemented by the generic RESTConnector, and configured via the YAML spec file. 
 
 ## Authentication
 
-The RESTAdapter supports a number of strategies for supplying an API key or token for authentication to an API. It also supports a configurable Oauth strategy for services that offer Oauth authentication.
+The RESTConnector supports a number of strategies for supplying an API key or token for authentication to an API. It also supports a configurable Oauth strategy for services that offer Oauth authentication.
 
-We expect that some complex services (such as Amazon AWS) may require custom code to implement their authentication scheme. In this case the RESTAdapter can be configured to access a custom library for authentication. This custom library will have to be included a priori in the Unify source code.
+We expect that some complex services (such as Amazon AWS) may require custom code to implement their authentication scheme. In this case the RESTConnector can be configured to access a custom library for authentication. This custom library will have to be included a priori in the Unify source code.
 
 Example auth strategies:
 
@@ -29,7 +29,7 @@ name, or with a string and referencing values using `{key}` syntax.
 
 ## Paging strategies
 
-The RESTAdapter supports different strategies for paging through multiple results:
+The RESTConnector supports different strategies for paging through multiple results:
 
     pageAndCount - a page number and count parameters are supplied. Paging continues
     until a result page smaller than the count (page size) is returned.
@@ -43,7 +43,7 @@ The RESTAdapter supports different strategies for paging through multiple result
     to pass the page token in the POST body, then specify any parameter name for `token_param`
     and then reference that value using ${param} in the `post` dictionary.
 
-Paging options can be specified at the level of the adapter spec, or specified individually
+Paging options can be specified at the level of the connector spec, or specified individually
 on a table spec. Example:
 
     paging:
@@ -66,20 +66,20 @@ on a table spec. Example:
       page_size: 100
 
 
-## The Adapter interface
+## The Connector interface
 
-All adapters support this interface, defined in `Adapter`:
+All connectors support this interface, defined in `Connector`:
 
     name - return the name of the service
     resolve_auth - apply the local connection settings to the authentication configuration
     validate - validate the authentication to the service
     list_tables - return the list of 'available' table definitions for the service
     lookupTable(tableName) - return the table spec for the table with the given name
-    supports_commands - returns True if the Adapter implements its own special commands
-    run_command - execute a command targeted at the Adapter
+    supports_commands - returns True if the Connector implements its own special commands
+    run_command - execute a command targeted at the Connector
 
 The `list_tables` method should return objects which implement the `TableDef` interface.
-This interface declares "potential" tables for which the Adapter can return data and which
+This interface declares "potential" tables for which the Connector can return data and which
 can be materialized into physical tables by Unify. 
 
 The `TableDef` interface includes:
@@ -92,13 +92,13 @@ The `TableDef` interface includes:
 data from the source system. This method will be called repeatedly to request
 all pages of data from the system. For each page, the function should yield
 the page of results as a list of dicts, and an empty array which is used
-to return the number of rows parsed by Unify. The Adapter should compare
+to return the number of rows parsed by Unify. The Connector should compare
 this row result with the size of the page requested and generally finish
 once an incomplete page is encountered. 
 
 `create_output_table` - This method will be called in order to write results
 **to** the connected system. Throw an Exception if writing is not supported
-by the Adapter. This method will be called once at the start of writing a table,
+by the Connector. This method will be called once at the start of writing a table,
 and it should return an opaque identifier for the output result.
 
 `write_page` - This method is called with each page of rows to write to the
@@ -153,6 +153,6 @@ the API to potentially return different results each time it is called. In this 
 we don't want to cache the results, but rather invoke the API live every time
 the table is referenced.
 
-One use case could be a "Google search" adapter, which returns the results of a
+One use case could be a "Google search" connector, which returns the results of a
 Google search query. It's infeasible to retrieve "all" results, so instead we
 need to call the API every time a query is made.

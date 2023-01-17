@@ -1213,7 +1213,7 @@ class SavedVar(Base):
     name = Column(String, primary_key=True)
     value = Column(Base64Encoded)
 
-class AdapterMetadata(Base):
+class ConnectorMetadata(Base):
     __tablename__ = "information_schema" + CHTableHandle.SCHEMA_SEP + "adapter_metadata"
     __table_args__ = DBMGR_CLASS.get_sqlalchemy_table_args(primary_key=['id','collection'], schema=UNIFY_META_SCHEMA)
 

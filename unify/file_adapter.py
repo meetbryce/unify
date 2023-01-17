@@ -11,7 +11,7 @@ import time
 import pandas as pd
 import requests
 
-from .adapters import Adapter, AdapterQueryResult, OutputLogger, StorageManager, TableDef
+from .connectors import Connector, ConnectorQueryResult, OutputLogger, StorageManager, TableDef
 
 class LocalFileTableSpec(TableDef):
     # Represents a Google Sheet as a queryable Table spec to Unify.
@@ -46,14 +46,14 @@ class LocalFileTableSpec(TableDef):
                 for chunk in reader:
                     chunk.dropna(axis='rows', how='all', inplace=True)
                     chunk.dropna(axis='columns', how='all', inplace=True)
-                    yield AdapterQueryResult(json=chunk, size_return=size_return)
+                    yield ConnectorQueryResult(json=chunk, size_return=size_return)
         else:
             logger.warning("File loader does not support chunking.")
             df = method(path, **kwargs)
-            yield AdapterQueryResult(json=df, size_return=size_return)
+            yield ConnectorQueryResult(json=df, size_return=size_return)
 
 
-class LocalFileAdapter(Adapter):
+class LocalFileAdapter(Connector):
     def __init__(self, spec, root_path: str, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
         # FIXME: Use user-specific path when we have one

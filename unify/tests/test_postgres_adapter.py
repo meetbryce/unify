@@ -1,8 +1,8 @@
 import pytest
 from datetime import datetime
 
-from unify.adapters import Connection
-from unify.postgres_adapter import PostgresAdapter
+from unify.connectors import Connection
+from unify.postgres_connector import PostgresConnector
 from unify.loading import TableLoader, LoaderJob
 from unify.db_wrapper import TableMissingException, TableHandle, DuckDBWrapper
 from unify.sqla_storage_manager import UnifyDBStorageManager
@@ -16,7 +16,7 @@ def db():
 @pytest.fixture
 def connection(db):
     config = [{"postgres": 
-                {"adapter": "postgres",
+                {"connector": "postgres",
                  "options": {"db_host": "localhost", "db_database":"dvdrental", "db_user":"scottp", "db_password":""}
                 }
             }]
@@ -27,8 +27,8 @@ def connection(db):
     )
     return connections[0]
 
-@pytest.mark.skip("Need to rewrite PG adapter to not use Clickhouse primitives")
-def test_postgres_adapter(db, connection):
+@pytest.mark.skip("Need to rewrite PG connector to not use Clickhouse primitives")
+def test_postgres_connector(db, connection):
     loader = TableLoader(given_connections=[connection])
 
     try:
@@ -38,8 +38,8 @@ def test_postgres_adapter(db, connection):
     loader.materialize_table(LoaderJob.load_table_job("postgres", "actor"))
 
     # Test our update strategy
-    pg_adapter: PostgresAdapter = connection.adapter
-    assert isinstance(pg_adapter, PostgresAdapter)
+    pg_connector: PostgresConnector = connection.connector
+    assert isinstance(pg_connector, PostgresConnector)
 
-    table_def = [t for t in pg_adapter.list_tables() if t.name == 'actor'][0]
+    table_def = [t for t in pg_connector.list_tables() if t.name == 'actor'][0]
     table_def.get_table_updater(datetime.utcnow())

@@ -23,9 +23,9 @@ import google.auth.transport.requests
 
 from .storage_manager import StorageManager
 from .data_utils import interp_dollar_values, flatten_dict
-from .adapters import (
-    Adapter, 
-    AdapterQueryResult,
+from .connectors import (
+    Connector, 
+    ConnectorQueryResult,
     TableDef, 
     TableUpdater, 
     ReloadStrategy, 
@@ -330,14 +330,14 @@ class RESTTable(TableDef):
                 return True
         return False
 
-    def query_resource(self, tableLoader, logger: logging.Logger) -> Generator[AdapterQueryResult, None, None]:
+    def query_resource(self, tableLoader, logger: logging.Logger) -> Generator[ConnectorQueryResult, None, None]:
         for params_record in self.generate_param_values(tableLoader):
             if self.copy_params_to_output:
                 merge_cols = {k: params_record.get(k) for k in self.copy_params_to_output}
             else:
                 merge_cols = None
             for page, size_return in self._query_resource(tableLoader, params_record.copy(), logger):
-                yield AdapterQueryResult(json=page, size_return=size_return, merge_cols=merge_cols)
+                yield ConnectorQueryResult(json=page, size_return=size_return, merge_cols=merge_cols)
                 if self.spec.throttle:
                     time.sleep(self.spec.throttle['sleep'])
 
@@ -516,7 +516,7 @@ class RESTTable(TableDef):
             return node  
 
     
-class RESTAdapter(Adapter):
+class RESTConnector(Connector):
     def __init__(self, spec, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
         self.base_url = spec['base_url']

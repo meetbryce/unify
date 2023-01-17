@@ -5,13 +5,13 @@ import requests_mock
 from unify.db_wrapper import dbmgr
 from unify.loading import  TableLoader, TableMgr, BaseTableScan, LoaderJob
 from unify.db_wrapper import TableMissingException
-from unify.adapters import Connection
+from unify.connectors import Connection
 from mocksvc.mocksvc import MockSvc
 
 @pytest.fixture
 def connections():
     config = [{"mocksvc": 
-                {"adapter": "mocksvc",
+                {"connector": "mocksvc",
                 "options": {"username": "scott@example.com", "password": "abc123"}
                 }
             }]

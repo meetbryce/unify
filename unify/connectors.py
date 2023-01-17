@@ -17,18 +17,18 @@ from .data_utils import interp_dollar_values
 
 logger = logging.getLogger(__name__)
 
-Adapter = typing.NewType("Adapter", None)
+Connector = typing.NewType("Connector", None)
 TableUpdater = typing.NewType("TableUpdater", None)
 
 
 class Connection:
-    ADAPTER_SPECS: dict = {}
+    CONNECTOR_SPECS: dict = {}
 
-    def __init__(self, adapter, schema_name, opts):
+    def __init__(self, connector, schema_name, opts):
         self.schema_name: str = schema_name
-        self.adapter: Adapter = adapter
-        self.adapter.resolve_auth(self.schema_name, opts['options'])
-        self.is_valid = self.adapter.validate()
+        self.connector: Connector = connector
+        self.connector.resolve_auth(self.schema_name, opts['options'])
+        self.is_valid = self.connector.validate()
 
     @staticmethod
     def connections_config_path():
@@ -43,7 +43,7 @@ class Connection:
         return yaml.safe_load(open(Connection.connections_config_path()))
 
     @staticmethod
-    def update_connections_config(schema_name, adapter_name, options):
+    def update_connections_config(schema_name, connector_name, options):
         path = Connection.connections_config_path()
         try:
             conf = yaml.safe_load(open(path))
@@ -52,7 +52,7 @@ class Connection:
             conf = []
             orig_lines = []
 
-        conf.append({schema_name: {"adapter": adapter_name, "options": options}})
+        conf.append({schema_name: {"connector": connector_name, "options": options}})
         
         # write out the new config, but preserve comments from the old file
         with open(path, "w") as f:
@@ -78,9 +78,9 @@ class Connection:
 
     @classmethod
     def setup_connections(cls, conn_list=None, connections_path=None, storage_mgr_maker=None):
-        from .rest_adapter import RESTAdapter
+        from .rest_connector import RESTConnector
 
-        adapter_table = {}
+        connector_table = {}
 
         for f in importlib.resources.contents("unify.rest_specs"):
             if not (f.endswith("spec.yml")  or f.endswith("spec.yaml")):
@@ -88,21 +88,21 @@ class Connection:
             try:
                 spec = yaml.load(importlib.resources.read_text("unify.rest_specs", f), Loader=yaml.FullLoader)
             except Exception as e:
-                print(f"Error loading adapter spec {f}: {e}")
+                print(f"Error loading connector spec {f}: {e}")
                 continue
             if spec.get('enabled') == False:
                 continue
-            klass = RESTAdapter
+            klass = RESTConnector
             if 'class' in spec:
                 if spec['class'].lower() == 'gsheetsadapter':
                     from gsheets_unify_adapter.gsheets_adapter import GSheetsAdapter
                     klass = GSheetsAdapter
-                elif spec['class'].lower() == 'postgresadapter':
-                    from .postgres_adapter import PostgresAdapter
-                    klass = PostgresAdapter           
-            adapter_table[spec['name']] = (klass, spec)
+                elif spec['class'].lower() == 'postgresconnector':
+                    from .postgres_connector import PostgresConnector
+                    klass = PostgresConnector           
+            connector_table[spec['name']] = (klass, spec)
 
-        Connection.ADAPTER_TABLE = adapter_table
+        Connection.CONNECTOR_TABLE = connector_table
 
         if conn_list:
             connections = conn_list
@@ -115,40 +115,40 @@ class Connection:
                 #print("Warning, no connections config file found. Use 'connect' command to create one.")
                 connections = []
         result = []
-        # Instantiate each adapter, resolve auth vars, and validate the connection
+        # Instantiate each connector, resolve auth vars, and validate the connection
         for opts in connections:
             schema_name = next(iter(opts))
             opts = opts[schema_name]
-            if opts['adapter'] not in adapter_table:
-                print(f"Error: cannot find adapter {opts['adapter']} for connection {schema_name}")
-                print("Available adapters: ", adapter_table.keys())
+            if opts['connector'] not in connector_table:
+                print(f"Error: cannot find connector {opts['connector']} for connection {schema_name}")
+                print("Available connectors: ", connector_table.keys())
                 continue
-            adapter_klass, spec = adapter_table[opts['adapter']]
-            adapter = adapter_klass(spec, storage_mgr_maker(schema_name), schema_name)
-            c = Connection(adapter, schema_name, opts)
+            connector_klass, spec = connector_table[opts['connector']]
+            connector = connector_klass(spec, storage_mgr_maker(schema_name), schema_name)
+            c = Connection(connector, schema_name, opts)
             if c.is_valid:
                 result.append(c)
             else:
-                print(f"Failed to load connection '{schema_name}' as adapter is invalid", file=sys.stderr)
+                print(f"Failed to load connection '{schema_name}' as connector is invalid", file=sys.stderr)
 
-        Connection.ADAPTER_SPECS.update(adapter_table)
+        Connection.CONNECTOR_SPECS.update(connector_table)
         return result
 
     @classmethod
-    def create_connection(cls, adapter_name: str, schema_name: str, opts: dict, storage_mgr_maker=None):
-        adapter_klass, spec = cls.ADAPTER_SPECS[adapter_name]
-        adapter = adapter_klass(spec, storage_mgr_maker(schema_name), schema_name)
-        c = Connection(adapter, schema_name, {"options": opts})
+    def create_connection(cls, connector_name: str, schema_name: str, opts: dict, storage_mgr_maker=None):
+        connector_klass, spec = cls.CONNECTOR_SPECS[connector_name]
+        connector = connector_klass(spec, storage_mgr_maker(schema_name), schema_name)
+        c = Connection(connector, schema_name, {"options": opts})
         c.test_connection()
-        Connection.update_connections_config(schema_name, adapter_name, opts)
+        Connection.update_connections_config(schema_name, connector_name, opts)
         return c
 
     def list_tables(self):
-        return self.adapter.list_tables()
+        return self.connector.list_tables()
 
     def test_connection(self):
         # Used to verify valid auth for a new connection
-        self.adapter.test_connection(logger=logger)
+        self.connector.test_connection(logger=logger)
 
 class OutputLogger:
     def __init__(self) -> None:
@@ -176,8 +176,8 @@ class OutputLogger:
         self.df = None
         
 
-AdapterQueryResult = namedtuple(
-    'AdapterQueryResult', 
+ConnectorQueryResult = namedtuple(
+    'ConnectorQueryResult', 
     ['json','size_return','merge_cols'],
     defaults={None}
 )
@@ -243,8 +243,8 @@ class TableDef:
     def strip_prefixes(self, value):
         self._strip_prefixes = value
 
-    def query_resource(self, tableLoader, logger: logging.Logger) -> Generator[AdapterQueryResult, None, None]:
-        """ Yields AdapterQueryResults for each page of an API endpoint """
+    def query_resource(self, tableLoader, logger: logging.Logger) -> Generator[ConnectorQueryResult, None, None]:
+        """ Yields ConnectorQueryResults for each page of an API endpoint """
         return None
 
     @property
@@ -288,8 +288,8 @@ class TableUpdater:
         """
         return False
 
-    def query_resource(self, tableLoader, logger: logging.Logger) -> Generator[AdapterQueryResult, None, None]:
-        """ Generator which yields AdapterQueryResults for all records updated
+    def query_resource(self, tableLoader, logger: logging.Logger) -> Generator[ConnectorQueryResult, None, None]:
+        """ Generator which yields ConnectorQueryResults for all records updated
             since the `updates_since` timestamp.
         """
         return None
@@ -359,7 +359,7 @@ RESTView = namedtuple(
 )
 
 
-class Adapter:
+class Connector:
     def __init__(self, name, storage: StorageManager):
         self.name = name
         self.help = ""
@@ -395,7 +395,7 @@ class Adapter:
         return next(t for t in self.list_tables() if t.name == tableName)
 
     def resolve_auth(self, connection_name: AnyStr, connection_opts: Dict):
-        # The adapter spec has an auth clause (self.auth) that can refer to "Connection options". 
+        # The connector spec has an auth clause (self.auth) that can refer to "Connection options". 
         # The Connection options can refer to environment variables or hold direct values.
         # We need to:
         # 1. Resolve the env var references in the Connection options
@@ -458,7 +458,7 @@ class Adapter:
 
     # Importing data
     def can_import_file(self, file_uri: str):
-        """ Return true if this adapter nows how to import the indicated file_uri """
+        """ Return true if this connector nows how to import the indicated file_uri """
         return False
 
     def import_file(self, file_uri: str, options: dict={}):
@@ -471,13 +471,13 @@ class Adapter:
 
     # Exporting data
     def create_output_table(self, file_name, output_logger:OutputLogger, overwrite=False, opts={}):
-        raise RuntimeError(f"Adapter {self.name} does not support writing")
+        raise RuntimeError(f"Connector {self.name} does not support writing")
 
     def write_page(self, output_handle, page, output_logger:OutputLogger, append=False):
-        raise RuntimeError(f"Adapter {self.name} does not support writing")
+        raise RuntimeError(f"Connector {self.name} does not support writing")
 
     def close_output_table(self, output_handle):
-        raise RuntimeError(f"Adapter {self.name} does not support writing")
+        raise RuntimeError(f"Connector {self.name} does not support writing")
 
     def list_views(self) -> List[RESTView]:
         return []

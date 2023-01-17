@@ -5,15 +5,15 @@ import requests
 import requests_mock
 
 from mocksvc.mocksvc import MockSvc
-from unify.adapters import Connection, Adapter
-from unify.rest_adapter import RESTAdapter
+from unify.connectors import Connection, Connector
+from unify.rest_connector import RESTConnector
 
 logger = logging.getLogger(__name__)
 
 @pytest.fixture
 def connection():
     config = [{"mocksvc": 
-                {"adapter": "mocksvc",
+                {"connector": "mocksvc",
                 "options": {"username": "scott@example.com", "password": "abc123"}
                 }
             }]
@@ -22,13 +22,13 @@ def connection():
     return connections[0]
 
 def test_mocksvc_config(connection):
-    assert isinstance(connection.adapter, RESTAdapter)
-    assert connection.adapter.name == "mocksvc"
-    assert connection.adapter.base_url == "https://mocksvc.com"
+    assert isinstance(connection.connector, RESTConnector)
+    assert connection.connector.name == "mocksvc"
+    assert connection.connector.base_url == "https://mocksvc.com"
 
     # Verify basic auth options set properly
-    assert connection.adapter.auth['params']['username'] == "scott@example.com"
-    assert connection.adapter.auth['params']['password'] == "abc123"
+    assert connection.connector.auth['params']['username'] == "scott@example.com"
+    assert connection.connector.auth['params']['password'] == "abc123"
 
 def test_mocksvc_requests_mock():
     with requests_mock.Mocker() as mock:
@@ -62,21 +62,21 @@ def test_calling_rest_api(connection):
     with requests_mock.Mocker() as mock:
         MockSvc.setup_mocksvc_api(mock)
 
-        table_spec = connection.adapter.lookupTable("repos100")
+        table_spec = connection.connector.lookupTable("repos100")
         total_records = 0
         for qres in table_spec.query_resource(None, logger):
             total_records += len(qres.json)
             qres.size_return.append(len(qres.json))
         assert total_records == 100
 
-        table_spec = connection.adapter.lookupTable("repos27")
+        table_spec = connection.connector.lookupTable("repos27")
         total_records = 0
         for qres in table_spec.query_resource(None, logger):
             total_records += len(qres.json)
             qres.size_return.append(len(qres.json))
         assert total_records == 27
 
-        table_spec = connection.adapter.lookupTable("repos1100")
+        table_spec = connection.connector.lookupTable("repos1100")
         total_records = 0
         for qres in table_spec.query_resource(None, logger):
             total_records += len(qres.json)

@@ -38,7 +38,7 @@ def test_storage_manager(store):
     assert store.get_object("col1", "key1") is None
     assert list(store.list_objects("col1")) == [("key2", d2)]
 
-    # Ensure stores for different adapters don't clash
+    # Ensure stores for different connectors don't clash
     store2 = UnifyDBStorageManager("jira", store.duck)
     store.put_object("col1", "key1", d1)
     store2.put_object("col1", "key1", d2)
