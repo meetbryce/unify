@@ -8,6 +8,7 @@ systems, connectors, and other features.
     help
     help [info, schemas, charts, import, export]
 
+    show connections
     show schemas
     show tables
     show tables from <schema>
@@ -43,7 +44,21 @@ systems, connectors, and other features.
 
     Short-cut for 'select count(*) from <table>'
 
-## Peeking at tables
+## Managing connections
+
+    > connect
+
+Create a new system connection.
+
+    > show connections
+
+List all connections.
+
+    > delete connection
+
+Delete a connection.
+
+## Peeking at tables (currently deprecated)
 
 The special `peek` command makes it easy to see "interesting" data from a table without having
 to know columns names ahead of time. It is similar to using "select * from..." except that
@@ -74,7 +89,11 @@ columns plus additional ones:
 
 ## Charting
 
-    create chart [<name>] [from <chart source>] as <chart type> where x = <col ref> and y = <col ref>
+    > open metabase
+
+Install/open Metabase to do graphical analysis.
+
+    > create chart [<name>] [from <chart source>] as <chart type> where x = <col ref> and y = <col ref>
 
 ## Importing data
 

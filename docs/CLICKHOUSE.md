@@ -1,22 +1,12 @@
 # Mac
 
-Use homebrew to install, add:
+**Don't install from Homebrew as the first is very old.**:
 
-    brew services start clickhouse
+Install Clickhouse per their instructions: https://clickhouse.com/docs/en/install/#self-managed-install
 
-Edit config in:
+Edit ~/unify/unify_config to set your Clickhouse connection parameters:
 
-    cd $(brew --prefix)/etc/clickhouse-server/
-
-Create a local user different than 'default':
-
-    CREATE USER scottp IDENTIFIED WITH plaintext_password BY 'egegeeg'
-
-Let that user do anything for ease of use:
-
-    GRANT ALL ON *.* TO scottp WITH GRANT OPTION;
-
-and set the user in the env:
-
-    DATABASE_USER=scottp
-    
+    DATABASE_BACKEND=clickhouse
+    DATABASE_HOST=??
+    DATABASE_USER=??
+    DATABASE_PASSWORD=??

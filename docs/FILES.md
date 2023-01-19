@@ -28,6 +28,8 @@ The special `LocalFileConnector` implements reading and writing to files on the 
 
 Other sources of files are supported by other connectors:
 
+(**TODO** NOT IMPLEMENTED YET)
+
 ### S3
 
 One or more S3 buckets can be mounted into the file system. This makes files in those buckets visible to the

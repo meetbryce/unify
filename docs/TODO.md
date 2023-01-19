@@ -2,11 +2,12 @@
 
 1. [done] Convert to poetry
 1. [done] Add "connect" interactive flow
-1. Create proper install package
-1. Create a basic usage tutorial
-1. Add background task processing
+1. [done] Create proper install package
+1. [done] Create a basic usage tutorial
+1. [done] Add background task processing
    - Persist log messages and support "show logs ..." command to view them
-1. Add command completion based on current schemas and tables
+   - Implement the table refresh daemon to automatically refresh all tables
+1. [done] Add command completion based on current schemas and tables
 
 ### FileConnector
 

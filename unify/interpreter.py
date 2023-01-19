@@ -741,7 +741,7 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
         """ connect - connect to a new system. """
         specs = sorted(Connection.CONNECTOR_SPECS.keys())
         specs_print = "\n".join(f"{idx+1}: {name}" for idx, name in enumerate(specs))
-        spec_number = self.context.get_input(specs_print + "\nPick an adapter: ")
+        spec_number = self.context.get_input(specs_print + "\nPick a connector: ")
         if spec_number == "":
             return
         adapter_tuple = Connection.CONNECTOR_SPECS[specs[int(spec_number)-1]]
@@ -804,21 +804,25 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
             for m in self.get_help_messages():
                 self.print(m)
             return
-        helps = {
-            "schemas": """Every connected system is represented in the Unify database as a schema.
-            The resources for the system appear as tables within this schema. Initially all tables
-            are empty, but they are imported on demand from the connected system whenver you access
-            the table.
 
-            Some systems support custom commands, which you can invoke by using the schema name
-            as the command prefix. You can get help on the connected system and its commands by
-            typing "help <schema>".
-            """,
-            "charts": """Help for charts"""
-        }
-        msg = helps[help_choice]
-        for l in msg.splitlines():
-            self.print(l.strip())
+        if help_choice == 'charts':
+            webbrowser.open("https://github.com/scottpersinger/unify/docs/CHARTS.md")
+        else:
+            helps = {
+                "schemas": """Every connected system is represented in the Unify database as a schema.
+                The resources for the system appear as tables within this schema. Initially all tables
+                are empty, but they are imported on demand from the connected system whenver you access
+                the table.
+
+                Some systems support custom commands, which you can invoke by using the schema name
+                as the command prefix. You can get help on the connected system and its commands by
+                typing "help <schema>".
+                """,
+                "charts": """Help for charts"""
+            }
+            msg = helps[help_choice]
+            for l in msg.splitlines():
+                self.print(l.strip())
 
     def help_last(self):
         """ ?? - shows column info for tables referenced in the most recent query """
@@ -944,7 +948,7 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
     def open_metabase(self):
         """ open metabase - install and open Metabase to analyze your data """
         ms: MetabaseSetup = MetabaseSetup(
-            unify_home=os.path.expanduser("~/unify"), 
+            unify_home=os.environ['UNIFY_HOME'], 
             prompt_func=self.context.get_input,
             use_duckdb=isinstance(self.duck, DuckDBWrapper),
             duck_db_path=getattr(self.duck, 'db_path', None)

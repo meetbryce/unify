@@ -32,7 +32,7 @@ class Connection:
 
     @staticmethod
     def connections_config_path():
-        return os.path.expanduser("~/unify/unify_connections.yaml")
+        return os.path.join(os.environ['UNIFY_HOME'], "unify_connections.yaml")
 
     @staticmethod
     def connections_config_exists():

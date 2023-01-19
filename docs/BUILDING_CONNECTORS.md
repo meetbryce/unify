@@ -1,4 +1,36 @@
-Unify expects most "connectors" to be implemented by the generic RESTConnector, and configured via the YAML spec file. 
+# Building Unify connectors
+
+Unify expects most "connectors" to be implemented by the generic [RESTConnector](./unify/rest_connector.py), and configured via the YAML spec file. 
+
+## Building a new RESTConnector
+
+Create a new yaml file called `<system>_spec.yaml` and place it in `$HOME/unify/connectors`.
+The easiest approach is to copy an existing connector spec and modify it. The
+[papertrail_spec.yaml](./unify/rest_specs/papertrail_spec.yaml) is a good, simple example.
+
+The required parts of the spec definition include:
+
+* **enabled**: Boolean flag. Must be set to `true` or this spec will be ignored.
+* **name**: The name of the system we are connecting to. Should be simple as it will generally
+get mapped to the database schema.
+* **base_url**: The root address for the system's API
+* **tables**: The list of tables exported by the connector
+  * **-name**: The name of the mapped table
+  * **resource_path**: The path to the specific REST API for this data set
+
+That's it. Once you restart Unify it will recognize the new connector. Use the `connect` command
+to create a connection. 
+
+With the configured info the connector will make GET requests to the indicated API paths and map JSON data to tables.
+Most systems, however, will require authentication. Add the `auth` stanza as described below to
+specify authentication.
+
+If API endpoints support paging, you should add the `paging` strategy described below.
+
+This is enough to build a connector that reads data into a set of tables. To get fresh content 
+from the system Unify will do a complete reload every cycle. This is sufficient for lots of
+cases! But look at the *update stragies* section for information on how to support incremental
+updates in your connector.
 
 ## Authentication
 
@@ -10,9 +42,9 @@ Example auth strategies:
 
     auth:
       type: BASIC
-      parameters:
-        - uservar
-        - tokenvar
+      params:
+        username: Github user email
+        password: Github personal access token 
 
     auth:
       type: PARAMS
@@ -20,12 +52,14 @@ Example auth strategies:
         hapikey: HUBSPOT_API_KEY
 
     auth:
-      type: HEADERS
-      headers:
-        Authorization: "Bearer {HUBSPOT_API_KEY}"
+      type: BEARER
+      params:
+        bearer_token: Hubspot private app token
 
-Authorization parameters can refer to values from the Connection settings either directly by
-name, or with a string and referencing values using `{key}` syntax.
+    auth:
+      type: CUSTOM_AUTH
+
+Connector auth parameters are stored in the `unify_connections.yaml` file. 
 
 ## Paging strategies
 
@@ -65,6 +99,41 @@ on a table spec. Example:
       token_param: after
       page_size: 100
 
+## Update strategies
+
+Each API spec can define a "refresh strategy" which indicates how changes to the
+system should be queried and merged into the local copy.
+
+**Full Reload**
+
+The default and simplest model is simply to perform a full table load again from
+the source system.
+
+    refresh:
+      strategy: reload
+
+**Incremental load**
+
+In this model the REST API must support a filter which returns "all changes since
+time t". The system will track the timestamp and provide it as a filter for the
+next query. The REST resource must also have a unique identifying key. This key is
+used to delete the old record before the new recorded is inserted into the database.
+
+    refresh:
+      strategy: updates
+      params:
+        name: <value expr>
+    key: <column>
+
+The `params` should refer to query parameters for passing the date filter to the
+REST API, using`{timestamp}` to reference the value. For example:
+      params: 
+        filter: updated_at>{timestamp}
+    
+**(future) Change data capture**
+
+If the system support webhooks for broadcasting change events, then Unify can subscribe
+to webhooks to be notified of changes to any records in the source system.
 
 ## The Connector interface
 
@@ -107,41 +176,6 @@ in as well as the source data as a DataFrame.
 
 `close_output_table` - Invoked when all data has been written
 
-## Updates to the source system
-
-Each API spec can define a "refresh strategy" which indicates how changes to the
-system should be queried and merged into the local copy.
-
-**Full Reload**
-
-The default and simplest model is simply to perform a full table load again from
-the source system.
-
-    refresh:
-      strategy: reload
-
-**Incremental load**
-
-In this model the REST API must support a filter which returns "all changes since
-time t". The system will track the timestamp and provide it as a filter for the
-next query. The REST resource must also have a unique identifying key. This key is
-used to delete the old record before the new recorded is inserted into the database.
-
-    refresh:
-      strategy: updates
-      params:
-        name: <value expr>
-    key: <column>
-
-The `params` should refer to query parameters for passing the date filter to the
-REST API, using`{timestamp}` to reference the value. For example:
-      params: 
-        filter: updated_at>{timestamp}
-    
-**(future) Change data capture**
-
-If the system support webhooks for broadcasting change events, then Unify can subscribe
-to webhooks to be notified of changes to any records in the source system.
 
 ## Dynamic tables
 

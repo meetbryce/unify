@@ -1,7 +1,6 @@
-# Notebooks
+# (future work) Notebooks
 
-Unify cribs the concept of "notebooks" as executable scripts from Jupyter. But we introduce our
-own notebook format for internal storage.
+Unify could crib the concept of "notebooks" as executable scripts from Jupyter. 
 
 A notebook is essentially just an ordered list of cells. Each cell has a "type" and so
 we can support both executable command cells as well as markdown cell for annotation.

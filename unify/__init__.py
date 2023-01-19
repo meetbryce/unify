@@ -11,6 +11,7 @@
 #  
 import os
 import os.path
+import webbrowser
 from dotenv import load_dotenv
 
 if 'UNIFY_HOME' not in os.environ:
@@ -23,6 +24,20 @@ if 'DATABASE_BACKEND' not in os.environ:
     print("Welcome to Unify. Do you want to use DuckDB or Clickhouse as your local database?")
     choice = input("1) DuckDB, 2) Clickhouse: ")
     if choice == '2':
+        answer = input("Do you need to install Clickhouse? (y/n): ")
+        if answer == 'y':
+            webbrowser.open("https://clickhouse.com/docs/en/install/#self-managed-install")
+        print("Please enter your Clickhouse credentials:")
+        host = input("Host name [localhost]: ")
+        username = input("Username [default]: ")
+        password = input("Password: ")
+        if not host:
+            host = "localhost"
+        if not username:
+            username = "default"
+        os.environ['DATABASE_HOST'] = host
+        os.environ['DATABASE_USER'] = username
+        os.environ['DATABASE_PASSWORD'] = password
         os.environ['DATABASE_BACKEND'] = 'clickhouse'
     else:
         os.environ['DATABASE_BACKEND'] = 'duckdb'

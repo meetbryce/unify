@@ -1,6 +1,6 @@
 ## Testing
 
-Tests are in the [tests](./tests) folder. They use `pytest`.
+Tests are in the [tests](./unify/tests) folder. They use `pytest`.
 They may need some environment variables to be set. To be
 compatible with VSCode I keep them in a local .env file and
 use:
@@ -13,23 +13,24 @@ Simply run `pytest` to run the tests.
 
 ## Parser
 
-Unify builds its own command interpreter on top of DuckDB, so that it can offer extended operations and syntax without modifying DuckDB.
-
-The parser uses the `lark` package. Find the grammer in [grammark.lark](grammar.lark). Tests for the gammar are in [tests/test_parser.py](tests/test_parser.py).
-
+The parser uses the `lark` package. Find the grammer in [grammark.lark](grammar.lark). Tests for the gammar are in [unify/tests/test_parser.py](unify/tests/test_parser.py).
 
 
 ## Class model
 
 An `Connector` is the manager object which implements a connection to a particular
-cloud system. The Connector is a logical entity that is configured via the
-`connector spec` YAML file. Each connector has a name which identifies the cloud
-system that it connects to, like "Github" or "Salesforce".
+cloud system. Most connectors re-use the generic `RESTConnector` class and configure
+an instance from their yaml file. 
 
-Some connectors will be implemented by a dedicated class, but most connectors are just
-configured instances of the generic RESTConnector. This allows us to implement
-new connectors just by creating a new connector spec YAML file. Spec files that omit
-the `class` property will use `RESTConnector` by default.
+It is possible to implement new connectors in code by implementing the 
+[Connector](./unify/connectors.py) and `TableDef` interfaces. 
+
+Each Connector represents the data sets that it can produce via the `TableDef` class.
+So we ask the connector for its "virtual tables" via `list_tables` and get a list of
+TableDefs back. To load the table (pull data from the underlying API and populate
+our local db) we use the `TableLoader` class from the `loading` module. This class implements
+re-usable logic for loading data from APIs, where the connector's TableDef is responsible
+for talking to the specific API.
 
 Our list of `Connectors` is created by enumerating the spec files in the `rest_specs`
 directory and constructing an connector instance for each one. Each connector instance
@@ -41,21 +42,8 @@ A `Connection` represents an active, authorized connection to a cloud system. A
 connection has a name which is also used as the schema name to organize the tables
 that pull data from that system. Each Connection references the Connector which is
 used to talk to the source system. The Connection supplies account-specific authentication
-information to the Connector.
-
-There is a singular `Connection` class whose instances represent the list of active
-connections. These instances are configured via the `connections.yaml` file. The configuration
-also supplies values for the "auth vars" needed by the connector. These can either be
-hard-coded values or references on env vars.
-
-We don't ever use "Connector" to avoid confusion!
-
-Each Connector represents the data sets that it can produce via the `TableDef` class.
-So we ask the connector for its "virtual tables" via `list_tables` and get a list of
-TableDefs back. To load the table (pull data from the underlying API and populate
-our local db) we use the `TableLoader` class from the `loading` module. This class implements
-re-usable logic for loading data from APIs, where the connector's TableDef is responsible
-for talking to the specific API.
+information to the Connector. In this way we can have multiple **connections** to the
+same type of system if desired.
 
 Most connections will re-use our RESTConnector.
 
@@ -66,7 +54,7 @@ loading jobs async is much harder to debug.
 
 Therefore by default the interpreter runs loading jobs in the command process, but on a
 background thread. The command process waits by default and shows a progress bar while
-the lob job is running. The user can "push" the job to background in which case the command
+the lob job is running. The user can "push" the job to the background in which case the command
 process simply stops waiting for the loading thread.
 
 This works well, and allows the user to load multiple tables simultaneously. 

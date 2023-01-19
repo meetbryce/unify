@@ -1,13 +1,11 @@
 # Multi-tenancy
 
-We anticipate handling multi-tenancy in three forms:
+(Thoughts on how a multi-tenant version of Unify could work.)
 
-1. When using DuckDB we will create a separate database file for each tenant.
+1. When using DuckDB we can create a separate database file for each tenant.
 
 2. For efficient multi-tenancy with Clickhouse we will package multiple tenants onto
 the same database server instance.
-
-3. For enterprise cases we can devote a dedicated Clickhouse server.
 
 ## Clickhouse multi-tenant
 

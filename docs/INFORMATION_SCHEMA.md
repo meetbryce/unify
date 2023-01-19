@@ -104,6 +104,7 @@ The advantage of "table dependence" is that we just have to record data for each
 and then traverse the relationships to understand the provenance.
 
 ## Pull or push
+(Future work...)
 
 We really want to be able to 'pull' results through the system. Basically I have an output
 target that I want created:
@@ -119,10 +120,6 @@ updated hourly).
 The generation of these reports should "pull" the dependent data through the system. That is,
 I should trace through the data sets used by the reports back ultimately to connector tables, refresh the data from those connectors, then run any intermediate transformation steps, and
 then re-generate the report.
-
-So I have:
-
-**report** This is the fundamental thing that I want to create.
 
 
     
