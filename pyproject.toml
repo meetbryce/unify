@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "unifydb"
-version = "0.2.2"
+version = "0.2.3"
 description = "Your personal data warehouse"
 authors = ["Scott Persinger <scottpersinger@gmail.com>"]
 readme = "README.md"
