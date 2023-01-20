@@ -208,34 +208,6 @@ def test_clickhouse_blobs():
 	client.insert_dataframe('INSERT INTO test6 VALUES', df, settings={'use_numpy': True})
 
 
-def test_school():
-	from bs4 import BeautifulSoup
-
-	UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36"
-	headers = {"user-agent": UA}
-	login = "https://login.jupitered.com/login/index.php"
-	params = {"studid1": "Drew Persinger", "text_password":"XpsPezBm78V5",
-			"access1":"1", "school1":"11907","city1":"Berkeley", "doit":"checkparent",
-			"from":"login","loginpage":"parent", "username1":""}
-
-	s = requests.Session()
-	r = s.post(login, data=params, headers=headers)
-	print(r.status_code)
-	print(r.url)
-	time.sleep(0.5)
-
-	soup = BeautifulSoup(r.text, 'html.parser')
-	if soup.find(id='mainpage') is not None or True:
-		print('Successfully logged in')
-		todo = "https://login.jupitered.com/0/student.php"
-		data = {"from":"inbox", "to":"todo", "stud":"5321673","school":"11907","year":"20222023"}
-		r2 = s.post(todo, data=data, headers=headers)
-		print(r.status_code)
-		print(r.text)
-
-	else:
-		print('Authentication Error')
-
 def test_aws_cost_api():
 	logging.basicConfig()
 	logging.getLogger().setLevel(logging.DEBUG)
@@ -403,27 +375,6 @@ def dump_duck():
 
 	#duck = duckdb.connect('/tmp/duckmeta', read_only=False)
 	#dump_tables(duck)
-
-def atlas_query():
-	session = requests.Session()
-	session.auth = ("scott@tatari.tv", "IWaomeSnHaXvJYE0Cp1O9D83")
-
-	body = """
-		{
-			"operationName":"ProjectDirectoryEmbedTQL",
-			"variables": {
-				"tql":"(archived = false) AND ((watcher = '5ddc151305eece0d09200c65'))",
-				"sort":["NAME_ASC"],
-				"workspaceId":"V29ya3NwYWNlOjIxNjI",
-				"first":40
-			},
-			"query":"query ProjectDirectoryEmbedTQL($tql: String!, $workspaceId: ID, $after: String, $first: Int, $sort: [ProjectSortEnum]) {\n  projectSearch: projectTql(first: $first, after: $after, q: $tql, workspaceId: $workspaceId, sort: $sort) {\n    count\n    pageInfo {\n      hasNextPage\n      startCursor\n      endCursor\n      __typename\n    }\n    edges {\n      node {\n        ...ProjectListRowEmbedFragment\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n\nfragment ProjectListRowEmbedFragment on Project {\n  id\n  uuid\n  name\n  key\n  private\n  creationDate\n  targetDate\n  targetDateConfidence\n  iconUrl {\n    square {\n      light\n      dark\n      __typename\n    }\n    __typename\n  }\n  newPhase {\n    id\n    displayName\n    name\n    __typename\n  }\n  status {\n    id\n    displayName\n    name\n    __typename\n  }\n  owner {\n    ...UserFields\n    __typename\n  }\n  __typename\n}\n\nfragment UserFields on User {\n  id\n  aaid\n  pii {\n    name\n    nickname\n    picture\n    accountStatus\n    email\n    extendedProfile {\n      jobTitle\n      __typename\n    }\n    __typename\n  }\n  __typename\n}\n"
-		}
-	"""
-	url = "https://team.atlassian.com/gateway/api/watermelon/graphql?operationName=ProjectDirectoryEmbedTQL"
-	r = session.post(url, data=body)
-	
-	print(r.json())
 
 def run_metabase():
 	use_docker = True
