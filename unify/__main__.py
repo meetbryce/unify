@@ -2,10 +2,12 @@ import os
 import sys
 import pandas as pd
 
+from .config import load_configuration
+load_configuration()
+
 from .interpreter import CommandInterpreter
 from .command_repl import UnifyRepl
-
-    
+   
 def main():
     if '-silent' in sys.argv:
         silent = True

@@ -2,7 +2,7 @@ import time
 from sqlalchemy.orm.session import Session
 
 from .storage_manager import StorageManager
-from .db_wrapper import DBManager, ConnectorMetadata
+from .db_wrapper import DBManager, ConnectorMetadata, dbmgr
 
 class UnifyDBStorageManager(StorageManager):
     """
@@ -17,7 +17,6 @@ class UnifyDBStorageManager(StorageManager):
         return self.duck
         
     def put_object(self, collection: str, id: str, values: dict) -> None:
-        from unify import dbmgr
         with dbmgr() as duck:
             with Session(bind=duck.engine) as session:
                 # Good to remember that Clickhouse won't enforce unique keys!
@@ -34,7 +33,6 @@ class UnifyDBStorageManager(StorageManager):
                 session.commit()
 
     def get_object(self, collection: str, id: str) -> dict:
-        from unify import dbmgr
         with dbmgr() as duck:
             with Session(bind=duck.engine) as session:
                 rec = session.query(ConnectorMetadata).filter(
@@ -45,7 +43,6 @@ class UnifyDBStorageManager(StorageManager):
                     return rec.values
 
     def delete_object(self, collection: str, record_id: str) -> bool:
-        from unify import dbmgr
         with dbmgr() as duck:
             with Session(bind=duck.engine) as session:
                 session.query(ConnectorMetadata).filter(
@@ -58,7 +55,6 @@ class UnifyDBStorageManager(StorageManager):
                 time.sleep(0.1)
 
     def list_objects(self, collection: str) -> list[tuple]:
-        from unify import dbmgr
         with dbmgr() as duck:
             with Session(bind=duck.engine) as session:
                 return [

@@ -66,3 +66,13 @@ tables:
     params:
       owner,repo: sql@(select owner_login, name from repos)
     copy_params_to_output: [repo]
+  - name: repo_events
+    query_resource: GET /networks/{owner}/{repo}/events
+    supports_paging: true
+    params:
+      owner,repo: sql@(select owner_login, name from repos)
+  - name: org_events
+    query_resource: GET /orgs/{org}/events
+    supports_paging: true
+    params:
+      org: sql@(select login from orgs)
