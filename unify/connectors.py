@@ -406,7 +406,7 @@ class Connector:
                 connection_opts
             )
         for k, value in connection_opts.items():
-            if value and value.startswith("$"):
+            if isinstance(value,str) and value.startswith("$"):
                 try:
                     value = os.environ[value[1:]]
                     connection_opts[k] = value

@@ -44,6 +44,7 @@ altair-viewer = "^0.4.0"
 nb2mail-unify = "^0.6"
 duckdb-engine = "^0.6.8"
 python-dotenv = "^0.21.0"
+requests-oauth2client = "^1.1.0"
 
 
 [tool.poetry.group.dev.dependencies]

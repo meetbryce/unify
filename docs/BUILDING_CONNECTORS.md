@@ -59,7 +59,33 @@ Example auth strategies:
     auth:
       type: CUSTOM_AUTH
 
+    auth:
+      type: OAUTH
+      params:
+        client_id: The Quickbooks oauth app client ID
+        client_secret: The Quickbooks oauth app client secret
+      defaults:
+        authorization_endpoint: https://appcenter.intuit.com/connect/oauth2
+        token_endpoint: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+        oauth_scopes: [com.intuit.quickbooks.accounting, openid, profile, email, phone, address]
+
 Connector auth parameters are stored in the `unify_connections.yaml` file. 
+
+### Using Oauth for authentication
+
+To use Oauth for a connector, generally you will need these pieces:
+
+1. Configure an _Oauth app_ within the target system. When you configure the app, specify
+```http://localhost:4563/oauth/<connector name>``` as the callback (or 'redirect') URL.
+
+2. Creating the app should generate a **client ID** and **client secret**. You should
+specify these when creating a new connection (using the `connect` command).
+
+3. You will need to know the _authorization endpoint_ and the _token endpoint_ for the
+target service. You can specify these as `defaults` to your connector.
+
+4. If the Oauth connection requires scopes, you can define `oauth_scopes` for your
+connector (either as a connection parameter or a default).
 
 ## Paging strategies
 

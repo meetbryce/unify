@@ -37,7 +37,6 @@ from unify.rest_connector import (
 )
 from unify.db_wrapper import (
     ConnectionScan,
-    ColumnInfo,
     dbmgr,
     DBManager, 
     DBSignals,

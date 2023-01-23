@@ -1,0 +1,52 @@
+enabled: true
+name: quickbooks
+base_url: https://sandbox-quickbooks.api.intuit.com
+auth:
+  type: OAUTH
+  params:
+    client_id: The Quickbooks oauth app client ID
+    client_secret: The Quickbooks oauth app client secret
+    realm_id: Specify the company (realm) ID
+  defaults:
+    authorization_endpoint: https://appcenter.intuit.com/connect/oauth2
+    token_endpoint: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
+    oauth_scopes: [com.intuit.quickbooks.accounting, openid, profile, email, phone, address]
+tables:
+  - name: accounts
+    resource_path: /v3/company/{realm_id}/query
+    params:
+      query: select * from Account
+      realm_id: ${realm_id}
+    result_body_path: QueryResponse.Account
+  - name: bills
+    resource_path: /v3/company/{realm_id}/query
+    params:
+      query: select * from Bill
+      realm_id: ${realm_id}
+    result_body_path: QueryResponse.Bill
+  - name: customers
+    resource_path: /v3/company/{realm_id}/query
+    params:
+      query: select * from Customer
+      realm_id: ${realm_id}
+    result_body_path: QueryResponse.Customer
+  - name: employees
+    resource_path: /v3/company/{realm_id}/query
+    params:
+      query: select * from Employee
+      realm_id: ${realm_id}
+    result_body_path: QueryResponse.Employee
+  - name: invoices
+    resource_path: /v3/company/{realm_id}/query
+    params:
+      query: select * from Invoice
+      realm_id: ${realm_id}
+    result_body_path: QueryResponse.Invoice
+  - name: invoice_lines
+    resource_path: /v3/company/{realm_id}/query
+    params:
+      query: select * from Invoice
+      realm_id: ${realm_id}
+    result_body_path: QueryResponse.Invoice.Line
+    result_meta_paths: ["QueryResponse.Invoice.Id"]
+

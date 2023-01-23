@@ -1,5 +1,6 @@
 from cgi import parse_multipart
 import copy
+import http.server
 import json
 import logging
 import logging.handlers
@@ -14,12 +15,14 @@ import typing
 from datetime import datetime
 from collections.abc import Iterable
 from collections import namedtuple
+import webbrowser
 
 import requests
 from jsonpath_ng import parse
 
 from google.oauth2.credentials import Credentials
 import google.auth.transport.requests
+from requests_oauth2client import OAuth2Client, AuthorizationRequest, BearerToken
 
 from .storage_manager import StorageManager
 from .data_utils import interp_dollar_values, flatten_dict
@@ -32,6 +35,8 @@ from .connectors import (
     RESTView,
     UpdatesStrategy, 
 )
+
+logger: logging.Logger = logging.getLogger('unify')
 
 class RESTCol:
     def __init__(self, dictvals):
@@ -409,12 +414,15 @@ class RESTTable(TableDef):
                             accum.update(dict(zip(param_cols, row)))
                         yield from emit_params(accum.copy(), params, pos+1)
                 else:
-                    accum[pname] = value
+                    accum[pname] = self.sub_variables(value)
                     yield from emit_params(accum, params, pos+1)
 
         yield from emit_params({}, list(params.items()))
 
-                    
+
+    def sub_variables(self, value: str):
+        return self.spec.sub_variables(value)
+
     def _query_resource(
         self, 
         tableLoader,
@@ -426,6 +434,7 @@ class RESTTable(TableDef):
         session = requests.Session()
         self.spec._setup_request_auth(session)
         session.headers.update(self.headers)
+        session.headers.update({"Accept" : "application/json"})
 
         pager = PagingHelper.get_pager(self.paging_options)
         
@@ -460,6 +469,8 @@ class RESTTable(TableDef):
 
             if r.status_code >= 400:
                 print(r.text)
+                print("Request: ", r.request.url)
+                print("headers: ", r.request.headers)
             if r.status_code == 404:
                 logger.error(f"%s 404 returned from {url}", self.name)
                 return
@@ -524,6 +535,8 @@ class RESTConnector(Connector):
         self.auth = copy.deepcopy(spec.get('auth', {}))
         self.auth_spec = spec.get('auth', {})
         self.help = spec.get('help', None)
+        self._oauth_client: OAuth2Client = None
+        self._oauth_request: AuthorizationRequest = None
 
         self.dateParserFormat = spec.get('dateParser')
         self.query_date_format = spec.get('queryDateFormat')
@@ -555,6 +568,17 @@ class RESTConnector(Connector):
                     raise RuntimeError(f"Missing one of name, from or query from view: {d}")                   
 
 
+    def sub_variables(self, value: str) -> str:
+        m = re.search(r"\$\{([\w_]+)\}", value)
+        if m:
+            var_name = m.group(1)
+            auth_defaults = self.auth.get('defaults', {})
+            auth_params = self.auth.get('params', {})
+
+            return auth_defaults.get(var_name, auth_params.get(var_name, value))
+        else:
+            return value
+        
     def get_config_parameters(self) -> dict:
         """ Returns a dict mapping config parameter names to descriptions. """
         return self.auth_spec.get('params', {})
@@ -606,6 +630,12 @@ class RESTConnector(Connector):
                     self.creds.apply(session.headers)
                 except google.auth.exceptions.RefreshError:
                     raise
+        elif authType == 'OAUTH':
+            # load access and refresh token from cached file
+            if self.oauth_tokens:
+                session.headers.update({"Authorization": f"bearer {self.oauth_tokens.access_token}"})
+            else:
+                raise RuntimeError("Auth type is OAUTH but no tokens have been loaded.")
         elif authType == 'NONE':
             pass
         else:
@@ -614,6 +644,8 @@ class RESTConnector(Connector):
     def validate(self) -> bool:
         # Make sure all auth parameters have been supplied
         auth_params = self.auth.get('params')
+        if self.auth['type'] == 'OAUTH':
+            self.validate_oauth()
         if auth_params is None:
             return True
         for k, v in auth_params.items():
@@ -621,6 +653,94 @@ class RESTConnector(Connector):
                 raise RuntimeError(f"Cannot validate auth for {self.name} adapter, missing required auth parameter: {k}")
         return True
 
+    def get_oauth_client(self) -> OAuth2Client:
+        if self._oauth_client:
+            return self._oauth_client
+        auth_defaults = self.auth.get('defaults', {})
+        auth_params = self.auth.get('params', {})
+
+        if 'token_endpoint' not in auth_defaults:
+            raise RuntimeError(f"Missing token_endpoint in auth defaults for {self.name} adapter")
+        if 'client_id' not in auth_params:
+            raise RuntimeError(f"Missing client_id in auth params for {self.name} adapter")
+        if 'client_secret' not in auth_params:
+            raise RuntimeError(f"Missing client_secret in auth params for {self.name} adapter")
+        
+        self._oauth_client: OAuth2Client = OAuth2Client(
+            token_endpoint=auth_defaults['token_endpoint'],
+		    auth=(auth_params['client_id'], auth_params['client_secret'])
+        )
+        return self._oauth_client
+
+    def get_oauth_request(self) -> AuthorizationRequest:
+        if self._oauth_request:
+            return self._oauth_request
+        auth_defaults = self.auth.get('defaults', {})
+        auth_params = self.auth.get('params', {})
+
+        if 'authorization_endpoint' not in auth_defaults:
+            raise RuntimeError(f"Missing authorization_endpoint in auth defaults for {self.name} adapter")
+        if 'client_id' not in auth_params:
+            raise RuntimeError(f"Missing client_id in auth params for {self.name} adapter")
+        if 'oauth_scopes' not in auth_params and 'oauth_scopes' not in auth_defaults:
+            raise RuntimeError(f"Missing oauth_scopes in auth params for {self.name} adapter")
+        
+        self._oauth_request = AuthorizationRequest(
+            auth_defaults['authorization_endpoint'], 
+            auth_params['client_id'],
+            redirect_uri=f"http://localhost:4563/oauth/{self.name}",
+            scope=auth_params.get('oauth_scopes', auth_defaults.get('oauth_scopes'))
+        )
+        return self._oauth_request
+
+    def oauth_tokens_path(self) -> str:
+        return os.path.join(os.environ['UNIFY_HOME'], f"oauth_tokens_{self.name}.json")
+    
+    def validate_oauth(self):
+        # If cached tokens file exists, then load it and try to refresh the token
+        # If file doesn't exist or refresh fails then run the web Authentication grant flow
+        oauth_tokens_path = self.oauth_tokens_path()
+        if os.path.exists(oauth_tokens_path):
+            logger.debug(f"Refreshing Oauth tokens for connector '{self.name}'")
+            with open(oauth_tokens_path, 'r') as f:
+                raw_tokens = json.load(f)
+                self.oauth_tokens = BearerToken(**raw_tokens)
+                if self.oauth_tokens.refresh_token:
+                    # catch and log error
+                    self.oauth_tokens = self.get_oauth_client().refresh_token(self.oauth_tokens)
+                    self.save_oauth_tokens()
+        else:
+            client = self.get_oauth_client()
+            req = self.get_oauth_request()
+            # run http server listener on port 4563
+            class MyHandler(http.server.BaseHTTPRequestHandler):
+                def do_GET(self):
+                    if '/oauth' in self.path:
+                        self.server.oauth_response_uri = self.path
+                        print("GET path = ", self.path)
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"Authentication successful, you can close this tab now.")
+                    self.server.shutdown()
+            
+            server = http.server.ThreadingHTTPServer(('localhost', 4563), MyHandler)
+            setattr(server, 'oauth_response_uri', None)
+            input("Press Enter to open browser for Oauth authentication of '{self.name}' connector...")
+            webbrowser.open(str(req))
+            print("Listening on port 4563, waiting for oauth redirect response...")
+            server.serve_forever()
+            # NOTE: Quickbooks returns the "realmId" in the query string, which is needed for later calls
+            # but is not part of the Oauth spec. We should define a config for that.
+            auth_response = req.validate_callback(server.oauth_response_uri)
+            self.oauth_tokens = client.authorization_code(auth_response)
+            self.save_oauth_tokens()
+
+    def save_oauth_tokens(self):
+        if self.oauth_tokens:
+            with open(self.oauth_tokens_path(), 'w') as f:
+                json.dump(self.oauth_tokens.as_dict(), f)
+
+	
     def test_connection(self, logger: logging.Logger):
         # Used to verify valid auth for a new connection
         class DetectErrorHandler(logging.NullHandler):

@@ -438,32 +438,27 @@ def test_progress_bar():
 			if cancel[0]:
 				break
 
-test_progress_bar()
+def test_quickbooks():
+	from requests_oauth2client import OAuth2Client, AuthorizationRequest
+	import webbrowser
 
+	oauth2client = OAuth2Client(token_endpoint=os.environ['QB_TOKEN_URL'],
+		auth=(os.environ['QUICKBOOKS_CLIENT_ID'], os.environ['QUICKBOOKS_CLIENT_SECRET']))
 
-bottom_toolbar = HTML(' <b>[f]</b> Print "f" <b>[x]</b> Abort.')
+	auth_request = AuthorizationRequest(os.environ['QB_AUTH_URL'], 
+				os.environ['QUICKBOOKS_CLIENT_ID'],
+				redirect_uri=os.environ['QB_REDIRECT_URL'],
+				scope="com.intuit.quickbooks.accounting")
+	webbrowser.open(str(auth_request))
 
-# Create custom key bindings first.
-kb = KeyBindings()
-cancel = [False]
+	url = input("Enter the full redirect URL: ")
+	# Exchange the authorization code for an access token
+	auth_response = auth_request.validate_callback(url)
+	token = oauth2client.authorization_code(auth_response)
+	print("Access token: ", token.as_dict())
+	breakpoint()
+	new_token = oauth2client.refresh_token(token)
+	print("New Access token: ", new_token.as_dict())
 
-@kb.add('f')
-def _(event):
-    print('You pressed `f`.')
+test_quickbooks()
 
-@kb.add('x')
-def _(event):
-    " Send Abort (control-c) signal. "
-    cancel[0] = True
-    #os.kill(os.getpid(), signal.SIGINT)
-
-# Use `patch_stdout`, to make sure that prints go above the
-# application.
-with patch_stdout():
-    with ProgressBar(key_bindings=kb, bottom_toolbar=bottom_toolbar) as pb:
-        for i in pb(range(800)):
-            time.sleep(.01)
-
-            # Stop when the cancel flag has been set.
-            if cancel[0]:
-                break
