@@ -4,6 +4,7 @@ import os
 from pprint import pprint
 import re
 import functools
+import sys
 import time
 import threading
 import typing
@@ -167,6 +168,10 @@ class ParserVisitor(Visitor):
         if subject:
             self._the_command_args['subject'] = subject.strip("'")
 
+    def exit_command(self, tree):
+        self._the_command = "exit_command"
+        return tree
+    
     def export_table(self, tree):
         self._the_command = "export_table"
         self._the_command_args['table_ref'] = collect_child_text("table_ref", tree, full_code=self._full_code)
@@ -894,6 +899,10 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
             self.print(f"Emailing {email_object} to {recipients}")
             fname = email_object.replace(".", "_") + ".csv"
             self._get_email_helper().send_table(df, fname, recipients, subject)
+
+    def exit_command(self):
+        """ exit - exits the application (or 'quit') """
+        sys.exit(0)
 
     def export_table(self, connector_ref, table_ref, file_ref, write_option=None):
         """ export <table> <adapter> <file> [append|overwrite] - export a table to a file """

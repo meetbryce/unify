@@ -79,11 +79,16 @@ class PagingHelper:
             return OffsetAndCountPager(options)
         elif options['strategy'] == 'pagerToken':
             return PagerTokenPager(options)
+        elif options['strategy'] == 'nextLink':
+            return NextLinkPager(options)
         else:
             raise RuntimeError("Unknown paging strategy: ", options)
 
     def next_page(self, last_page_size: int, json_result: Union[dict, list]) -> bool:
         return False
+    
+    def request_url(self, url: str) -> str:
+        return url
 
 class NullPager(PagingHelper):
     def __init__(self, options):
@@ -160,6 +165,26 @@ class PagerTokenPager(PagingHelper):
             return self.current_token is not None
         return False
 
+class NextLinkPager(PagingHelper):
+    # Finds the link to the next page of results inside the result body from a request
+    def __init__(self, options):
+        super().__init__(options)
+        if 'pager_link_path' not in options:
+            raise RuntimeError("pager_link_path not specified in options")
+        if 'count_param' not in options:
+            raise RuntimeError("count_param not specified in options")
+        self.count_param = options['count_param']
+        self.token_expr = parse(options['pager_link_path'])
+        self.next_link: str = None
+
+    def request_url(self, url: str) -> str:
+        return self.next_link
+
+    def next_page(self, last_page_size: int, json_result: Union[dict, list]) -> bool:
+        for match in self.token_expr.find(json_result):
+            self.next_link = match.value
+            return self.next_link is not None
+        return False
 
 class RESTTable(TableDef):
     VALID_KEYS = {
@@ -452,6 +477,7 @@ class RESTTable(TableDef):
                 raise RuntimeError(f"Cannot query API resource '{url}' because missing API param from: {api_params}. {e}")
 
             api_params.update(pager.get_request_params())
+            url = pager.request_url(url)
             
             if self.post:
                 remove_keys = []

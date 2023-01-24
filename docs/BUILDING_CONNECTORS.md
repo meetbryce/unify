@@ -127,6 +127,12 @@ on a table spec. Example:
       token_param: after
       page_size: 100
 
+    paging:
+      strategy: nextLink
+      pager_link_path: pages.next
+      count_param: limit
+      page_size: 100
+      
 ## Versioning
 
 There are two senses of 'version' to keep in mind. One is the version of the Unify interpreter - a

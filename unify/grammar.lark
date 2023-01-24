@@ -38,6 +38,7 @@ command: show_tables
          | connect_command
          | system_command
          | open_command
+         | exit_command
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
 
@@ -142,6 +143,8 @@ system_command: "system" WS sys_command
 open_command: "open" WS open_target
 
 open_target: ANY
+
+exit_command: "exit" | "quit"
 
 sys_command: "status" | "stop daemon" | "restart daemon" | "cancel"
 

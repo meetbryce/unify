@@ -4,7 +4,8 @@ from unify.rest_connector import (
     PageAndCountPager, 
     OffsetAndCountPager, 
     NullPager, 
-    PagerTokenPager
+    PagerTokenPager,
+    NextLinkPager
 )
 
 def test_pagers():
@@ -93,5 +94,31 @@ def test_token_pager():
     assert pager.get_request_params() == {"next": "page2", "limit": 25}
     assert pager.next_page(25, page2) == False
 
+def test_link_pager():
+    pager = PagingHelper.get_pager(
+        {"strategy": "nextLink", 
+        "pager_link_path": "results[*].subd.nextPage", 
+        "count_param":"limit",
+        "token_param":"next",
+        "page_size":25
+        }
+    )
+    assert isinstance(pager, NextLinkPager)
+    assert pager.page_size == 25
+
+    page1 = {
+        "results": [
+            {
+                "fields": {"field1": "one", "field2": "two"},
+                "subd": {"nextPage": "http://example.com/page2"}
+            },
+            {
+                "fields": {"field1": "one", "field2": "two"},
+            },
+        ]
+    }
+    assert pager.next_page(25, page1) == True
+    url = "http://yahoo.com"
+    assert pager.request_url(url) == "http://example.com/page2"
     
 
