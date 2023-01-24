@@ -51,6 +51,7 @@ class LoaderJobHandler(logging.Handler):
             return "No log record"
 
 setup_job_log_handler(LoaderJobHandler())
+last_content: str = ""
 
 class UnifyRepl:
     def __init__(self, interpreter: CommandInterpreter, wide_display=False):
@@ -64,14 +65,17 @@ class UnifyRepl:
         kb = KeyBindings()
         @kb.add('enter', filter=has_focus(DEFAULT_BUFFER))
         def handle_enter(event):
+            global last_content
             # Your stuff.
             content = session.default_buffer.text.strip()
-            if content.startswith("select") and not content.endswith(";"):
+            if len(content) > len(last_content) and content.startswith("select") and not content.endswith(";"):
                 session.default_buffer.insert_text("\n")
+                last_content = content
                 return
             else:
                 # Call the original handler.
-                print(session.default_buffer.text)
+                #print(session.default_buffer.text)
+                last_content = ""
                 session.default_buffer.validate_and_handle()
 
         session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")), key_bindings=kb)
