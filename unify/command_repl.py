@@ -10,6 +10,11 @@ from prompt_toolkit import prompt, PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.patch_stdout import patch_stdout
+from pygments.lexers.sql import SqlLexer
+from prompt_toolkit.lexers import PygmentsLexer
+from prompt_toolkit.filters import has_focus
+from prompt_toolkit.enums import DEFAULT_BUFFER
+from prompt_toolkit.key_binding import KeyBindings
 
 from .interpreter import CommandInterpreter, CommandContext, setup_job_log_handler
 
@@ -56,7 +61,20 @@ class UnifyRepl:
             pd.set_option('display.width', 1000)
 
     def loop(self):
-        session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")))
+        kb = KeyBindings()
+        @kb.add('enter', filter=has_focus(DEFAULT_BUFFER))
+        def handle_enter(event):
+            # Your stuff.
+            content = session.default_buffer.text.strip()
+            if content.startswith("select") and not content.endswith(";"):
+                session.default_buffer.insert_text("\n")
+                return
+            else:
+                # Call the original handler.
+                print(session.default_buffer.text)
+                session.default_buffer.validate_and_handle()
+
+        session = PromptSession(history=FileHistory(os.path.expanduser("~/.pphistory")), key_bindings=kb)
         suggester = AutoSuggestFromHistory()
         try:
             with patch_stdout():
@@ -67,6 +85,7 @@ class UnifyRepl:
                             completer=self.interpreter.get_prompt_completer(), 
                             bottom_toolbar=LoaderJobHandler.toolbar,
                             refresh_interval=1.0,
+                            lexer=PygmentsLexer(SqlLexer)
                         )
                         if cmd.strip() == "":
                             continue

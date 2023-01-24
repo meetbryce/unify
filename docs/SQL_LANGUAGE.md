@@ -44,6 +44,10 @@ systems, connectors, and other features.
 
     Short-cut for 'select count(*) from <table>'
 
+    > select * from schema1.users!
+
+    Append '!' to your query to show columns as full width (they are truncated by default).
+
 ## Managing connections
 
     > connect

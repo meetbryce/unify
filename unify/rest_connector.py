@@ -35,6 +35,7 @@ from .connectors import (
     RESTView,
     UpdatesStrategy, 
 )
+from .features import Features
 
 logger: logging.Logger = logging.getLogger('unify')
 
@@ -545,6 +546,10 @@ class RESTConnector(Connector):
         self.next_page_token = spec.get('next_page_token')
         self.throttle = spec.get('throttle')
 
+        self.requires = spec.get('requires')
+        if isinstance(self.requires, str):
+            self.requires = re.split(r"[, ]+", self.requires)
+
         if "tables" in spec:
             self.tables = [RESTTable(self, d) for d in spec['tables']]
         else:
@@ -642,6 +647,13 @@ class RESTConnector(Connector):
             raise Exception(f"Error unknown auth type: {authType}")
 
     def validate(self) -> bool:
+        # Make sure all interpreter features are supported
+        if self.requires:
+            for feature in self.requires:
+                if not Features.has_feature(feature):
+                    print(f"Cannot validate {self.name} adapter, missing required feature: {feature}")
+                    return False
+
         # Make sure all auth parameters have been supplied
         auth_params = self.auth.get('params')
         if self.auth['type'] == 'OAUTH':

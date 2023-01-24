@@ -7,26 +7,40 @@ base_url: https://api.github.com
 # Authorization is specified with the 'auth' dictionary:
 #
 auth:
-  type: BASIC # one of NONE, BASIC, BEARER, HEADERS, PARAMS, or AWS4Auth
-  uservar: USER
-  tokenvar: PASSWORD
+  type: BASIC # one of NONE, BASIC, BEARER, HEADERS, PARAMS, OAUTH, or AWS4Auth
+  params:
+    username: System specific attribute name help message
+    password: System specific attribute name help message
   # The other keys depend on the auth type.
   # BASIC:
-  #   uservar: <the user name>
-  #   tokenvar: <the auth token>
+  #   username: <the user name>
+  #   password: <the auth token>
   # BEARER:
-  #    tokenvar: <the auth token>
+  #    bearer_token: <the auth token>
   # HEADERS:
   #    Each key, value is passed as a header
   # PARAMS:
   #    Each key, value is passed a a URL parameter
+  # OAUTH:
+  #    client_id:
+  #    client_secret:
+  #    authorization_endpoint: 
+  #    token_endpoint: 
+  #    oauth_scopes: 
+  #
   # AWS4Auth:
   #    access_id: <access key id>
   #    secret_key: <access secret key>
   #    region: <AWS region>
   #    service: # the 2 letter AWS service name
-  # Typically each value specifies an *option key* that will be defined in the connections.yaml 
-  # config file.
+  # 
+  # In `unify_connections.yaml` a value will be specified for each param.
+  #
+  # You can also use `defaults` to configure static values for the connector that
+  # don't need to be set for each connection:
+  #     defaults:
+  #       key1: value1
+  #       key2: value2
 #
 # Pagination is controlled by the *paging* dictionary
 #
@@ -100,7 +114,7 @@ tables:
     result_body_path: results.inner_value
     # and you want to include column "tag_name=foo" in each record, you can specify the
     # path to this additional field:
-    result_meta_paths: [["results", "tag_name"]]
+    result_meta_paths: ["results.tag_name"]
     # Now your resulting records will look like:
     #    field1         tag_name
     #    ---------      ----------
@@ -131,6 +145,10 @@ tables:
     resource_path: /v1/{org}/users
     params:
       org: AcmeCo
+    # Use ${option} to refer to auth parameters or auth default values
+    # Assuming "auth" stanza has a "client_secret" param:
+    params:
+      auth_key: ${client_secret}
     #
     # A key feature is that a param definition can provide *multiple values*. In this case
     # the API will be called with each value of that parameter. For example:

@@ -1,5 +1,6 @@
 enabled: true
 name: quickbooks
+requires: auth.defaults, connector.oauth
 base_url: https://sandbox-quickbooks.api.intuit.com
 auth:
   type: OAUTH
@@ -11,6 +12,7 @@ auth:
     authorization_endpoint: https://appcenter.intuit.com/connect/oauth2
     token_endpoint: https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer
     oauth_scopes: [com.intuit.quickbooks.accounting, openid, profile, email, phone, address]
+    api_header: Authorization.Bearer
 tables:
   - name: accounts
     resource_path: /v3/company/{realm_id}/query
@@ -24,6 +26,12 @@ tables:
       query: select * from Bill
       realm_id: ${realm_id}
     result_body_path: QueryResponse.Bill
+  - name: company_info
+    resource_path: /v3/company/{realm_id}/query
+    params:
+      query: select * from CompanyInfo
+      realm_id: ${realm_id}
+    result_body_path: QueryResponse.CompanyInfo
   - name: customers
     resource_path: /v3/company/{realm_id}/query
     params:
@@ -49,4 +57,16 @@ tables:
       realm_id: ${realm_id}
     result_body_path: QueryResponse.Invoice.Line
     result_meta_paths: ["QueryResponse.Invoice.Id"]
+  - name: payments
+    resource_path: /v3/company/{realm_id}/query
+    params:
+      query: select * from Payment
+      realm_id: ${realm_id}
+    result_body_path: QueryResponse.Payment
+  - name: vendors
+    resource_path: /v3/company/{realm_id}/query
+    params:
+      query: select * from Vendor
+      realm_id: ${realm_id}
+    result_body_path: QueryResponse.Vendor
 

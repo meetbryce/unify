@@ -37,12 +37,17 @@ tables:
       login: sql@(select login from org_members)
   - name: myself
     resource_path: /user
-  - name: repos
+  - name: org_repos
     resource_path: /orgs/{org}/repos
     supports_paging: True
     params:
       type: all
       org: sql@(select login from orgs)
+  - name: my_repos
+    resource_path: /user/repos
+    supports_paging: True
+    params:
+      visibility: all
   - name: pulls
     query_resource: GET /repos/{owner}/{repo}/pulls
     supports_paging: True

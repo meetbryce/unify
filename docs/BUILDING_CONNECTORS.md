@@ -5,8 +5,10 @@ Unify expects most "connectors" to be implemented by the generic [RESTConnector]
 ## Building a new RESTConnector
 
 Create a new yaml file called `<system>_spec.yaml` and place it in `$HOME/unify/connectors`.
-The easiest approach is to copy an existing connector spec and modify it. The
-[papertrail_spec.yaml](./unify/rest_specs/papertrail_spec.yaml) is a good, simple example.
+The easiest approach is to copy an existing connector spec and modify it. Connector specs
+for your existing connections will already be present in the directory (create a connection
+to copy the spec file to your user directory). The [papertrail_spec.yaml](./unify/rest_specs/papertrail_spec.yaml) 
+is a good, simple example.
 
 The required parts of the spec definition include:
 
@@ -124,6 +126,22 @@ on a table spec. Example:
       count_param: limit
       token_param: after
       page_size: 100
+
+## Versioning
+
+There are two senses of 'version' to keep in mind. One is the version of the Unify interpreter - a
+Connector may depend on a newer feature of the interpreter than the one you have installed.
+The other version is the version of the Connector itself. Connectors may specify a version number
+with the `version` attribute:
+
+    version: 1.2
+
+The value should be an int or float number. To ensure that the Connector works with the interpreter
+version, you should use the `requires` attribute. This takes a list of feature flags needed by the
+connector. The interpreter will check to make sure it supports any required features when it loads
+the connector.
+
+    requires: auth.default, connector.oauth
 
 ## Update strategies
 

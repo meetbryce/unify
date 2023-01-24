@@ -708,9 +708,7 @@ class TableLoader:
         else:
             schema, table_root = table.split(".")
             if schema not in self.connectors:
-                breakpoint()
-                logger.critical(f"Connector '{schema}' not found - maybe you need to restart the job daemon?")
-                return
+                raise KeyError(f"Connector '{schema}' not found")
             table_spec = self.connectors[schema].lookupTable(table_root)
             tmgr = TableMgr(schema, self.connectors[schema], table_spec)
             self.tables[tmgr.name] = tmgr

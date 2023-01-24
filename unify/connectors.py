@@ -4,6 +4,7 @@ import os
 import re
 from pprint import pprint
 import logging
+import shutil
 import sys
 from tempfile import NamedTemporaryFile
 import yaml
@@ -23,6 +24,7 @@ TableUpdater = typing.NewType("TableUpdater", None)
 
 class Connection:
     CONNECTOR_SPECS: dict = {}
+    SPEC_PACKAGE = "unify.rest_specs"
 
     def __init__(self, connector, schema_name, opts):
         self.schema_name: str = schema_name
@@ -82,15 +84,30 @@ class Connection:
 
         connector_table = {}
 
-        for f in importlib.resources.contents("unify.rest_specs"):
-            if not (f.endswith("spec.yml")  or f.endswith("spec.yaml")):
-                continue
+        Connection.externalize_spec_file("spec_doc.yaml")
+
+        def find_connector_specs() -> Generator[str, None, None]:
+            for f in glob.glob(os.path.join(os.environ['UNIFY_HOME'], "connectors", "*spec.yaml")):
+                yield f
+            for f in importlib.resources.contents(Connection.SPEC_PACKAGE):
+                if f.endswith("spec.yml")  or f.endswith("spec.yaml"):
+                    with importlib.resources.path(Connection.SPEC_PACKAGE, f) as path:
+                        yield path
+
+        for f in find_connector_specs():
+            base_name = os.path.basename(f)
             try:
-                spec = yaml.load(importlib.resources.read_text("unify.rest_specs", f), Loader=yaml.FullLoader)
+                spec = yaml.load(open(f), Loader=yaml.FullLoader)
             except Exception as e:
                 print(f"Error loading connector spec {f}: {e}")
                 continue
             if spec.get('enabled') == False:
+                continue
+            if 'name' not in spec:
+                print(f"Skipping connector spec {f}: no name specified")
+                continue
+            name = spec['name']
+            if name in connector_table:
                 continue
             klass = RESTConnector
             if 'class' in spec:
@@ -100,9 +117,7 @@ class Connection:
                 elif spec['class'].lower() == 'postgresconnector':
                     from .postgres_connector import PostgresConnector
                     klass = PostgresConnector           
-            connector_table[spec['name']] = (klass, spec)
-
-        Connection.CONNECTOR_TABLE = connector_table
+            connector_table[name] = (klass, spec, f)
 
         if conn_list:
             connections = conn_list
@@ -123,7 +138,7 @@ class Connection:
                 print(f"Error: cannot find connector {opts['connector']} for connection {schema_name}")
                 print("Available connectors: ", connector_table.keys())
                 continue
-            connector_klass, spec = connector_table[opts['connector']]
+            connector_klass, spec, _ = connector_table[opts['connector']]
             connector = connector_klass(spec, storage_mgr_maker(schema_name), schema_name)
             c = Connection(connector, schema_name, opts)
             if c.is_valid:
@@ -136,12 +151,29 @@ class Connection:
 
     @classmethod
     def create_connection(cls, connector_name: str, schema_name: str, opts: dict, storage_mgr_maker=None):
-        connector_klass, spec = cls.CONNECTOR_SPECS[connector_name]
+        connector_klass, spec, spec_file = cls.CONNECTOR_SPECS[connector_name]
+        if not Connection.externalize_spec_file(spec_file):
+            print(f"Using user spec {spec_file}")
         connector = connector_klass(spec, storage_mgr_maker(schema_name), schema_name)
         c = Connection(connector, schema_name, {"options": opts})
         c.test_connection()
         Connection.update_connections_config(schema_name, connector_name, opts)
         return c
+
+    @classmethod
+    def externalize_spec_file(cls, spec_file: str) -> bool:
+        """ Returns True if the provided spec is bult-in and we externalized it, otherwise returns False. """
+        user_specs = os.path.join(os.environ['UNIFY_HOME'], 'connectors')
+        if os.path.dirname(spec_file) == user_specs and os.path.exists(spec_file):
+            return False # already externalized
+        dest_path = os.path.join(user_specs, spec_file)
+        os.makedirs(user_specs, exist_ok=True)
+
+        if not os.path.exists(dest_path):
+            with importlib.resources.path(Connection.SPEC_PACKAGE, spec_file) as path:
+                shutil.copy(path, user_specs)
+        return True
+
 
     def list_tables(self):
         return self.connector.list_tables()
