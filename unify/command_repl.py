@@ -70,7 +70,7 @@ class UnifyRepl:
             content = session.default_buffer.text.strip()
             if len(content) > len(last_content) and content.startswith("select") and not content.endswith(";"):
                 # continue the prompt for select statements
-                session.default_buffer.insert_text("\n")
+                session.default_buffer.insert_text("\n> ")
                 last_content = content
                 return
             else:
@@ -91,6 +91,8 @@ class UnifyRepl:
                             refresh_interval=1.0,
                             lexer=PygmentsLexer(SqlLexer)
                         )
+                        cmd = cmd.replace("\n> ", " ")
+                        print(cmd)
                         cmd = cmd.strip()
                         if cmd == "":
                             continue

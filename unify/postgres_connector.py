@@ -1,11 +1,13 @@
+import io
 import logging
 import os
 import typing
 import re
+import shlex
 import shutil
+import sys
 import subprocess
 from datetime import datetime
-
 import pandas as pd
 import psycopg
 
@@ -20,6 +22,8 @@ from .connectors import (
 )
 from .db_wrapper import DBManager, TableHandle, CHTableHandle, DBSignals
  
+logger: logging.Logger = logging.getLogger('unify')
+
 #######
 # A Replicating Postgres connector which uses COPY to quickly replicate Postgres tables.
 # On extract, use "COPY" to dump the Postgres table to a local CSV file.
@@ -78,7 +82,7 @@ class PostgresTableSpec(TableDef):
         # We will implement the replication entirely within the database, rather than the
         # usual pattern of returning chunks of rows to insert.
         for count in self.connector.load_table(self.name):
-            yield ConnectorQueryResult(json=pd.DataFrame(), size_return=[], rows_written=count)
+            yield ConnectorQueryResult(json=pd.DataFrame(), size_return=[], rows_written=count[0], message=count[1])
 
 class PostgresConnector(Connector):
     def __init__(self, spec, storage: StorageManager, schema_name: str):
@@ -155,7 +159,7 @@ class PostgresConnector(Connector):
                         outf.write(row)
                         count +=1 
                         if count % 1000 == 0:
-                            yield count
+                            yield (count, "Exporting data from Postgres...")
 
     def _find_sort_column(self, cols_df: pd.DataFrame, table: str):
         # Heuristic to determine an Ordering (partition) column
@@ -193,14 +197,19 @@ class PostgresConnector(Connector):
         # as strings, but then apply the parseDateTimeBestEffort() function in the SELECT part of the query to
         # convert them for insert. Thus the `parser_cols` is the col name+type for the CSV parser, but the
         # `select_cols` is the same list but with the cast functions applied.
+        #
+        # Note: I looked at trying to stream the CSV data directly over the clickhouse client, but it requires
+        # python dicts which means parsing each CSV row. So I've stuck with shelling out to the clickhouse-client
+        # binary to handle the parsing.
         cols_df = self._get_remote_table_columns(table_root)
         sort_col = self._find_sort_column(cols_df, table_root)
         columns = {tuple[0]: tuple[1] for tuple in cols_df.to_records(index=False)}
 
         select_cols = [self.format_select(col_name, col_type) for col_name, col_type in columns.items()]
 
-        table_cols = [f"{tuple[0]} {self.pg_to_clickhouse_type(tuple[1], string_dates=False, nullable=tuple[2])}" for tuple in cols_df.to_records(index=False)]
-        parser_cols = [f"{col_name} {self.pg_to_clickhouse_type(col_type, string_dates=True)}" for col_name, col_type in columns.items()]
+        table_cols = [f"{tuple[0]} {self.pg_to_clickhouse_type(tuple[1], col=tuple[0], string_dates=False, nullable=tuple[2])}" \
+                      for tuple in cols_df.to_records(index=False)]
+        parser_cols = [f"{col_name} {self.pg_to_clickhouse_type(col_type, col=col_name, string_dates=True)}" for col_name, col_type in columns.items()]
 
         # Download the table data in CSV
         csv_file = '/tmp/download.csv'
@@ -218,10 +227,11 @@ class PostgresConnector(Connector):
         select_clause = ", ".join(select_cols)
         input_clause = ", ".join(parser_cols)
 
-        self._clickclient(
-            f"INSERT INTO {table} SELECT {select_clause} FROM input('{input_clause}') FORMAT CSVWithNames SETTINGS date_time_input_format='best_effort';", 
-            csv_file
-        )
+        for count in self._clickclient(
+                f"INSERT INTO {table} SELECT {select_clause} FROM input('{input_clause}') FORMAT CSVWithNames SETTINGS date_time_input_format='best_effort';", 
+                csv_file
+            ):
+            yield count
 
         user_table = TableHandle(table_root, self.schema_name)
         real_table = CHTableHandle(user_table, tenant_id=self.db.tenant_id)
@@ -238,12 +248,33 @@ class PostgresConnector(Connector):
         password = os.environ['DATABASE_PASSWORD']
 
         # FIXME: parse --progress
-        cmd = f"cat {cat_file} | clickhouse-client -h {host} -d {database} -u {user} --password '{password}' --query \"{sql}\""
-        ret = subprocess.run(cmd, 
-                                shell=True, capture_output=True)
-        if ret.returncode != 0:
-            raise RuntimeError(f"Cliclhouse import command failed {ret}: {sql}")
-        return ret.stdout.decode('utf-8').strip()
+        cmd = f"gstdbuf -e0 clickhouse-client --progress -h {host} -d {database} -u {user} --password '{password}' --query \"{sql}\""
+
+        if True:
+            args = shlex.split(cmd)
+            #print(cmd)
+            full_output = io.StringIO()
+            with open(cat_file) as csvdata:
+                with subprocess.Popen(args, bufsize=200, text=True, stdin=csvdata, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
+                    # Look for progress reports: Progress: 0.00 rows, 9.16 MB
+                    while True:
+                        output = proc.stdout.read(200)
+                        full_output.write(output)
+                        if output == '' and proc.poll() != None:
+                            if proc.returncode != 0:
+                                print(full_output.getvalue())
+                            return
+                        m = re.search(r"(\d\d%)", output)
+                        if m:
+                            yield (m.group(1), "Loading data into Clickhouse")
+        else:
+            print("Loading in shell")
+            ret = subprocess.run(f"cat {cat_file} | " + cmd, shell=True, capture_output=True)
+            print(ret.stdout)
+            print(ret.stderr)
+            if ret.returncode != 0:
+                raise RuntimeError(f"Cliclhouse import command failed {ret}: {sql}")
+            return ret.stdout.decode('utf-8').strip()
 
 
     def drop_table(self, table_root: str):
@@ -256,7 +287,7 @@ class PostgresConnector(Connector):
     def is_pg_date_type(self, pgtype):
         return pgtype.startswith("date") or pgtype.startswith("timestamp")
 
-    def pg_to_ch_root_type(self, pgtype: str, string_dates=False):
+    def pg_to_ch_root_type(self, pgtype: str, col="", string_dates=False):
         if pgtype.endswith("_enum"):
             return "String"
         if pgtype.startswith("boolean"):
@@ -279,16 +310,17 @@ class PostgresConnector(Connector):
             return "Float64"
         if pgtype == 'tstzrange':
             return "String"
-        raise RuntimeError("Unknown postgres type: " + pgtype)
+        logger.error("Unknown postgres type: " + pgtype + " for column '{col}', defaulting to String")
+        return "String"
 
-    def pg_to_clickhouse_type(self, pgtype: str, string_dates=False, nullable=True):
+    def pg_to_clickhouse_type(self, pgtype: str, col="", string_dates=False, nullable=True):
         if pgtype.endswith("[]"):
             return "String" 
             # figure out how to parse CSV arrays. Need to sub '[' for '{' and then use JSONExtract(col,'Array(Int)')
             # "Array(" + ch_root_type(pgtype) + ")"
             # 
         else:
-            roott = self.pg_to_ch_root_type(pgtype, string_dates=string_dates)
+            roott = self.pg_to_ch_root_type(pgtype, col=col, string_dates=string_dates)
             if not nullable or roott.startswith("Array"):
                 return roott
             else:

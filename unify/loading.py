@@ -123,11 +123,17 @@ class LoaderJob:
         self._progress_bar = pb
 
     def set_progress_title(self, title: str):
+        logger.info(title)
         if self._progress_bar:
             self._progress_bar.title = title
 
-    def set_progress_count(self, count):
+    def set_progress_count(self, count, msg=None):
+        if msg:
+            self.set_progress_title(msg + f" {count}")
         if self._progress_bar and len(self._progress_bar.counters) > 0:
+            if isinstance(count, str):
+                count = int(re.match(r'\d+', count).group(0))
+                self._progress_bar.counters[0].total = 100
             self._progress_bar.counters[0].items_completed = count
             if count >= (self._progress_bar.counters[0].total+1):
                 self._progress_bar.counters[0].total = self._progress_bar.counters[0].total*10
@@ -375,7 +381,7 @@ class BaseTableScan(Thread):
 
             if df.empty:
                 call_count += 1
-                self.loader_job.set_progress_count(query_result.rows_written or call_count)
+                self.loader_job.set_progress_count(query_result.rows_written or call_count, query_result.message)
                 continue
 
             if page == 1:
@@ -649,7 +655,7 @@ class TableLoader:
 
     def _handle_job(self, job: LoaderJob, run_async: bool=True):
         t = threading.Thread(target=self._dispatch_job, args=(job,))
-        if run_async and False:
+        if run_async:
             t.daemon = True
             t.start()
             
@@ -669,6 +675,7 @@ class TableLoader:
             job.background()
 
         if job.action == LoaderJob.ACTION_LOAD_TABLE and job.table:
+            logger.info(f"Loading {str(job.table)}")
             bottom = f"Loading {str(job.table)}. Press any key to move job to the background."
             if os.environ.get('UNIFY_DEBUG'):
                 self.materialize_table(job=job)
@@ -829,6 +836,7 @@ class TableLoader:
                 raise TableMissingException(qual)
             tmgr.load_table(tableLoader=self, job=job)
             self.create_views(job.table.schema(), job.table.table_root())
+            logger.info(f"Finished loading {str(job.table)}")
             return tmgr.has_data()
 ##
 ### Refresh daemon
