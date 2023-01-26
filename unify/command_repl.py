@@ -69,12 +69,12 @@ class UnifyRepl:
             # Your stuff.
             content = session.default_buffer.text.strip()
             if len(content) > len(last_content) and content.startswith("select") and not content.endswith(";"):
+                # continue the prompt for select statements
                 session.default_buffer.insert_text("\n")
                 last_content = content
                 return
             else:
-                # Call the original handler.
-                #print(session.default_buffer.text)
+                # finsh the prompt
                 last_content = ""
                 session.default_buffer.validate_and_handle()
 
@@ -91,7 +91,8 @@ class UnifyRepl:
                             refresh_interval=1.0,
                             lexer=PygmentsLexer(SqlLexer)
                         )
-                        if cmd.strip() == "":
+                        cmd = cmd.strip()
+                        if cmd == "":
                             continue
                         context: CommandContext = self.interpreter.run_command(cmd, input_func=session.prompt)
                         outputs, df = [context.logger.get_output(), context.result]

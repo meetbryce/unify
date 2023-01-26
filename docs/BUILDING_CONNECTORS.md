@@ -105,6 +105,9 @@ The RESTConnector supports different strategies for paging through multiple resu
     to pass the page token in the POST body, then specify any parameter name for `token_param`
     and then reference that value using ${param} in the `post` dictionary.
 
+    nextLink - Each page includes a "next page link" attribute in the response. You need only
+    specify the path to the next link field in the response.
+
 Paging options can be specified at the level of the connector spec, or specified individually
 on a table spec. Example:
 
@@ -132,7 +135,14 @@ on a table spec. Example:
       pager_link_path: pages.next
       count_param: limit
       page_size: 100
-      
+
+    tables:
+      - name: users
+        resource_path: /users
+        paging:
+          strategy: ...
+          ...
+          
 ## Versioning
 
 There are two senses of 'version' to keep in mind. One is the version of the Unify interpreter - a

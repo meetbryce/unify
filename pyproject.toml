@@ -45,6 +45,7 @@ nb2mail-unify = "^0.6"
 duckdb-engine = "^0.6.8"
 python-dotenv = "^0.21.0"
 requests-oauth2client = "^1.1.0"
+psycopg = {extras = ["binary"], version = "^3.1.8"}
 
 
 [tool.poetry.group.dev.dependencies]

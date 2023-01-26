@@ -25,6 +25,9 @@ def main():
                 if df is not None:
                     print(df)
             sys.exit(0)
+        elif sys.argv[i] == '-debug':
+            # Suppresss the progress bars
+            os.environ['UNIFY_DEBUG'] = '1'
 
     UnifyRepl(interpreter).loop()
 

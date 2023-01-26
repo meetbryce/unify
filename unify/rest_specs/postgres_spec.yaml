@@ -1,6 +1,6 @@
 enabled: true
 name: postgres
-class: PostgresAdapter
+class: PostgresConnector
 auth:
   type: CUSTOM_AUTH
   params:

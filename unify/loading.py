@@ -128,7 +128,8 @@ class LoaderJob:
 
     def set_progress_count(self, count):
         if self._progress_bar and len(self._progress_bar.counters) > 0:
-            if count == (self._progress_bar.counters[0].total+1):
+            self._progress_bar.counters[0].items_completed = count
+            if count >= (self._progress_bar.counters[0].total+1):
                 self._progress_bar.counters[0].total = self._progress_bar.counters[0].total*10
 
     def get_progress_iter(self):
@@ -334,6 +335,7 @@ class BaseTableScan(Thread):
         self.save_scan_record({"scan_start": scan_start})
 
         page = 1
+        call_count = 1
         page_flush_count = 5 # flush 5 REST calls worth of data to the db
         row_buffer_df = None
         table_cols = set()
@@ -372,6 +374,8 @@ class BaseTableScan(Thread):
                 self.loader_job.incr_row_count(df.shape[0])
 
             if df.empty:
+                call_count += 1
+                self.loader_job.set_progress_count(query_result.rows_written or call_count)
                 continue
 
             if page == 1:
@@ -392,7 +396,8 @@ class BaseTableScan(Thread):
                 row_buffer_df = row_buffer_df[0:0] # clear flushed rows, but keep columns
 
             page += 1
-            self.loader_job.set_progress_count(page)
+            call_count += 1
+            self.loader_job.set_progress_count(query_result.rows_written or call_count)
 
         if row_buffer_df is not None and row_buffer_df.shape[0] > 0:
             self._flush_rows_to_db_catch_error(duck, self.tableMgr, row_buffer_df, page, page_flush_count)
@@ -665,9 +670,12 @@ class TableLoader:
 
         if job.action == LoaderJob.ACTION_LOAD_TABLE and job.table:
             bottom = f"Loading {str(job.table)}. Press any key to move job to the background."
-            with ProgressBar(key_bindings=kb, title=f"Loading {str(job.table)}...", bottom_toolbar=bottom) as pb:
-                job.progress_bar = pb
+            if os.environ.get('UNIFY_DEBUG'):
                 self.materialize_table(job=job)
+            else:
+                with ProgressBar(key_bindings=kb, title=f"Loading {str(job.table)}...", bottom_toolbar=bottom) as pb:
+                    job.progress_bar = pb
+                    self.materialize_table(job=job)
         elif job.action == LoaderJob.ACTION_REFRESH_TABLE:
             self.tables[str(job.table)].refresh_table(tableLoader=self, job=job)
         elif job.action == LoaderJob.ACTION_CANCEL:

@@ -210,8 +210,8 @@ class OutputLogger:
 
 ConnectorQueryResult = namedtuple(
     'ConnectorQueryResult', 
-    ['json','size_return','merge_cols'],
-    defaults={None}
+    ['json','size_return','merge_cols','rows_written'],
+    defaults=(None, None)
 )
 
 class TableDef:
