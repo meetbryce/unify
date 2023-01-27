@@ -1,3 +1,4 @@
+from datetime import datetime
 import io
 import logging
 import os
@@ -7,7 +8,8 @@ import shlex
 import shutil
 import sys
 import subprocess
-from datetime import datetime
+import tempfile
+
 import pandas as pd
 import psycopg
 
@@ -88,7 +90,7 @@ class PostgresConnector(Connector):
     def __init__(self, spec, storage: StorageManager, schema_name: str):
         super().__init__(spec['name'], storage)
         self.auth = spec.get('auth', {}).get('params').copy()
-
+                                                           
         # connection params will live in self.auth
         self.logger: OutputLogger = None
         self.tables = None
@@ -109,87 +111,28 @@ class PostgresConnector(Connector):
         self.conn = psycopg.connect(
             f"postgresql://{self.auth['db_user']}:{self.auth['db_password']}@{self.auth['db_host']}/{self.auth['db_database']}"
         )
+        if shutil.which("clickhouse-client") is None:
+            logger.critical("Can't find 'clickhouse-client' on the current PATH. Table loads won't work in the Prostgres Connector")
+        self.base_url  = self.auth.get('db_host', '') + "/" + self.auth.get('db_database', '')
+
         return True
+
+    def ensure_good_connection(self):
+        try:
+            self.conn.cursor().execute("select 1")
+        except psycopg.OperationalError:
+            # attempt to re-connect
+            self.validate()
 
     def list_tables(self):
         # select tables names through the remote PG connection and return TableDefs for each one
+        self.ensure_good_connection()
         with self.conn.cursor() as cursor:
             cursor.execute("select table_name, table_schema from information_schema.tables where table_schema='public'")
             return [PostgresTableSpec(t[0], self) for t in cursor.fetchall()]
 
-    def _get_remote_table_columns(self, table_root):
-        # Find the table columns and types so we can copy the schema
-        # Borrowed from: https://stackoverflow.com/questions/20194806/how-to-get-a-list-column-names-and-datatypes-of-a-table-in-postgresql
-        schema = 'public'
-        sql = f"""
-            SELECT
-                    a.attname as "column_name",
-                    pg_catalog.format_type(a.atttypid, a.atttypmod) as "data_type", not a.attnotnull as is_nullable
-                FROM
-                    pg_catalog.pg_attribute a
-                WHERE
-                    a.attnum > 0
-                    AND NOT a.attisdropped
-                    AND a.attrelid = (
-                        SELECT c.oid
-                        FROM pg_catalog.pg_class c
-                            LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-                        WHERE c.relname = '{table_root}' and n.nspname = '{schema}'
-                            AND pg_catalog.pg_table_is_visible(c.oid)
-                    );
-        """        
-        # FIXME: support schema other than 'public'
-        sql2 = f"""
-            SELECT column_name, data_type, is_nullable 
-            FROM information_schema.columns 
-            WHERE table_catalog='{self.auth["db_database"]}' and table_name='{table_root}';
-        """
-        with self.conn.cursor() as cursor:
-            cursor.execute(sql)
-            return pd.DataFrame(cursor.fetchall(), columns=['column_name', 'data_type', 'is_nullable'])
-
-    def _download_pg_table(self, table: str):
-        temp_file = '/tmp/download.csv'
-        # TODO: yield empty results to run the progress bar
-        count = 0
-        with open(temp_file, "wb") as outf:
-            with self.conn.cursor() as cursor:
-                with cursor.copy(f"COPY {table} TO STDOUT CSV HEADER") as copy:
-                    for row in copy:
-                        outf.write(row)
-                        count +=1 
-                        if count % 1000 == 0:
-                            yield (count, "Exporting data from Postgres...")
-
-    def _find_sort_column(self, cols_df: pd.DataFrame, table: str):
-        # Heuristic to determine an Ordering (partition) column
-        # FIXME: We should use the primary key, else find a timestamp column. For now
-        # we just look for an int, timestamp, or str column which is NOT NULLABLE.
-        sort_col = None
-        df = cols_df
-        int_cols = df[(df.data_type.str.contains('int')) & (df.is_nullable==False)]
-        if int_cols.shape[0] >= 1:
-            sort_col = int_cols.iloc[0].column_name
-        else:
-            ts_cols = df[(df.data_type.str.startswith('timestamp')) & (df.is_nullable=='NO')]
-            if ts_cols.shape[0] >= 1:
-                sort_col = ts_cols.iloc[0].column_name
-            else:
-                str_cols = df[(df.data_type.str.startswith('character')) & (df.is_nullable=='NO')]
-                if str_cols.shape[0] >= 1:
-                    sort_col = str_cols.iloc[0].column_name
-
-        if sort_col is None:
-            raise RuntimeError("Cannot find a suitable ordering column for table " + table)
-        return sort_col
-
-    def format_select(self, col_name, col_type):
-        if self.is_pg_date_type(col_type):
-            return f"parseDateTimeBestEffortOrNull({col_name})"
-        else:
-            return col_name
-        
     def load_table(self, table_root):
+        self.ensure_good_connection()
         # The logic here is tricky:
         # 1. Read the PG table schema and create a matching Clickhouse table, with pg types mapped to CH types
         # 2. Download the PG table in CSV format
@@ -212,8 +155,8 @@ class PostgresConnector(Connector):
         parser_cols = [f"{col_name} {self.pg_to_clickhouse_type(col_type, col=col_name, string_dates=True)}" for col_name, col_type in columns.items()]
 
         # Download the table data in CSV
-        csv_file = '/tmp/download.csv'
-        for count in self._download_pg_table(table_root):
+        csv_file = tempfile.NamedTemporaryFile()
+        for count in self._download_pg_table(table_root, csv_file):
             yield count
 
         table = f"{self.tenant_db}.{self.schema_name}____{table_root}"
@@ -221,8 +164,6 @@ class PostgresConnector(Connector):
             CREATE TABLE {table} ({", ".join(table_cols)}) ENGINE = MergeTree() ORDER BY ({sort_col})
         """
         self.db.execute_raw(sql)
-        # Shell out to clickhouse-client to load the CSV file
-        # FIXME: Stream to the clickhouse-driver client
 
         select_clause = ", ".join(select_cols)
         input_clause = ", ".join(parser_cols)
@@ -233,11 +174,106 @@ class PostgresConnector(Connector):
             ):
             yield count
 
+        csv_file.close()
+
         user_table = TableHandle(table_root, self.schema_name)
         real_table = CHTableHandle(user_table, tenant_id=self.db.tenant_id)
         self.db._send_signal(signal=DBSignals.TABLE_CREATE, table=real_table)
 
-    def _clickclient(self, sql, cat_file: str):
+    def _get_remote_table_columns(self, table_root):
+        # Find the table columns and types so we can copy the schema
+        # Borrowed from: https://stackoverflow.com/questions/20194806/how-to-get-a-list-column-names-and-datatypes-of-a-table-in-postgresql
+        schema = 'public'
+
+        keys = f"""
+            SELECT               
+            pg_attribute.attname  
+            FROM pg_index, pg_class, pg_attribute, pg_namespace 
+            WHERE 
+            pg_class.oid = '{table_root}'::regclass AND 
+            indrelid = pg_class.oid AND 
+            nspname = '{schema}' AND 
+            pg_class.relnamespace = pg_namespace.oid AND 
+            pg_attribute.attrelid = pg_class.oid AND 
+            pg_attribute.attnum = any(pg_index.indkey)
+            AND indisprimary;
+        """
+        with self.conn.cursor() as cursor:
+            key_cols = set([col[0] for col in cursor.execute(keys).fetchall()])
+
+        if len(key_cols) > 0:        
+            key_match = 'a.attname in ({})'.format(", ".join([f"'{col}'" for col in key_cols]))
+        else:
+            key_match = 'False'
+        sql = f"""
+            SELECT
+                    a.attname as "column_name",
+                    pg_catalog.format_type(a.atttypid, a.atttypmod) as "data_type", not a.attnotnull as is_nullable,
+                    {key_match} as is_primary_key
+                FROM
+                    pg_catalog.pg_attribute a
+                WHERE
+                    a.attnum > 0
+                    AND NOT a.attisdropped
+                    AND a.attrelid = (
+                        SELECT c.oid
+                        FROM pg_catalog.pg_class c
+                            LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                        WHERE c.relname = '{table_root}' and n.nspname = '{schema}'
+                            AND pg_catalog.pg_table_is_visible(c.oid)
+                    );
+        """        
+        # FIXME: support schema other than 'public'
+        with self.conn.cursor() as cursor:
+            cursor.execute(sql)
+            return pd.DataFrame(cursor.fetchall(), columns=['column_name', 'data_type', 'is_nullable', 'is_primary_key'])
+
+    def _download_pg_table(self, table: str, file_obj):
+        count = 0
+        with self.conn.cursor() as cursor:
+            with cursor.copy(f"COPY {table} TO STDOUT CSV HEADER") as copy:
+                for row in copy:
+                    file_obj.write(row)
+                    count +=1 
+                    if count % 1000 == 0:
+                        yield (count, f"Exporting '{table}' from Postgres...")
+
+    def _find_sort_column(self, cols_df: pd.DataFrame, table: str):
+        # Heuristic to determine an Ordering (partition) column
+        df = cols_df
+
+        # First try the primary key
+        key_cols = df[df.is_primary_key==True]
+        if key_cols.shape[0] >= 1:
+            dt = str(key_cols.iloc[0].data_type)
+            if "int" in dt or dt.startswith("timestamp"):
+                return key_cols.iloc[0].column_name
+
+        # Now just look for any timestamp column            
+        sort_col = None
+        ts_cols = df[(df.data_type.str.startswith('timestamp')) & (df.is_nullable==False)]
+        if ts_cols.shape[0] >= 1:
+            sort_col = ts_cols.iloc[0].column_name
+        else:
+            int_cols = df[(df.data_type.str.contains('int')) & (df.is_nullable==False)]
+            if int_cols.shape[0] >= 1:
+                sort_col = int_cols.iloc[0].column_name
+            else:
+                str_cols = df[(df.data_type.str.startswith('character')) & (df.is_nullable==False)]
+                if str_cols.shape[0] >= 1:
+                    sort_col = str_cols.iloc[0].column_name
+
+        if sort_col is None:
+            raise RuntimeError("Cannot find a suitable ordering column for table " + table)
+        return sort_col
+
+    def format_select(self, col_name, col_type):
+        if self.is_pg_date_type(col_type):
+            return f"parseDateTimeBestEffortOrNull({col_name})"
+        else:
+            return col_name
+        
+    def _clickclient(self, sql, csv_file_obj):
         cclient_path = shutil.which("clickhouse-client")
         if cclient_path is None:
             raise RuntimeError("Cannot find clickhouse-client in PATH")
@@ -247,38 +283,32 @@ class PostgresConnector(Connector):
         user = os.environ['DATABASE_USER']
         password = os.environ['DATABASE_PASSWORD']
 
-        # FIXME: parse --progress
-        cmd = f"gstdbuf -e0 clickhouse-client --progress -h {host} -d {database} -u {user} --password '{password}' --query \"{sql}\""
+        # Use --progress so clickhouse reports loading progress
+        cmd = f"{cclient_path} --progress -h {host} -d {database} -u {user} --password '{password}' --query \"{sql}\""
 
-        if True:
-            args = shlex.split(cmd)
-            #print(cmd)
-            full_output = io.StringIO()
-            with open(cat_file) as csvdata:
-                with subprocess.Popen(args, bufsize=200, text=True, stdin=csvdata, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
-                    # Look for progress reports: Progress: 0.00 rows, 9.16 MB
-                    while True:
-                        output = proc.stdout.read(200)
-                        full_output.write(output)
-                        if output == '' and proc.poll() != None:
-                            if proc.returncode != 0:
-                                print(full_output.getvalue())
-                            return
-                        m = re.search(r"(\d\d%)", output)
-                        if m:
-                            yield (m.group(1), "Loading data into Clickhouse")
-        else:
-            print("Loading in shell")
-            ret = subprocess.run(f"cat {cat_file} | " + cmd, shell=True, capture_output=True)
-            print(ret.stdout)
-            print(ret.stderr)
-            if ret.returncode != 0:
-                raise RuntimeError(f"Cliclhouse import command failed {ret}: {sql}")
-            return ret.stdout.decode('utf-8').strip()
+        args = shlex.split(cmd)
+        full_output = io.StringIO()
+        csv_file_obj.seek(0)
+        with subprocess.Popen(
+            args, 
+            bufsize=200, 
+            text=True, 
+            stdin=csv_file_obj, 
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.STDOUT) as proc:
+            # This took a while to figure out. clickhouse will dump progress lines with
+            # a percentage number to stderr, so catch those and yield them back to the caller
+            while True:
+                output = proc.stdout.read(200)
+                full_output.write(output)
+                if output == '' and proc.poll() != None:
+                    if proc.returncode != 0:
+                        print(full_output.getvalue())
+                    return
+                m = re.search(r"(\d\d%)", output)
+                if m:
+                    yield (m.group(1), "Loading data into Clickhouse")
 
-
-    def drop_table(self, table_root: str):
-        pass
 
     def rename_table(self, table_root: str, new_name: str):
         #implement

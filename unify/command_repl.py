@@ -30,7 +30,8 @@ class LoaderJobHandler(logging.Handler):
     def emit(self, record):
         global job_record
         job_record = record
-        print("", end="", flush=True)
+        if record.levelno == logging.CRITICAL:
+            print(record.msg)
 
     @staticmethod
     def toolbar():
