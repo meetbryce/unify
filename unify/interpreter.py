@@ -213,6 +213,9 @@ class ParserVisitor(Visitor):
         self._the_command = 'open_command'
         self._the_command_args['open_target'] = collect_child_text("open_target", tree, full_code=self._full_code).strip("'")
 
+    def openai_command(self, tree):
+        self._the_command = 'openai_command'
+
     def peek_table(self, tree):
         self._the_command = 'peek_table'
         self._the_command_args['qualifier'] = \
@@ -726,6 +729,9 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
     def print(self, *args):
         self.context.logger.print(*args)
 
+    def get_input(self, promot):
+        return self.context.get_input(promot)
+    
     ################
     ## Commands 
     #
@@ -735,7 +741,29 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
     # retrieve input from the user interactively.
     ################
     def alter_table(self, table_ref, new_table):
-        self.duck.rename_table(TableHandle(table_ref), new_table)
+        """ alter table <table> - rename a table or modify its columns """
+        if new_table:
+            return self.duck.rename_table(TableHandle(table_ref), new_table)
+        else:
+            cmds = ["rename table", "rename column", "change column type", "add column", "drop column"]
+            cmd = self.get_input(
+                "Choose operation:\n" + "\n".join([f"{i+1} - {cmd}" for i, cmd in enumerate(cmds)]) + "\n: "
+            )
+            if cmd == "1":
+                name = self.get_input("New table name: ")
+                if name:
+                    self.duck.rename_table(TableHandle(table_ref), name)
+            elif cmd == "2":
+                col = self.get_input("Column to rename: ")
+                name = self.get_input("New column name: ")
+                if col and name:
+                    self.duck.rename_column(TableHandle(table_ref), col, name)
+            elif cmd == "3":
+                col = self.get_input("Column to change type: ")
+                type = self.get_input("New column type: ")
+                if col and type:
+                    self.duck.rentype_column(TableHandle(table_ref), col, type)
+
 
     def show_connections(self):
         """ show connections - list all connections. Use 'connect' to create a new connection. """
@@ -1364,6 +1392,41 @@ Use the 'connect' command to create a new connection to load data, or use 'impor
             self.print("Cancelling background jobs...")
             self.loader.cancel_all_jobs()
 
+
+    def openai_command(self):
+        """ openai - interact with OpenAI's GPT-3 API """
+        try:
+            import openai
+        except ImportError:
+            self.print("OpenAI library not installed. Please run 'pip install openai'. And set the OPENAI_API_KEY environment variable.")
+            return
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key is None:
+            self.print("OPENAI_API_KEY environment variable not set.")
+            return
+        openai.api_key = api_key
+
+        command = self.context.get_input("Enter your OpenAI prompt:\n")
+        aiprompt = "SQL tables (and columns):\n"
+        with dbmgr() as db:
+            actuals: pd.DataFrame = db.list_tables("github")
+            for table in actuals["table_name"]:
+                if table in ['repo_events']:
+                    continue
+                columns = db.list_columns(TableHandle(table, "github"))
+                cols = columns["column_name"].tolist()
+                aiprompt += f'* github.{table}({", ".join(cols)})\n'
+                
+        aiprompt += f'\n{command}'
+        print("Thinking...")
+        response = openai.Completion.create(model="code-davinci-002", prompt=aiprompt, temperature=0,
+				      max_tokens=256, best_of=1)
+        m = re.search(r"select [^`;]+", response.choices[0].text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+        if m:
+            sql = m.group(0)
+            print(sql)
+        else:
+            print(response.choices[0].text)
 
     #########
     ### FILE system commands

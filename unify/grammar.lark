@@ -39,6 +39,7 @@ command: show_tables
          | system_command
          | open_command
          | exit_command
+         | openai_command
 
 show_tables: "show tables" (WS FROM WS? schema_ref?)?
 
@@ -92,7 +93,7 @@ drop_table: "drop" WS "table" WS ("if exists"i WS)? table_ref
 
 drop_schema: "drop schema" WS schema_ref (WS "cascade")?
 
-alter_table: "alter"i WS "table"i WS table_ref "rename"i WS "to" WS new_table
+alter_table: "alter"i WS "table"i WS table_ref ("rename"i WS "to" WS new_table)?
 
 new_table: table_ref
 
@@ -145,6 +146,8 @@ open_command: "open" WS open_target
 open_target: ANY
 
 exit_command: "exit" | "quit"
+
+openai_command: "openai"
 
 sys_command: "status" | "stop daemon" | "restart daemon" | "cancel"
 

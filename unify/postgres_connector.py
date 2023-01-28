@@ -57,8 +57,6 @@ class PostgresTableSpec(TableDef):
         # modified records.
         # 3. If we can't find an "update" column then we'll fall back to the full reload.
 
-        return ReloadStrategy(self)
-
         # See if we can find a column to use for incremental updates
         db: DBManager = self.connector.db
         table = TableHandle(self.schema_name, self.connector.name)

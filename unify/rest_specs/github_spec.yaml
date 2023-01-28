@@ -55,7 +55,7 @@ tables:
       sort: created
       direction: desc
       state: all
-      owner,repo: sql@(select owner_login, name from repos)
+      owner,repo: sql@(select owner_login, name from org_repos)
     select: id, url, html_url, node_id, number, state, locked, title, user, body, draft, created_at, 
             updated_at, head_repo_name, head_repo_id, head_label, head_ref, 
             base_repo_name, base_repo_id, base_label, base_ref,

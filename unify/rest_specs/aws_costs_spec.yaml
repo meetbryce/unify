@@ -66,7 +66,7 @@ tables:
         - [RESERVATIONS, SCOPE]
         - [RESERVATIONS, TAG]
         - [RESERVATIONS, TENANCY]
-      start_date: sql@(select cast(cast((now() - interval 6 month) as date) as varchar))
+      start_date: sql@(select cast(cast((now() - interval 14 month) as date) as varchar))
       end_date: sql@(select cast(cast(now() as date) as varchar))
     post:
       TimePeriod: 

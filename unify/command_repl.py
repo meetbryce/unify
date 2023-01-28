@@ -93,10 +93,10 @@ class UnifyRepl:
                             lexer=PygmentsLexer(SqlLexer)
                         )
                         cmd = cmd.replace("\n> ", " ")
-                        print(cmd)
                         cmd = cmd.strip()
                         if cmd == "":
                             continue
+
                         context: CommandContext = self.interpreter.run_command(cmd, input_func=session.prompt)
                         outputs, df = [context.logger.get_output(), context.result]
                         print("\n".join(outputs))

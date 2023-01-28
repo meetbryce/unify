@@ -460,5 +460,24 @@ def test_quickbooks():
 	new_token = oauth2client.refresh_token(token)
 	print("New Access token: ", new_token.as_dict())
 
-test_quickbooks()
+def test_openai():
+	import openai
+	import os
+	from prompt_toolkit import prompt
+	openai.api_key = os.getenv("OPENAI_API_KEY")
+
+	while True:
+		print("Enter your prompt:")
+		line = input()
+		prompt = ""
+		while line != ".":
+			prompt += line
+			line = input()
+
+		print("----")
+		response = openai.Completion.create(model="code-davinci-002", prompt=prompt, temperature=0,
+				      max_tokens=256, best_of=1)
+		print(response.choices[0].text)
+
+test_openai()
 

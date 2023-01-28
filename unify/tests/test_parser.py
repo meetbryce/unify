@@ -118,7 +118,11 @@ def test_other_statements(visitor, parser):
     verify_parse(v, p, "reload_table", query="reload table github.orgs", args={'table_ref':"github.orgs"})
     verify_parse(v, p , "alter_table", query="alter table github.orgs rename to organizations", 
         args={'table_ref':"github.orgs", 'new_table': "organizations"})
+    verify_parse(v, p , "alter_table", query="alter table github.orgs", 
+        args={'table_ref':"github.orgs"})
 
+    verify_parse(v, p, "openai_command", query="openai", args={})
+    
 def test_chart_commands(visitor, parser):
     v = visitor
     p = parser
